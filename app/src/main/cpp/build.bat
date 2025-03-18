@@ -1,15 +1,12 @@
 @echo off
-:: 相当于 set -e（错误发生时停止执行，部分实现）
 setlocal EnableDelayedExpansion
 
-:: 执行CMake命令
 cmake --preset android-release
 if %ERRORLEVEL% neq 0 goto :error
 
 cmake --build --preset android-release
 if %ERRORLEVEL% neq 0 goto :error
 
-:: 创建目录并复制文件
 if not exist lib mkdir lib
 xcopy /Y /I .\build\android\qnnlibs\*.so .\lib\
 if %ERRORLEVEL% neq 0 goto :error
