@@ -35,10 +35,23 @@ git clone --recursive https://github.com/xororz/local-dream.git
 4. Modify the ANDROID_NDK_ROOT in app/src/main/cpp/CMakePresets.json
 
 ### Build and prepare libraries
+#### Linux
 
 ```bash
 cd app/src/main/cpp/
 bash ./build.sh
+```
+
+#### Windows
+
+```powershell
+# winget install Kitware.CMake (install CMake if you don't have it)
+# winget install Ninja-build.Ninja (install Ninja if you don't have it)
+# winget install Rustlang.Rustup (install Rust if you don't have it)
+cd app\src\main\cpp\
+# Convert patch file to Unix format (if you don't have dos2unix, install with: winget install -e --id waterlan.dos2unix)
+dos2unix SampleApp.patch
+.\build.bat
 ```
 
 ### Build apk in android studio
