@@ -50,10 +50,17 @@ file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v79/unsigned/libQnnHtpV79Skel.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 
 if(ANDROID)
-    set(PLATFORM_NAME "linux")
+    if(WIN32)
+        set(PLATFORM_NAME "windows")
+        set(HOST_TAG "windows-x86_64")
+    else()
+        set(PLATFORM_NAME "linux") 
+        set(HOST_TAG "linux-x86_64")
+    endif()
+    
     set(OUTPUT_SUFFIX ${CMAKE_ANDROID_ARCH_ABI})
     set(PLATFORM_LIBS log android dl m c GLESv2 EGL)
-    set(ANDROID_TOOLCHAIN_ROOT ${CMAKE_ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64 CACHE PATH "Android NDK root path")
+    set(ANDROID_TOOLCHAIN_ROOT ${CMAKE_ANDROID_NDK}/toolchains/llvm/prebuilt/${HOST_TAG} CACHE PATH "Android NDK root path")
 
     add_compile_options(
         -O3
@@ -64,10 +71,16 @@ if(ANDROID)
 
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=for-loop-analysis")
 else()
-    set(PLATFORM_NAME "linux")
-    set(OUTPUT_SUFFIX "x86_64-linux-clang")
-    set(PLATFORM_LIBS dl pthread)
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld-17")
+    if(WIN32)
+        set(PLATFORM_NAME "windows")
+        set(OUTPUT_SUFFIX "x86_64-windows-msvc")
+        set(PLATFORM_LIBS)
+    else()
+        set(PLATFORM_NAME "linux")
+        set(OUTPUT_SUFFIX "x86_64-linux-clang")
+        set(PLATFORM_LIBS dl pthread)
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld-17")
+    endif()
 endif()
 
 # MNN
