@@ -34,7 +34,7 @@
     <string name="selected_items">%d Selected</string>
     <string name="download_settings">Download Settings</string>
     <string name="download_from">Download From</string>
-    <string name="download_settings_hint">Download from huggingface or other mirror url</string>
+    <string name="download_settings_hint">Download from Hugging Face or other mirror url</string>
     <string name="model_size">Total Size: ~%s</string>
     <string name="downloaded">Downloaded</string>
     <string name="downloading_file">Downloading file %1$d/%2$d: %3$s</string>
