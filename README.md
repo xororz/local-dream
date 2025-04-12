@@ -83,7 +83,7 @@ open this project in android studio and click Build/Generate App Bundles or APKs
 - Devices with Snapdragon 8+Gen 1
 - Devices with Snapdragon 8 Gen 2
 - Devices with Snapdragon 8 Gen 3
-- Devices with Snapdragon 8 Gen 4
+- Devices with Snapdragon 8 Elite
 
 Other devices are not able to download the npu models.
 

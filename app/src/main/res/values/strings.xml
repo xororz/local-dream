@@ -26,7 +26,7 @@
     <string name="delete_confirm">Delete selected %s models? This action cannot be undone.</string>
     <string name="got_it">Got It!</string>
     <string name="about_app">Note</string>
-    <string name="must_read">This APP supports running stable diffusion image generation on CPU and some Qualcomm NPUs.\n\nIf your chip is not one of the following, you can only run it on CPU\n\nSupported NPU list:\n- Snapdragon 8 Gen 1\n- Snapdragon 8 Gen 2\n- Snapdragon 8 Gen 3\n- Snapdragon 8 Gen 4</string>
+    <string name="must_read">This APP supports running stable diffusion image generation on CPU and some Qualcomm NPUs.\n\nIf your chip is not one of the following, you can only run it on CPU\n\nSupported NPU list:\n- Snapdragon 8 Gen 1\n- Snapdragon 8 Gen 2\n- Snapdragon 8 Gen 3\n- Snapdragon 8 Elite</string>
     <string name="help">help</string>
 
     <!-- Model List Screen -->
