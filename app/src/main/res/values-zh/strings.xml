@@ -26,7 +26,7 @@
     <string name="delete_confirm">确定要删除选中的 %s 个模型吗？此操作不可恢复</string>
     <string name="got_it">知道了!</string>
     <string name="about_app">须知</string>
-    <string name="must_read">此APP支持在CPU和部分高通NPU上运行stable diffusion图像生成。\n\n如您的芯片不是下列之一，则只能用CPU运行\n\n支持的NPU列表:\n- 骁龙8gen1\n- 骁龙8gen2\n- 骁龙8gen3\n- 骁龙8gen4</string>
+    <string name="must_read">此APP支持在CPU和部分高通NPU上运行stable diffusion图像生成。\n\n如您的芯片不是下列之一，则只能用CPU运行\n\n支持的NPU列表:\n- 骁龙8gen1\n- 骁龙8gen2\n- 骁龙8gen3\n- 骁龙8elite</string>
     <string name="help">help</string>
 
     <!-- Model List Screen -->
