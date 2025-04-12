@@ -46,7 +46,7 @@ val chipsetModelSuffixes = mapOf(
     "QCS8550" to "8gen2",
     "QCM8550" to "8gen2",
     "SM8650" to "8gen3",
-    "SM8750" to "8gen4",
+    "SM8750" to "8elite",
 )
 
 sealed class DownloadResult {
