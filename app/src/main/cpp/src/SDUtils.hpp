@@ -34,6 +34,37 @@ struct GenerationResult {
   int first_step_time_ms;
 };
 
+// 保存 RGB 数据为 PNG 文件
+bool save_rgb_png(const std::string& filename, const std::vector<uint8_t>& rgb_data,
+	int width, int height) {
+	// 每像素3字节：R, G, B；每行字节数 = 宽度 * 3
+	return stbi_write_png(filename.c_str(), width, height, 3,
+		rgb_data.data(), width * 3) != 0;
+}
+
+// 写入 PNG 的内存缓冲结构
+struct PngBuffer {
+	std::vector<uint8_t> data;
+};
+
+// stb 回调：写入数据到 PngBuffer
+inline void write_png_callback(void* context, void* data, int size) {
+	PngBuffer* buffer = static_cast<PngBuffer*>(context);
+	uint8_t* bytes = static_cast<uint8_t*>(data);
+	buffer->data.insert(buffer->data.end(), bytes, bytes + size);
+}
+
+// 主函数：返回 PNG 编码的二进制数据
+inline std::vector<uint8_t> encode_rgb_to_png(const std::vector<uint8_t>& rgb_data,
+	int width, int height) {
+	PngBuffer buffer;
+	stbi_write_png_to_func(write_png_callback, &buffer,
+		width, height, 3,                   // 3 通道 (RGB)
+		rgb_data.data(), width * 3);        // 每行字节数
+
+	return buffer.data;  // PNG 格式的二进制数据
+}
+
 inline std::string base64_encode(const std::string &in) {
   static const auto lookup =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
