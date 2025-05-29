@@ -1011,8 +1011,12 @@ int main(int argc, char **argv) {
                 sink.write(ev.c_str(), ev.size());
               });
               auto enc_start = std::chrono::high_resolution_clock::now();
-              std::string image_str_result(result.image_data.begin(),
-                                           result.image_data.end());
+                
+              std::vector<uint8_t> image_data_png = encode_rgb_to_png(result.image_data, result.width, result.height);
+
+              std::string image_str_result(image_data_png.begin(),
+              image_data_png.end());
+                
               std::string enc_img = base64_encode(image_str_result);
               auto enc_end = std::chrono::high_resolution_clock::now();
               std::cout
