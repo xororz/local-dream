@@ -27,7 +27,7 @@ If you like it, please consider [sponsor](https://github.com/xororz/local-dream?
 
 It is recommended to build it on linux/wsl. Other platforms are not verified.
 
-**Rust is needed for building tokenizer-cpp. You should first install rustup, then "rustup default stable".**
+**Rust, ninja, and cmake are needed for building. You should first install rustup, then "rustup default stable", and then "rustup target add aarch64-linux-android".**
 
 ### Clone this repo recursively
 
@@ -61,6 +61,14 @@ cd app\src\main\cpp\
 # Convert patch file to Unix format (if you don't have dos2unix, install with: winget install -e --id waterlan.dos2unix)
 dos2unix SampleApp.patch
 .\build.bat
+```
+
+#### Mac OS
+
+```bash
+# brew install cmake rust ninja (If you are using homebrew)
+sed -i '' '2s/$/ -DCMAKE_POLICY_VERSION_MINIMUM=3.5/' build.sh # The default version of homebrew is too high
+bash ./build.sh
 ```
 
 ### Build apk in android studio
