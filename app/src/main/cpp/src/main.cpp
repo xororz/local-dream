@@ -428,7 +428,32 @@ void processCommandLine(int argc, char **argv) {
     if (!std::filesystem::exists(model_path)) {
       showHelpAndExit("Model file does not exist");
     }
-    generateMNNModels(model_dir, model_name, clip_skip_2);
+
+    std::vector<std::string> loras;
+    std::vector<float> lora_weights;
+    for (int i = 1;; ++i) {
+      std::string lora_filename = "lora." + std::to_string(i) + ".safetensors";
+      auto lora_path = std::filesystem::path(model_dir) / lora_filename;
+      if (!std::filesystem::exists(lora_path)) {
+        break;
+      }
+      loras.push_back(lora_filename);
+
+      std::string weight_filename = "lora." + std::to_string(i) + ".weight";
+      auto weight_path = std::filesystem::path(model_dir) / weight_filename;
+      float weight = 1.0f;
+
+      if (std::filesystem::exists(weight_path)) {
+        std::ifstream weight_file(weight_path);
+        if (weight_file.is_open()) {
+          weight_file >> weight;
+          weight_file.close();
+        }
+      }
+      lora_weights.push_back(weight);
+    }
+
+    generateMNNModels(model_dir, model_name, clip_skip_2, loras, lora_weights);
     exit(EXIT_SUCCESS);
   }
   if (clipPath.empty() || unetPath.empty() || vaeDecoderPath.empty())

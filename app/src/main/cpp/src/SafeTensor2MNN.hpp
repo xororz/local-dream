@@ -3,10 +3,17 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <xtensor-blas/xlinalg.hpp>
+#include <xtensor/xadapt.hpp>
+#include <xtensor/xarray.hpp>
+#include <xtensor/xeval.hpp>
 
+#include "FloatConversion.hpp"
+#include "LoraMapping.hpp"
 #include "SDStructure.hpp"
 #include "SafeTensorReader.hpp"
 
@@ -23,17 +30,6 @@ struct Shape {
     dims.push_back(std::stoi(shape_str.substr(pos)));
   }
 };
-
-// std::vector<uint8_t> readConstFile(const std::string& filename) {
-//   std::ifstream file(filename, std::ios::binary);
-//   if (!file) return {};
-//   file.seekg(0, std::ios::end);
-//   int size = file.tellg();
-//   file.seekg(0, std::ios::beg);
-//   std::vector<uint8_t> data(size);
-//   file.read(reinterpret_cast<char*>(data.data()), size);
-//   return data;
-// }
 
 std::vector<uint8_t> fillBuffer(const std::vector<uint32_t>& values,
                                 int need_bits) {
@@ -173,11 +169,89 @@ std::vector<uint8_t> quantizeWeights(const std::vector<float>& weights,
   return result;
 }
 
+std::vector<float> applyLoRA(const std::vector<float>& original_weights,
+                             const std::string& weight_name,
+                             const std::vector<SafeTensorReader*>& lora_readers,
+                             const std::vector<float>& lora_weights = {}) {
+  std::vector<float> final_weights = original_weights;
+
+  auto it = lora_mapping.find(weight_name);
+  if (it != lora_mapping.end()) {
+    const std::string& lora_key = it->second;
+
+    for (size_t lora_idx = 0; lora_idx < lora_readers.size(); ++lora_idx) {
+      auto* lora_reader = lora_readers[lora_idx];
+      float lora_weight =
+          (lora_idx < lora_weights.size()) ? lora_weights[lora_idx] : 1.0f;
+
+      std::string alpha_key = lora_key + ".alpha";
+      std::string lora_down_key = lora_key + ".lora_down.weight";
+      std::string lora_up_key = lora_key + ".lora_up.weight";
+
+      if (!lora_reader->has_tensor(lora_down_key) ||
+          !lora_reader->has_tensor(lora_up_key)) {
+        // std::cout << "Missing LoRA tensors for weight: " << weight_name
+        //           << std::endl;
+        continue;
+      }
+
+      float alpha = 1.0f;
+      if (lora_reader->has_tensor(alpha_key)) {
+        lora_reader->read(alpha_key);
+        alpha = lora_reader->data.empty() ? 1.0f : lora_reader->data[0];
+      }
+
+      lora_reader->read(lora_down_key);
+      std::vector<float> lora_down = lora_reader->data;
+
+      lora_reader->read(lora_up_key);
+      std::vector<float> lora_up = lora_reader->data;
+
+      if (!lora_down.empty() && !lora_up.empty()) {
+        int total_elements = original_weights.size();
+        int rank = static_cast<int>(
+            sqrt(lora_down.size() / (total_elements / lora_up.size())));
+        int out_features = lora_up.size() / rank;
+        int in_features = lora_down.size() / rank;
+
+        xt::xarray<float> lora_up_tensor =
+            xt::adapt(lora_up, {out_features, rank});
+        xt::xarray<float> lora_down_tensor =
+            xt::adapt(lora_down, {rank, in_features});
+        xt::xarray<float> original_tensor =
+            xt::adapt(final_weights, {out_features, in_features});
+
+        xt::xarray<float> lora_delta =
+            xt::eval(lora_weight * alpha / rank *
+                     xt::linalg::dot(lora_up_tensor, lora_down_tensor));
+
+        original_tensor += lora_delta;
+
+        std::copy(original_tensor.begin(), original_tensor.end(),
+                  final_weights.begin());
+      }
+    }
+  }
+
+  return final_weights;
+}
+
 void generateModel(const std::string& dir, const std::string& safetensor_file,
                    const std::string& model_name,
-                   const std::vector<std::vector<std::string>>& structure) {
+                   const std::vector<std::vector<std::string>>& structure,
+                   const std::vector<std::string>& loras = {},
+                   const std::vector<float>& lora_weights = {}) {
   SafeTensorReader reader(dir + "/" + safetensor_file);
   std::ofstream weight_file(dir + "/model.mnn.weight", std::ios::binary);
+
+  std::vector<SafeTensorReader*> lora_readers;
+  std::vector<std::unique_ptr<SafeTensorReader>> lora_reader_holders;
+  for (const auto& lora_file : loras) {
+    auto lora_reader =
+        std::make_unique<SafeTensorReader>(dir + "/" + lora_file);
+    lora_readers.push_back(lora_reader.get());
+    lora_reader_holders.push_back(std::move(lora_reader));
+  }
 
   for (const auto& weight_info : structure) {
     const std::string& weight_name = weight_info[0];
@@ -185,26 +259,34 @@ void generateModel(const std::string& dir, const std::string& safetensor_file,
 
     if (data_type == "fp32") {
       reader.read(weight_name);
-      weight_file.write(reinterpret_cast<const char*>(reader.data.data()),
-                        reader.data.size() * sizeof(float));
+      std::vector<float> final_weights =
+          applyLoRA(reader.data, weight_name, lora_readers, lora_weights);
+      weight_file.write(reinterpret_cast<const char*>(final_weights.data()),
+                        final_weights.size() * sizeof(float));
     } else if (data_type == "fp16") {
-      reader.read(weight_name, false);
-      weight_file.write(reinterpret_cast<const char*>(reader.fp16_data.data()),
-                        reader.fp16_data.size() * sizeof(uint16_t));
+      reader.read(weight_name);
+      std::vector<float> final_weights =
+          applyLoRA(reader.data, weight_name, lora_readers, lora_weights);
+
+      std::vector<uint16_t> fp16_result(final_weights.size());
+      for (size_t i = 0; i < final_weights.size(); ++i) {
+        fp16_result[i] = fp32_to_fp16(final_weights[i]);
+      }
+      weight_file.write(reinterpret_cast<const char*>(fp16_result.data()),
+                        fp16_result.size() * sizeof(uint16_t));
     } else if (data_type == "const") {
-      // int const_idx = std::stoi(weight_info[2]);
       int zero_length = std::stoi(weight_info[2]);
-      // std::cout << zero_length << std::endl;
-      // std::string const_filename =
-      //     dir + "/const/const_" + std::to_string(const_idx) + ".bin";
-      // auto const_data = readConstFile(const_filename);
       std::vector<float> const_data(zero_length, 0.0f);
-      weight_file.write(reinterpret_cast<const char*>(const_data.data()),
-                        const_data.size() * sizeof(float));
+      std::vector<float> final_weights =
+          applyLoRA(const_data, weight_name, lora_readers, lora_weights);
+      weight_file.write(reinterpret_cast<const char*>(final_weights.data()),
+                        final_weights.size() * sizeof(float));
     } else if (data_type == "block_quant") {
       reader.read(weight_name);
+      std::vector<float> final_weights =
+          applyLoRA(reader.data, weight_name, lora_readers, lora_weights);
       Shape shape(weight_info[2]);
-      auto quantized = quantizeWeights(reader.data, shape);
+      auto quantized = quantizeWeights(final_weights, shape);
       weight_file.write(reinterpret_cast<const char*>(quantized.data()),
                         quantized.size());
     }
@@ -262,11 +344,15 @@ void patchModel(const std::string& dir, const std::string& safetensor_file,
 
 void generateClipModel(const std::string& dir,
                        const std::string& safetensor_file,
-                       bool clip_skip_2 = false) {
+                       bool clip_skip_2 = false,
+                       const std::vector<std::string>& loras = {},
+                       const std::vector<float>& lora_weights = {}) {
   if (clip_skip_2) {
-    generateModel(dir, safetensor_file, "clip", clip_skip_2_structure);
+    generateModel(dir, safetensor_file, "clip", clip_skip_2_structure, loras,
+                  lora_weights);
   } else {
-    generateModel(dir, safetensor_file, "clip", clip_structure);
+    generateModel(dir, safetensor_file, "clip", clip_structure, loras,
+                  lora_weights);
   }
 
   int header_size = 246656;
@@ -331,12 +417,15 @@ void generateClipModel(const std::string& dir,
 
 void generateMNNModels(const std::string& dir,
                        const std::string& safetensor_file,
-                       bool clip_skip_2 = false) {
+                       bool clip_skip_2 = false,
+                       const std::vector<std::string>& loras = {},
+                       const std::vector<float>& lora_weights = {}) {
   std::cout << "Generating CLIP model..." << std::endl;
-  generateClipModel(dir, safetensor_file, clip_skip_2);
+  generateClipModel(dir, safetensor_file, clip_skip_2, loras, lora_weights);
 
   std::cout << "Generating UNet model..." << std::endl;
-  generateModel(dir, safetensor_file, "unet", unet_structure);
+  generateModel(dir, safetensor_file, "unet", unet_structure, loras,
+                lora_weights);
   patchModel(dir, safetensor_file, "unet", unet_small_weights);
 
   std::cout << "Generating VAE Decoder model..." << std::endl;

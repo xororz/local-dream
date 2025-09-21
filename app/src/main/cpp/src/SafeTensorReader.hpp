@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "FloatConversion.hpp"
 #include "json.hpp"
 
 struct TensorInfo {
@@ -18,60 +19,6 @@ class SafeTensorReader {
   std::string filename_;
   std::map<std::string, TensorInfo> tensor_map_;
   long header_size_;
-
-  float fp16_to_fp32(uint16_t fp16_val) {
-    uint32_t sign = (fp16_val & 0x8000) << 16;
-    uint32_t exponent = (fp16_val & 0x7C00) >> 10;
-    uint32_t mantissa = fp16_val & 0x03FF;
-
-    if (exponent == 0) {
-      if (mantissa == 0) {
-        return *reinterpret_cast<float*>(&sign);
-      } else {
-        exponent = 127 - 15 + 1;
-        while ((mantissa & 0x400) == 0) {
-          mantissa <<= 1;
-          exponent--;
-        }
-        mantissa &= 0x3FF;
-        uint32_t fp32_bits = sign | (exponent << 23) | (mantissa << 13);
-        return *reinterpret_cast<float*>(&fp32_bits);
-      }
-    } else if (exponent == 0x1F) {
-      uint32_t fp32_bits = sign | 0x7F800000 | (mantissa << 13);
-      return *reinterpret_cast<float*>(&fp32_bits);
-    } else {
-      exponent = exponent - 15 + 127;
-      uint32_t fp32_bits = sign | (exponent << 23) | (mantissa << 13);
-      return *reinterpret_cast<float*>(&fp32_bits);
-    }
-  }
-
-  uint16_t fp32_to_fp16(float fp32_val) {
-    uint32_t fp32_bits = *reinterpret_cast<uint32_t*>(&fp32_val);
-    uint32_t sign = (fp32_bits & 0x80000000) >> 16;
-    uint32_t exponent = (fp32_bits & 0x7F800000) >> 23;
-    uint32_t mantissa = fp32_bits & 0x007FFFFF;
-
-    if (exponent == 0) {
-      return static_cast<uint16_t>(sign);
-    } else if (exponent == 0xFF) {
-      uint16_t fp16_bits =
-          static_cast<uint16_t>(sign | 0x7C00 | (mantissa >> 13));
-      return fp16_bits;
-    } else {
-      int32_t new_exponent = static_cast<int32_t>(exponent) - 127 + 15;
-      if (new_exponent <= 0) {
-        return static_cast<uint16_t>(sign);
-      } else if (new_exponent >= 0x1F) {
-        return static_cast<uint16_t>(sign | 0x7C00);
-      } else {
-        uint16_t fp16_bits = static_cast<uint16_t>(sign | (new_exponent << 10) |
-                                                   (mantissa >> 13));
-        return fp16_bits;
-      }
-    }
-  }
 
   void parse_header() {
     std::ifstream file(filename_, std::ios::binary);
@@ -141,7 +88,8 @@ class SafeTensorReader {
 
     const TensorInfo& info = it->second;
 
-    if (info.dtype != "F16" && info.dtype != "F32" && info.dtype != "F64") {
+    if (info.dtype != "F16" && info.dtype != "F32" && info.dtype != "F64" &&
+        info.dtype != "BF16") {
       throw std::runtime_error("Unsupported tensor dtype: " + info.dtype);
     }
 
@@ -209,6 +157,25 @@ class SafeTensorReader {
       fp16_data.resize(tensor_size);
       for (int i = 0; i < tensor_size; ++i) {
         data[i] = static_cast<float>(fp64_data[i]);
+        fp16_data[i] = fp32_to_fp16(data[i]);
+      }
+    } else if (info.dtype == "BF16") {
+      long expected_bytes = static_cast<long>(tensor_size) * 2;
+      if (data_end - data_start != expected_bytes) {
+        throw std::runtime_error("Data size mismatch for tensor: " +
+                                 tensor_name);
+      }
+
+      std::vector<uint16_t> bf16_temp(tensor_size);
+      file.read(reinterpret_cast<char*>(bf16_temp.data()), expected_bytes);
+      if (file.gcount() != static_cast<std::streamsize>(expected_bytes)) {
+        throw std::runtime_error("Cannot read tensor data: " + tensor_name);
+      }
+
+      data.resize(tensor_size);
+      fp16_data.resize(tensor_size);
+      for (int i = 0; i < tensor_size; ++i) {
+        data[i] = bf16_to_fp32(bf16_temp[i]);
         fp16_data[i] = fp32_to_fp16(data[i]);
       }
     }
