@@ -25,3 +25,6 @@
 [submodule "app/src/main/cpp/3rdparty/zstd"]
 	path = app/src/main/cpp/3rdparty/zstd
 	url = https://github.com/facebook/zstd.git
+[submodule "app/src/main/cpp/3rdparty/xtensor-blas"]
+	path = app/src/main/cpp/3rdparty/xtensor-blas
+	url = https://github.com/xtensor-stack/xtensor-blas.git
