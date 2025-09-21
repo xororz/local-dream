@@ -131,13 +131,34 @@ class BackendService : Service() {
                 }
             }
 
-            val nativeDir = applicationInfo.nativeLibraryDir
+            try {
+                val qnnlibsAssets = assets.list("qnnlibs")
+                qnnlibsAssets?.forEach { fileName ->
+                    val targetLib = File(runtimeDir, fileName)
 
-            File(nativeDir).listFiles()?.filter {
-                it.name.endsWith(".so")
-            }?.forEach { sourceLib ->
-                val targetLib = File(runtimeDir, sourceLib.name)
-                copyFileIfNeeded(sourceLib, targetLib)
+                    val needsCopy = !targetLib.exists() || run {
+                        val assetInputStream = assets.open("qnnlibs/$fileName")
+                        val assetSize = assetInputStream.use { it.available().toLong() }
+                        targetLib.length() != assetSize
+                    }
+
+                    if (needsCopy) {
+                        val assetInputStream = assets.open("qnnlibs/$fileName")
+                        assetInputStream.use { input ->
+                            targetLib.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        Log.d(TAG, "Copied $fileName from assets to runtime directory")
+                    }
+
+                    targetLib.setReadable(true, true)
+                    targetLib.setExecutable(true, true)
+                }
+                Log.i(TAG, "QNN libraries prepared in runtime directory")
+            } catch (e: IOException) {
+                Log.e(TAG, "Failed to prepare QNN libraries from assets", e)
+                throw RuntimeException("Failed to prepare QNN libraries from assets", e)
             }
 
             if (BuildConfig.FLAVOR == "filter") {
@@ -175,18 +196,6 @@ class BackendService : Service() {
         }
     }
 
-    private fun copyFileIfNeeded(source: File, target: File) {
-        if (!target.exists() || target.length() != source.length()) {
-            source.inputStream().use { input ->
-                target.outputStream().use { output ->
-                    input.copyTo(output)
-                }
-            }
-        }
-        target.setReadable(true, true)
-        target.setExecutable(true, true)
-    }
-
     private fun startBackend(model: Model, resolution: Int): Boolean {
         Log.i(TAG, "backend start, model: ${model.name}")
         updateState(BackendState.Starting)
@@ -215,8 +224,8 @@ class BackendService : Service() {
                 "--unet", File(modelsDir, "unet.bin").absolutePath,
                 "--vae_decoder", File(modelsDir, "vae_decoder.bin").absolutePath,
                 "--tokenizer", File(modelsDir, "tokenizer.json").absolutePath,
-                "--backend", File(nativeDir, "libQnnHtp.so").absolutePath,
-                "--system_library", File(nativeDir, "libQnnSystem.so").absolutePath,
+                "--backend", File(runtimeDir, "libQnnHtp.so").absolutePath,
+                "--system_library", File(runtimeDir, "libQnnSystem.so").absolutePath,
                 "--port", "8081",
                 "--text_embedding_size", model.textEmbeddingSize.toString()
             )
@@ -262,17 +271,17 @@ class BackendService : Service() {
             val env = mutableMapOf<String, String>()
 
             val systemLibPaths = listOf(
-                nativeDir,
+                runtimeDir.absolutePath,
                 "/system/lib64",
                 "/vendor/lib64",
                 "/vendor/lib64/egl"
             ).joinToString(":")
 
             env["LD_LIBRARY_PATH"] = systemLibPaths
-            env["DSP_LIBRARY_PATH"] = nativeDir
+            env["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
 
             Log.d(TAG, "COMMAND: ${command.joinToString(" ")}")
-            Log.d(TAG, "DIR: ${nativeDir}")
+            Log.d(TAG, "DIR: ${runtimeDir}")
             Log.d(TAG, "LD_LIBRARY_PATH=${env["LD_LIBRARY_PATH"]}")
             Log.d(TAG, "DSP_LIBRARY_PATH=${env["DSP_LIBRARY_PATH"]}")
 

@@ -111,6 +111,7 @@ set(PACKAGE_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/xtensor/include
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/xtl/include
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/xsimd/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/xtensor-blas/include
     ${ZSTD_INCLUDE_DIR}
 
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src/
