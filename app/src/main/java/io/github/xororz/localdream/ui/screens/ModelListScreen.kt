@@ -62,6 +62,20 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.foundation.interaction.MutableInteractionSource
 
+data class LoRAFile(
+    val uri: Uri,
+    val weight: Float = 1.0f
+)
+
+private fun getCleanFileName(uri: Uri): String {
+    val fileName = uri.lastPathSegment ?: "Unknown file"
+    return if (fileName.startsWith("primary:")) {
+        fileName.removePrefix("primary:")
+    } else {
+        fileName
+    }
+}
+
 @Composable
 private fun DeleteConfirmDialog(
     selectedCount: Int,
@@ -444,14 +458,16 @@ fun ModelListScreen(
     if (showCustomModelDialog) {
         CustomModelDialog(
             onDismiss = { showCustomModelDialog = false },
-            onModelAdded = { modelName, fileUri, clipSkip ->
+            onModelAdded = { modelName, fileUri, clipSkip, loraFiles ->
                 showCustomModelDialog = false
                 scope.launch {
                     convertCustomModel(
                         context = context,
                         modelName = modelName,
                         fileUri = fileUri,
-                        clipSkip = clipSkip, onProgress = { progress ->
+                        clipSkip = clipSkip,
+                        loraFiles = loraFiles,
+                        onProgress = { progress ->
                             conversionProgress = progress
                         },
                         onStart = {
@@ -1706,17 +1722,26 @@ fun AddCustomModelButton(
 @Composable
 fun CustomModelDialog(
     onDismiss: () -> Unit,
-    onModelAdded: (String, Uri, Int) -> Unit
+    onModelAdded: (String, Uri, Int, List<LoRAFile>) -> Unit
 ) {
     var modelName by remember { mutableStateOf("") }
     var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
     var clipSkip by remember { mutableStateOf(1) }
+    var selectedLoraFiles by remember { mutableStateOf<List<LoRAFile>>(emptyList()) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let {
             selectedFileUri = it
+        }
+    }
+
+    val loraPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            selectedLoraFiles = selectedLoraFiles + LoRAFile(it)
         }
     }
 
@@ -1796,10 +1821,121 @@ fun CustomModelDialog(
 
                 selectedFileUri?.let { uri ->
                     Text(
-                        text = "Selected: ${uri.lastPathSegment ?: "Unknown file"}",
+                        text = "Selected: ${getCleanFileName(uri)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
+                }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = stringResource(R.string.lora_files_optional),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    OutlinedButton(
+                        onClick = {
+                            loraPickerLauncher.launch("*/*")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(stringResource(R.string.add_lora_file))
+                    }
+
+                    if (selectedLoraFiles.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = stringResource(R.string.selected_lora_files),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        selectedLoraFiles.forEachIndexed { index, loraFile ->
+                            key(loraFile.uri.toString()) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "${index + 1}. ${getCleanFileName(loraFile.uri)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        IconButton(
+                                            onClick = {
+                                                selectedLoraFiles = selectedLoraFiles.filterIndexed { i, _ -> i != index }
+                                            },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "delete",
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.lora_weight),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+
+                                        Slider(
+                                            value = loraFile.weight,
+                                            onValueChange = { newWeight ->
+                                                selectedLoraFiles = selectedLoraFiles.mapIndexed { i, file ->
+                                                    if (i == index) file.copy(weight = newWeight) else file
+                                                }
+                                            },
+                                            valueRange = 0f..2f,
+                                            steps = 39,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(24.dp),
+                                            colors = SliderDefaults.colors(
+                                                thumbColor = MaterialTheme.colorScheme.primary,
+                                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                                inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                            )
+                                        )
+
+                                        Text(
+                                            text = "%.2f".format(loraFile.weight),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                                            modifier = Modifier.width(35.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -1807,7 +1943,7 @@ fun CustomModelDialog(
             TextButton(
                 onClick = {
                     if (modelName.isNotBlank() && selectedFileUri != null) {
-                        onModelAdded(modelName, selectedFileUri!!, clipSkip)
+                        onModelAdded(modelName, selectedFileUri!!, clipSkip, selectedLoraFiles)
                     }
                 },
                 enabled = modelName.isNotBlank() && selectedFileUri != null
@@ -1827,7 +1963,9 @@ suspend fun convertCustomModel(
     context: Context,
     modelName: String,
     fileUri: Uri,
-    clipSkip: Int, onProgress: (String) -> Unit,
+    clipSkip: Int,
+    loraFiles: List<LoRAFile>,
+    onProgress: (String) -> Unit,
     onStart: () -> Unit,
     onSuccess: () -> Unit,
     onError: (String) -> Unit
@@ -1863,6 +2001,25 @@ suspend fun convertCustomModel(
             modelFile.outputStream().use { output ->
                 input.copyTo(output)
             }
+        }
+
+        withContext(Dispatchers.Main) {
+            onProgress(context.getString(R.string.copying_lora_files))
+        }
+
+        loraFiles.forEachIndexed { index, loraFile ->
+            val loraInputStream = context.contentResolver.openInputStream(loraFile.uri)
+                ?: throw Exception("Cannot open LoRA file ${index + 1}")
+            val loraFileTarget = File(modelDir, "lora.${index + 1}.safetensors")
+            val loraWeightFile = File(modelDir, "lora.${index + 1}.weight")
+
+            loraInputStream.use { input ->
+                loraFileTarget.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            loraWeightFile.writeText(loraFile.weight.toString())
         }
 
         withContext(Dispatchers.Main) {
@@ -1979,6 +2136,17 @@ suspend fun convertCustomModel(
             val clipSlimmedFile = File(modelDir, "clip.mnn.slimmed")
             if (clipSlimmedFile.exists()) {
                 clipSlimmedFile.delete()
+            }
+
+            loraFiles.forEachIndexed { index, _ ->
+                val loraFile = File(modelDir, "lora.${index + 1}.safetensors")
+                val loraWeightFile = File(modelDir, "lora.${index + 1}.weight")
+                if (loraFile.exists()) {
+                    loraFile.delete()
+                }
+                if (loraWeightFile.exists()) {
+                    loraWeightFile.delete()
+                }
             }
 
             withContext(Dispatchers.Main) {

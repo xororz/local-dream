@@ -162,4 +162,9 @@
     <string name="converting_model">转换模型中...</string>
     <string name="clip_skip">CLIP Skip</string>
     <string name="clip_skip_hint">设置CLIP跳跃层数 (1或2)</string>
+    <string name="lora_files_optional">LoRA 文件 (可选)</string>
+    <string name="add_lora_file">添加 LoRA 文件</string>
+    <string name="selected_lora_files">已选择的 LoRA 文件:</string>
+    <string name="copying_lora_files">拷贝 LoRA 文件中...</string>
+    <string name="lora_weight">权重:</string>
 </resources>

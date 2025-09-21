@@ -160,4 +160,9 @@
     <string name="converting_model">Converting model...</string>
     <string name="clip_skip">CLIP Skip</string>
     <string name="clip_skip_hint">Set CLIP skip layers (1 or 2)</string>
+    <string name="lora_files_optional">LoRA Files (Optional)</string>
+    <string name="add_lora_file">Add LoRA File</string>
+    <string name="selected_lora_files">Selected LoRA files:</string>
+    <string name="copying_lora_files">Copying LoRA files...</string>
+    <string name="lora_weight">Weight:</string>
 </resources>
