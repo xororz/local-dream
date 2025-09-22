@@ -15,6 +15,8 @@ This project is **now open sourced and completely free**. Hope you enjoy it!
 
 If you like it, please consider [sponsor](https://github.com/xororz/local-dream?tab=readme-ov-file#-support-this-project) this project.
 
+> If you have Qualcomm's latest chip - Snapdragon Elite 2 or 8gen 5, please be patient. I will adapt it promptly after Qualcomm releases the latest SDK. You can also join our [telegram group](https://t.me/local_dream) to help with testing.
+
 ## 🚀 Quick Start
 
 1. **Download**: Get the APK from [Releases](https://github.com/xororz/local-dream/releases) or [Google Play](https://play.google.com/store/apps/details?id=io.github.xororz.localdream)(NSFW filtered)
