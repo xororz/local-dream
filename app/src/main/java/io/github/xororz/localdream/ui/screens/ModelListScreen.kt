@@ -1179,7 +1179,7 @@ fun ModelCard(
                     }
                 }
 
-                if (!model.runOnCpu && model.isDownloaded && model.supportedHighres.isNotEmpty()) {
+                if (!model.runOnCpu && model.isDownloaded && model.supportedHighres.isNotEmpty() && !Model.isMinimalDevice()) {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
@@ -1882,7 +1882,8 @@ fun CustomModelDialog(
 
                                         IconButton(
                                             onClick = {
-                                                selectedLoraFiles = selectedLoraFiles.filterIndexed { i, _ -> i != index }
+                                                selectedLoraFiles =
+                                                    selectedLoraFiles.filterIndexed { i, _ -> i != index }
                                             },
                                             modifier = Modifier.size(24.dp)
                                         ) {
@@ -1909,9 +1910,10 @@ fun CustomModelDialog(
                                         Slider(
                                             value = loraFile.weight,
                                             onValueChange = { newWeight ->
-                                                selectedLoraFiles = selectedLoraFiles.mapIndexed { i, file ->
-                                                    if (i == index) file.copy(weight = newWeight) else file
-                                                }
+                                                selectedLoraFiles =
+                                                    selectedLoraFiles.mapIndexed { i, file ->
+                                                        if (i == index) file.copy(weight = newWeight) else file
+                                                    }
                                             },
                                             valueRange = 0f..2f,
                                             steps = 39,
@@ -1921,7 +1923,9 @@ fun CustomModelDialog(
                                             colors = SliderDefaults.colors(
                                                 thumbColor = MaterialTheme.colorScheme.primary,
                                                 activeTrackColor = MaterialTheme.colorScheme.primary,
-                                                inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                                inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(
+                                                    alpha = 0.3f
+                                                )
                                             )
                                         )
 

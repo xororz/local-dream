@@ -28,7 +28,7 @@
     <string name="delete_confirm">Delete selected %s models? This action cannot be undone.</string>
     <string name="got_it">Got It!</string>
     <string name="about_app">Note</string>
-    <string name="must_read">This APP supports running stable diffusion image generation on CPU/GPU and some Qualcomm NPUs.\n\nIf your chip is not one of the following, you can only run it on CPU/GPU\n\nSupported NPU list:\n- Snapdragon 8 Gen 1\n- Snapdragon 8 Gen 2\n- Snapdragon 8 Gen 3\n- Snapdragon 8 Elite\n\nThis project is open source at https://github.com/xororz/local-dream where you can view the source code or submit issues</string>
+    <string name="must_read">This APP supports running stable diffusion image generation on CPU/GPU and some Qualcomm NPUs.\n\nIf your chip is not one of the following, you can only run it on CPU/GPU\n\nSupported NPU list:\n- Snapdragon 8 Gen 1\n- Snapdragon 8 Gen 2\n- Snapdragon 8 Gen 3\n- Snapdragon 8 Elite\n\nFor Qualcomm chips released in 2020 and later, experimental support is provided, but NPU execution is not guaranteed.\n\nThis project is open source at https://github.com/xororz/local-dream where you can view the source code or submit issues</string>
     <string name="help">help</string>
 
     <!-- Model List Screen -->
@@ -49,7 +49,7 @@
     <string name="cannot_download">Cannot Download</string>
     <string name="cannot_download_hint">A model is being downloaded, please wait.</string>
     <string name="download_model">Download Model</string>
-    <string name="download_model_hint">Are you sure to download %s ? Please do not exit the application during the download process.</string>
+    <string name="download_model_hint">Are you sure to download %s ? Please do not exit the application during the download process.\n\nWe currently allow NPU model downloads for all Qualcomm chips, but older chips may not be able to run them.</string>
     <string name="download_done">Download Finished</string>
     <string name="unsupport_npu">Your device is not supported. Try the CPU model please.</string>
     <string name="cpu_models">CPU Models</string>

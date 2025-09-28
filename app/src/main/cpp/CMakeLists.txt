@@ -24,6 +24,8 @@ file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtp.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnSystem.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
+file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV68Stub.so
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV69Stub.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV73Stub.so
@@ -31,6 +33,10 @@ file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV73Stub.so
 file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV75Stub.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV79Stub.so
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
+file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v68/unsigned/libQnnHtpV68.so
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
+file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v68/unsigned/libQnnHtpV68Skel.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v69/unsigned/libQnnHtpV69.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)

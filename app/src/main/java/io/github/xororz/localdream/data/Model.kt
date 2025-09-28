@@ -271,7 +271,23 @@ data class Model(
         private const val MODELS_DIR = "models"
 
         fun isDeviceSupported(): Boolean {
-            return getDeviceSoc() in chipsetModelSuffixes
+            val soc = getDeviceSoc()
+            return getChipsetSuffix(soc) != null
+        }
+
+        fun isMinimalDevice(): Boolean {
+            val soc = getDeviceSoc()
+            return getChipsetSuffix(soc) == "min"
+        }
+
+        fun getChipsetSuffix(soc: String): String? {
+            if (soc in chipsetModelSuffixes) {
+                return chipsetModelSuffixes[soc]
+            }
+            if (soc.startsWith("SM")) {
+                return "min"
+            }
+            return null
         }
 
         fun getModelsDir(context: Context): File {
@@ -432,7 +448,7 @@ class ModelRepository(private val context: Context) {
     private fun initializeModels(): List<Model> {
         val customModels = scanCustomModels()
 
-        val predefinedModels = listOf(
+        val predefinedModels = mutableListOf(
             createAnythingV5Model(),
             createAnythingV5ModelCPU(),
             createQteaMixModel(),
@@ -443,8 +459,11 @@ class ModelRepository(private val context: Context) {
             createCuteYukiMixModelCPU(),
             createChilloutMixModelCPU(),
             createChilloutMixModel(),
-            createSD21Model(),
         )
+
+        if (!Model.isMinimalDevice()) {
+            predefinedModels.add(createSD21Model())
+        }
 
         return customModels + predefinedModels
     }
@@ -452,6 +471,7 @@ class ModelRepository(private val context: Context) {
     private fun createAnythingV5Model(): Model {
         val id = "anythingv5"
         val soc = getDeviceSoc()
+        val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val files = listOf(
             ModelFile(
                 "tokenizer.json",
@@ -466,17 +486,17 @@ class ModelRepository(private val context: Context) {
             ModelFile(
                 "vae_encoder.bin",
                 "vae_encoder",
-                "xororz/AnythingV5/resolve/main/vae_encoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/AnythingV5/resolve/main/vae_encoder_${suffix}.bin"
             ),
             ModelFile(
                 "vae_decoder.bin",
                 "vae_decoder",
-                "xororz/AnythingV5/resolve/main/vae_decoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/AnythingV5/resolve/main/vae_decoder_${suffix}.bin"
             ),
             ModelFile(
                 "unet.bin",
                 "unet",
-                "xororz/AnythingV5/resolve/main/unet_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/AnythingV5/resolve/main/unet_${suffix}.bin"
             )
         )
 
@@ -563,6 +583,7 @@ class ModelRepository(private val context: Context) {
     private fun createQteaMixModel(): Model {
         val id = "qteamix"
         val soc = getDeviceSoc()
+        val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val files = listOf(
             ModelFile(
                 "tokenizer.json",
@@ -577,17 +598,17 @@ class ModelRepository(private val context: Context) {
             ModelFile(
                 "vae_encoder.bin",
                 "vae_encoder",
-                "xororz/AnythingV5/resolve/main/vae_encoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/AnythingV5/resolve/main/vae_encoder_${suffix}.bin"
             ),
             ModelFile(
                 "vae_decoder.bin",
                 "vae_decoder",
-                "xororz/QteaMix/resolve/main/vae_decoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/QteaMix/resolve/main/vae_decoder_${suffix}.bin"
             ),
             ModelFile(
                 "unet.bin",
                 "unet",
-                "xororz/QteaMix/resolve/main/unet_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/QteaMix/resolve/main/unet_${suffix}.bin"
             )
         )
 
@@ -674,6 +695,7 @@ class ModelRepository(private val context: Context) {
     private fun createCuteYukiMixModel(): Model {
         val id = "cuteyukimix"
         val soc = getDeviceSoc()
+        val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val files = listOf(
             ModelFile(
                 "tokenizer.json",
@@ -688,17 +710,17 @@ class ModelRepository(private val context: Context) {
             ModelFile(
                 "vae_encoder.bin",
                 "vae_encoder",
-                "xororz/AnythingV5/resolve/main/vae_encoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/AnythingV5/resolve/main/vae_encoder_${suffix}.bin"
             ),
             ModelFile(
                 "vae_decoder.bin",
                 "vae_decoder",
-                "xororz/CuteYukiMix/resolve/main/vae_decoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/CuteYukiMix/resolve/main/vae_decoder_${suffix}.bin"
             ),
             ModelFile(
                 "unet.bin",
                 "unet",
-                "xororz/CuteYukiMix/resolve/main/unet_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/CuteYukiMix/resolve/main/unet_${suffix}.bin"
             )
         )
 
@@ -785,6 +807,7 @@ class ModelRepository(private val context: Context) {
     private fun createAbsoluteRealityModel(): Model {
         val id = "absolutereality"
         val soc = getDeviceSoc()
+        val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val files = listOf(
             ModelFile(
                 "tokenizer.json",
@@ -795,17 +818,17 @@ class ModelRepository(private val context: Context) {
             ModelFile(
                 "vae_encoder.bin",
                 "vae_encoder",
-                "xororz/AnythingV5/resolve/main/vae_encoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/AnythingV5/resolve/main/vae_encoder_${suffix}.bin"
             ),
             ModelFile(
                 "vae_decoder.bin",
                 "vae_decoder",
-                "xororz/AbsoluteReality/resolve/main/vae_decoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/AbsoluteReality/resolve/main/vae_decoder_${suffix}.bin"
             ),
             ModelFile(
                 "unet.bin",
                 "unet",
-                "xororz/AbsoluteReality/resolve/main/unet_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/AbsoluteReality/resolve/main/unet_${suffix}.bin"
             )
         )
 
@@ -893,6 +916,7 @@ class ModelRepository(private val context: Context) {
     private fun createChilloutMixModel(): Model {
         val id = "chilloutmix"
         val soc = getDeviceSoc()
+        val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val files = listOf(
             ModelFile(
                 "tokenizer.json",
@@ -903,17 +927,17 @@ class ModelRepository(private val context: Context) {
             ModelFile(
                 "vae_encoder.bin",
                 "vae_encoder",
-                "xororz/AnythingV5/resolve/main/vae_encoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/AnythingV5/resolve/main/vae_encoder_${suffix}.bin"
             ),
             ModelFile(
                 "vae_decoder.bin",
                 "vae_decoder",
-                "xororz/ChilloutMix/resolve/main/vae_decoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/ChilloutMix/resolve/main/vae_decoder_${suffix}.bin"
             ),
             ModelFile(
                 "unet.bin",
                 "unet",
-                "xororz/ChilloutMix/resolve/main/unet_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/ChilloutMix/resolve/main/unet_${suffix}.bin"
             )
         )
 
@@ -1001,27 +1025,28 @@ class ModelRepository(private val context: Context) {
     private fun createSD21Model(): Model {
         val id = "sd21"
         val soc = getDeviceSoc()
+        val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val files = listOf(
             ModelFile("tokenizer.json", "tokenizer", "xororz/SD21/resolve/main/tokenizer.json"),
             ModelFile(
                 "clip.bin",
                 "clip",
-                "xororz/SD21/resolve/main/clip_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/SD21/resolve/main/clip_${suffix}.bin"
             ),
             ModelFile(
                 "vae_encoder.bin",
                 "vae_encoder",
-                "xororz/AnythingV5/resolve/main/vae_encoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/AnythingV5/resolve/main/vae_encoder_${suffix}.bin"
             ),
             ModelFile(
                 "vae_decoder.bin",
                 "vae_decoder",
-                "xororz/SD21/resolve/main/vae_decoder_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/SD21/resolve/main/vae_decoder_${suffix}.bin"
             ),
             ModelFile(
                 "unet.bin",
                 "unet",
-                "xororz/SD21/resolve/main/unet_${chipsetModelSuffixes[soc]}.bin"
+                "xororz/SD21/resolve/main/unet_${suffix}.bin"
             )
         )
 
