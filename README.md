@@ -15,7 +15,11 @@ This project is **now open sourced and completely free**. Hope you enjoy it!
 
 If you like it, please consider [sponsor](https://github.com/xororz/local-dream?tab=readme-ov-file#-support-this-project) this project.
 
-> If you have Qualcomm's latest chip - Snapdragon Elite 2 or 8gen 5, please be patient. I will adapt it promptly after Qualcomm releases the latest SDK. You can also join our [telegram group](https://t.me/local_dream) to help with testing.
+> If you have Qualcomm's latest chip - Snapdragon Elite 2 or 8gen 5, please be patient. I will adapt it promptly after Qualcomm releases the latest SDK.
+>
+> Non-flagship chips are now experimentally supported. It should work on NPUs that are Hexagon V68 or above.
+>
+> You can join our [telegram group](https://t.me/local_dream) for discussion or help with testing.
 
 ## 🚀 Quick Start
 
