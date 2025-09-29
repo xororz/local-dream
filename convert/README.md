@@ -50,7 +50,7 @@ Download the conversion scripts from [here](https://chino.icu/local-dream/npucon
 4. Convert the ONNX model to QNN format:
 
    ```bash
-   bash convert_all.sh --min_soc <min or 8gen1 or 8gen2>
+   bash scripts/convert_all.sh --min_soc <min or 8gen1 or 8gen2>
    ```
 
    **--min_soc**: Choose the minimum SOC you want to support.
