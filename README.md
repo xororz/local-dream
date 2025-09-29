@@ -19,6 +19,8 @@ If you like it, please consider [sponsor](https://github.com/xororz/local-dream?
 >
 > Non-flagship chips are now experimentally supported. It should work on NPUs that are Hexagon V68 or above.
 >
+> Try our [NPU Model Conversion Guide](https://github.com/xororz/local-dream/tree/master/convert) if you want to run your own models on npu.
+>
 > You can join our [telegram group](https://t.me/local_dream) for discussion or help with testing.
 
 ## 🚀 Quick Start
