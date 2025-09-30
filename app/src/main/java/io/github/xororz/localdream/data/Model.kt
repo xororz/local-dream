@@ -280,6 +280,11 @@ data class Model(
             return getChipsetSuffix(soc) == "min"
         }
 
+        fun isQualcommDevice(): Boolean {
+            val soc = getDeviceSoc()
+            return soc.startsWith("SM") || soc.startsWith("QCS") || soc.startsWith("QCM")
+        }
+
         fun getChipsetSuffix(soc: String): String? {
             if (soc in chipsetModelSuffixes) {
                 return chipsetModelSuffixes[soc]
@@ -392,8 +397,13 @@ class ModelRepository(private val context: Context) {
             modelsDir.listFiles()?.forEach { dir ->
                 if (dir.isDirectory) {
                     val finishedFile = File(dir, "finished")
+                    val npuCustomFile = File(dir, "npucustom")
+
                     if (finishedFile.exists()) {
-                        val customModel = createCustomModel(dir)
+                        val customModel = createCustomModel(dir, isNpu = false)
+                        customModels.add(customModel)
+                    } else if (npuCustomFile.exists()) {
+                        val customModel = createCustomModel(dir, isNpu = true)
                         customModels.add(customModel)
                     }
                 }
@@ -403,28 +413,42 @@ class ModelRepository(private val context: Context) {
         return customModels
     }
 
-    private fun createCustomModel(modelDir: File): Model {
+    private fun createCustomModel(modelDir: File, isNpu: Boolean = false): Model {
         val modelId = modelDir.name
         val files = mutableListOf<ModelFile>()
 
-        val commonFiles = listOf(
-            "tokenizer.json" to "tokenizer",
-            "clip.mnn" to "clip",
-            "unet.mnn" to "unet",
-            "vae_decoder.mnn" to "vae_decoder",
-            "vae_encoder.mnn" to "vae_encoder"
-        )
-
-        commonFiles.forEach { (fileName, displayName) ->
-            val file = File(modelDir, fileName)
-            if (file.exists()) {
-                files.add(
-                    ModelFile(
-                        name = fileName,
-                        displayName = displayName,
-                        uri = ""
+        if (isNpu) {
+            modelDir.listFiles()?.forEach { file ->
+                if (file.isFile && file.name != "npucustom") {
+                    files.add(
+                        ModelFile(
+                            name = file.name,
+                            displayName = file.nameWithoutExtension,
+                            uri = ""
+                        )
                     )
-                )
+                }
+            }
+        } else {
+            val commonFiles = listOf(
+                "tokenizer.json" to "tokenizer",
+                "clip.mnn" to "clip",
+                "unet.mnn" to "unet",
+                "vae_decoder.mnn" to "vae_decoder",
+                "vae_encoder.mnn" to "vae_encoder"
+            )
+
+            commonFiles.forEach { (fileName, displayName) ->
+                val file = File(modelDir, fileName)
+                if (file.exists()) {
+                    files.add(
+                        ModelFile(
+                            name = fileName,
+                            displayName = displayName,
+                            uri = ""
+                        )
+                    )
+                }
             }
         }
 
@@ -439,7 +463,7 @@ class ModelRepository(private val context: Context) {
             isPartiallyDownloaded = false,
             defaultPrompt = "masterpiece, best quality, flowers,",
             defaultNegativePrompt = "worst quality, low quality, normal quality, poorly drawn, lowres, low resolution, signature, watermarks, ugly, out of focus, error, blurry, unclear photo, bad photo",
-            runOnCpu = true,
+            runOnCpu = !isNpu,
             useCpuClip = true,
             isCustom = true
         )

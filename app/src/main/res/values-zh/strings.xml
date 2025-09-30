@@ -146,17 +146,26 @@
     
     <!-- Custom Model -->
     <string name="add_custom_model">添加自定义模型</string>
+    <string name="add_custom_npu_model">添加自定义NPU模型</string>
     <string name="custom_model">自定义模型</string>
+    <string name="custom_npu_model">自定义NPU模型</string>
     <string name="custom_model_name">模型名称</string>
     <string name="custom_model_name_hint">输入模型名称</string>
     <string name="select_model_file">选择模型文件</string>
+    <string name="select_zip_file">选择ZIP文件</string>
+    <string name="zip_file_selected">ZIP文件已选择</string>
     <string name="file_selected">文件已选择</string>
     <string name="add_model">添加模型</string>
     <string name="custom_model_hint">仅支持SD1.5架构的safetensors模型文件</string>
+    <string name="custom_npu_model_hint">选择包含NPU模型文件的ZIP压缩包。仅支持高通芯片设备。</string>
     <string name="converting">转换中...</string>
     <string name="model_conversion_success">模型转换成功！</string>
     <string name="model_conversion_failed">转换失败: %s</string>
+    <string name="npu_model_added_success">NPU模型添加成功！</string>
+    <string name="npu_model_add_failed">NPU模型添加失败: %s</string>
     <string name="preparing_model">准备模型中...</string>
+    <string name="preparing_npu_model">准备NPU模型中...</string>
+    <string name="extracting_zip_file">解压ZIP文件中...</string>
     <string name="copying_model_file">复制模型文件中...</string>
     <string name="copying_base_files">复制基础文件中...</string>
     <string name="converting_model">转换模型中...</string>

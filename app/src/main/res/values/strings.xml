@@ -144,17 +144,26 @@
     
     <!-- Custom Model -->
     <string name="add_custom_model">Add Custom Model</string>
+    <string name="add_custom_npu_model">Add Custom NPU Model</string>
     <string name="custom_model">Custom Model</string>
+    <string name="custom_npu_model">Custom NPU Model</string>
     <string name="custom_model_name">Model Name</string>
     <string name="custom_model_name_hint">Enter model name</string>
     <string name="select_model_file">Select Model File</string>
+    <string name="select_zip_file">Select ZIP File</string>
+    <string name="zip_file_selected">ZIP File Selected</string>
     <string name="file_selected">File Selected</string>
     <string name="add_model">Add Model</string>
     <string name="custom_model_hint">Only supports SD1.5 architecture safetensors model files</string>
+    <string name="custom_npu_model_hint">Select a ZIP file containing NPU model files. Only available on Qualcomm devices.</string>
     <string name="converting">Converting...</string>
     <string name="model_conversion_success">Model conversion successful!</string>
     <string name="model_conversion_failed">Conversion failed: %s</string>
+    <string name="npu_model_added_success">NPU model added successfully!</string>
+    <string name="npu_model_add_failed">NPU model add failed: %s</string>
     <string name="preparing_model">Preparing model...</string>
+    <string name="preparing_npu_model">Preparing NPU model...</string>
+    <string name="extracting_zip_file">Extracting ZIP file...</string>
     <string name="copying_model_file">Copying model file...</string>
     <string name="copying_base_files">Copying base files...</string>
     <string name="converting_model">Converting model...</string>

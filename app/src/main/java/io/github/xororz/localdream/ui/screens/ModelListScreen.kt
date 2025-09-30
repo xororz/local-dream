@@ -61,6 +61,8 @@ import androidx.compose.material.icons.filled.Folder
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import java.util.zip.ZipInputStream
+import java.io.BufferedOutputStream
 
 data class LoRAFile(
     val uri: Uri,
@@ -134,6 +136,7 @@ fun ModelListScreen(
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showFileManagerDialog by remember { mutableStateOf(false) }
     var showCustomModelDialog by remember { mutableStateOf(false) }
+    var showCustomNpuModelDialog by remember { mutableStateOf(false) }
     var isConverting by remember { mutableStateOf(false) }
     var conversionProgress by remember { mutableStateOf("") }
     var tempBaseUrl by remember { mutableStateOf("") }
@@ -497,6 +500,46 @@ fun ModelListScreen(
         )
     }
 
+    if (showCustomNpuModelDialog) {
+        CustomNpuModelDialog(
+            onDismiss = { showCustomNpuModelDialog = false },
+            onModelAdded = { modelName, zipUri ->
+                showCustomNpuModelDialog = false
+                scope.launch {
+                    extractNpuModel(
+                        context = context,
+                        modelName = modelName,
+                        zipUri = zipUri,
+                        onProgress = { progress ->
+                            conversionProgress = progress
+                        },
+                        onStart = {
+                            isConverting = true
+                        },
+                        onSuccess = {
+                            isConverting = false
+                            modelRepository.refreshAllModels()
+                            scope.launch {
+                                snackbarHostState.showSnackbar(context.getString(R.string.npu_model_added_success))
+                            }
+                        },
+                        onError = { error ->
+                            isConverting = false
+                            scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    context.getString(
+                                        R.string.npu_model_add_failed,
+                                        error
+                                    )
+                                )
+                            }
+                        }
+                    )
+                }
+            }
+        )
+    }
+
     if (showDeleteConfirm && selectedModels.isNotEmpty()) {
         DeleteConfirmDialog(
             selectedCount = selectedModels.size,
@@ -782,6 +825,15 @@ fun ModelListScreen(
                         item {
                             AddCustomModelButton(
                                 onClick = { showCustomModelDialog = true },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+
+                    if (page == 1 && Model.isQualcommDevice()) {
+                        item {
+                            AddCustomNpuModelButton(
+                                onClick = { showCustomNpuModelDialog = true },
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -1720,6 +1772,138 @@ fun AddCustomModelButton(
 }
 
 @Composable
+fun AddCustomNpuModelButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onClick() }
+                )
+            },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+        ),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.add_custom_npu_model),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+fun CustomNpuModelDialog(
+    onDismiss: () -> Unit,
+    onModelAdded: (String, Uri) -> Unit
+) {
+    var modelName by remember { mutableStateOf("") }
+    var selectedZipUri by remember { mutableStateOf<Uri?>(null) }
+
+    val zipPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            selectedZipUri = it
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = stringResource(R.string.add_custom_npu_model),
+                style = MaterialTheme.typography.headlineSmall
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.custom_npu_model_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = modelName,
+                    onValueChange = { modelName = it },
+                    label = { Text(stringResource(R.string.custom_model_name)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.custom_model_name_hint)) }
+                )
+
+                OutlinedButton(
+                    onClick = {
+                        zipPickerLauncher.launch("application/zip")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Folder,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = selectedZipUri?.let { stringResource(R.string.zip_file_selected) }
+                            ?: stringResource(R.string.select_zip_file)
+                    )
+                }
+
+                selectedZipUri?.let { uri ->
+                    Text(
+                        text = "Selected: ${getCleanFileName(uri)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (modelName.isNotBlank() && selectedZipUri != null) {
+                        onModelAdded(modelName, selectedZipUri!!)
+                    }
+                },
+                enabled = modelName.isNotBlank() && selectedZipUri != null
+            ) {
+                Text(stringResource(R.string.add_model))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
 fun CustomModelDialog(
     onDismiss: () -> Unit,
     onModelAdded: (String, Uri, Int, List<LoRAFile>) -> Unit
@@ -1961,6 +2145,93 @@ fun CustomModelDialog(
             }
         }
     )
+}
+
+suspend fun extractNpuModel(
+    context: Context,
+    modelName: String,
+    zipUri: Uri,
+    onProgress: (String) -> Unit,
+    onStart: () -> Unit,
+    onSuccess: () -> Unit,
+    onError: (String) -> Unit
+) = withContext(Dispatchers.IO) {
+    try {
+        withContext(Dispatchers.Main) {
+            onStart()
+            onProgress(context.getString(R.string.preparing_npu_model))
+        }
+
+        if (!Model.isQualcommDevice()) {
+            withContext(Dispatchers.Main) {
+                onError("Only Qualcomm devices are supported for custom NPU models")
+            }
+            return@withContext
+        }
+
+        val modelId = modelName.replace(" ", "")
+
+        val modelsDir = File(context.filesDir, "models")
+        if (!modelsDir.exists()) {
+            modelsDir.mkdirs()
+        }
+
+        val modelDir = File(modelsDir, modelId)
+        if (modelDir.exists()) {
+            modelDir.deleteRecursively()
+        }
+        modelDir.mkdirs()
+
+        withContext(Dispatchers.Main) {
+            onProgress(context.getString(R.string.extracting_zip_file))
+        }
+
+        val inputStream = context.contentResolver.openInputStream(zipUri)
+            ?: throw Exception("Cannot open selected zip file")
+
+        ZipInputStream(inputStream.buffered()).use { zipInputStream ->
+            var zipEntry = zipInputStream.nextEntry
+
+            while (zipEntry != null) {
+                if (!zipEntry.isDirectory) {
+                    val fileName = zipEntry.name.substringAfterLast('/')
+
+                    if (fileName.isNotEmpty() && !fileName.startsWith(".") && !fileName.startsWith("__MACOSX")) {
+                        val outputFile = File(modelDir, fileName)
+
+                        BufferedOutputStream(outputFile.outputStream()).use { outputStream ->
+                            zipInputStream.copyTo(outputStream)
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            onProgress("Extracted: $fileName")
+                        }
+                    }
+                }
+                zipEntry = zipInputStream.nextEntry
+            }
+        }
+
+        val npuCustomFile = File(modelDir, "npucustom")
+        npuCustomFile.createNewFile()
+
+        withContext(Dispatchers.Main) {
+            onSuccess()
+        }
+
+    } catch (e: Exception) {
+        android.util.Log.e("NpuModelExtract", "Extraction failed", e)
+
+        val modelId = modelName.replace(" ", "")
+        val modelDir = File(File(context.filesDir, "models"), modelId)
+        if (modelDir.exists()) {
+            modelDir.deleteRecursively()
+        }
+
+        withContext(Dispatchers.Main) {
+            onError("Extraction failed: ${e.message}")
+        }
+    }
 }
 
 suspend fun convertCustomModel(
