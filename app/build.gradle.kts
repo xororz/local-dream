@@ -5,15 +5,15 @@ plugins {
 
 android {
     namespace = "io.github.xororz.localdream"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "io.github.xororz.localdream"
         minSdk = 28
 //        minSdk = 31
-        targetSdk = 35
-        versionCode = 43
-        versionName = "1.8.4"
+        targetSdk = 36
+        versionCode = 44
+        versionName = "1.9.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
