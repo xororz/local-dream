@@ -4,10 +4,10 @@ project(libstable_diffusion_core.so C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# QNN SDK PATH, MUST BE 2.29.0.241129
-set(QNN_SDK_ROOT /data/qairt/2.29.0.241129)
+# QNN SDK PATH
+set(QNN_SDK_ROOT /data/qairt/2.39.0.250926)
 
-file(COPY ${QNN_SDK_ROOT}/examples/QNN/SampleApp/
+file(COPY ${QNN_SDK_ROOT}/examples/QNN/SampleApp/SampleApp/
     DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp)
 execute_process(COMMAND git apply --directory=app/src/main/cpp/ --verbose ${CMAKE_CURRENT_SOURCE_DIR}/SampleApp.patch
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -34,6 +34,8 @@ file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV75Stub.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV79Stub.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
+file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV81Stub.so
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v68/unsigned/libQnnHtpV68.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v68/unsigned/libQnnHtpV68Skel.so
@@ -53,6 +55,10 @@ file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v75/unsigned/libQnnHtpV75Skel.so
 file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v79/unsigned/libQnnHtpV79.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v79/unsigned/libQnnHtpV79Skel.so
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
+file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v81/unsigned/libQnnHtpV81.so
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
+file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v81/unsigned/libQnnHtpV81Skel.so
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 
 if(WIN32)

@@ -1,8 +1,8 @@
 diff --git a/3rdparty/SampleApp/src/QnnSampleApp.cpp b/3rdparty/SampleApp/src/QnnSampleApp.cpp
-index 263bc2a..cbd23e1 100644
+index 68a13c7..39bdd18 100755
 --- a/3rdparty/SampleApp/src/QnnSampleApp.cpp
 +++ b/3rdparty/SampleApp/src/QnnSampleApp.cpp
-@@ -112,19 +112,19 @@ std::string sample_app::QnnSampleApp::getBackendBuildId() {
+@@ -78,19 +78,19 @@ std::string sample_app::QnnSampleApp::getBackendBuildId() {
  //  2. Read all input list paths provided
  //      during creation.
  sample_app::StatusCode sample_app::QnnSampleApp::initialize() {
@@ -36,12 +36,12 @@ index 263bc2a..cbd23e1 100644
    if (log::isLogInitialized()) {
      auto logCallback = log::getLogCallback();
 diff --git a/3rdparty/SampleApp/src/QnnSampleApp.hpp b/3rdparty/SampleApp/src/QnnSampleApp.hpp
-index 530d1c1..94ca0ae 100644
+index a675ec7..26a3855 100755
 --- a/3rdparty/SampleApp/src/QnnSampleApp.hpp
 +++ b/3rdparty/SampleApp/src/QnnSampleApp.hpp
-@@ -85,7 +85,7 @@ class QnnSampleApp {
+@@ -82,7 +82,7 @@ class QnnSampleApp {
  
-   virtual ~QnnSampleApp();
+   StatusCode verifyFailReturnStatus(Qnn_ErrorHandle_t errCode);
  
 - private:
 +//  private:
@@ -49,10 +49,10 @@ index 530d1c1..94ca0ae 100644
  
    StatusCode extractProfilingSubEvents(QnnProfile_EventId_t profileEventId);
 diff --git a/3rdparty/SampleApp/src/Utils/IOTensor.hpp b/3rdparty/SampleApp/src/Utils/IOTensor.hpp
-index a44086f..78ab0ba 100644
+index fc5a0c2..84bdb2a 100755
 --- a/3rdparty/SampleApp/src/Utils/IOTensor.hpp
 +++ b/3rdparty/SampleApp/src/Utils/IOTensor.hpp
-@@ -67,7 +67,7 @@ class IOTensor {
+@@ -71,7 +71,7 @@ class IOTensor {
                                             size_t numInputTensors,
                                             size_t numOutputTensors);
  
