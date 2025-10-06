@@ -32,6 +32,7 @@ import io.github.xororz.localdream.service.BackendService
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.StateFlow
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -243,6 +244,7 @@ private fun checkStoragePermission(context: Context): Boolean {
 }
 
 private suspend fun checkBackendHealth(
+    backendState: StateFlow<BackendService.BackendState>,
     onHealthy: () -> Unit,
     onUnhealthy: () -> Unit
 ) = withContext(Dispatchers.IO) {
@@ -256,6 +258,13 @@ private suspend fun checkBackendHealth(
         val timeoutDuration = 60000
 
         while (currentCoroutineContext().isActive) {
+            if (backendState.value is BackendService.BackendState.Error) {
+                withContext(Dispatchers.Main) {
+                    onUnhealthy()
+                }
+                break
+            }
+
             if (System.currentTimeMillis() - startTime > timeoutDuration) {
                 withContext(Dispatchers.Main) {
                     onUnhealthy()
@@ -843,6 +852,7 @@ fun ModelRunScreen(
 
     LaunchedEffect(Unit) {
         checkBackendHealth(
+            backendState = BackendService.backendState,
             onHealthy = {
                 isBackendReady = true
                 isCheckingBackend = false

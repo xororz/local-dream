@@ -270,14 +270,38 @@ class BackendService : Service() {
             }
             val env = mutableMapOf<String, String>()
 
-            val systemLibPaths = listOf(
+            val systemLibPaths = mutableListOf(
                 runtimeDir.absolutePath,
                 "/system/lib64",
                 "/vendor/lib64",
-                "/vendor/lib64/egl"
-            ).joinToString(":")
-
-            env["LD_LIBRARY_PATH"] = systemLibPaths
+                "/vendor/lib64/egl",
+            )
+            val vendorEglDir = File("/vendor/lib64/egl")
+            if (vendorEglDir.exists() && vendorEglDir.isDirectory) {
+                try {
+                    vendorEglDir.listFiles()?.forEach { subDir ->
+                        if (subDir.isDirectory && subDir.name.startsWith("mt", ignoreCase = true)) {
+                            systemLibPaths.add(subDir.absolutePath)
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            val vendorLib64 = File("/vendor/lib64")
+            if (vendorLib64.exists() && vendorLib64.isDirectory) {
+                try {
+                    vendorLib64.listFiles()?.forEach { subDir ->
+                        if (subDir.isDirectory && subDir.name.startsWith("mt", ignoreCase = true)) {
+                            systemLibPaths.add(subDir.absolutePath)
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            val systemLibPathsStr = systemLibPaths.joinToString(":")
+            env["LD_LIBRARY_PATH"] = systemLibPathsStr
             env["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
 
             Log.d(TAG, "COMMAND: ${command.joinToString(" ")}")
@@ -318,7 +342,7 @@ class BackendService : Service() {
 
                     val exitCode = proc.waitFor()
                     Log.i(TAG, "Backend process exited with code: $exitCode")
-                    updateState(BackendState.Idle)
+                    updateState(BackendState.Error("Backend process exited with code: $exitCode"))
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "monitor error", e)
