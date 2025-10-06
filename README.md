@@ -15,8 +15,6 @@ This project is **now open sourced and completely free**. Hope you enjoy it!
 
 If you like it, please consider [sponsor](https://github.com/xororz/local-dream?tab=readme-ov-file#-support-this-project) this project.
 
-> If you have Qualcomm's latest chip - Snapdragon Elite 2 or 8gen 5, please be patient. I will adapt it promptly after Qualcomm releases the latest SDK.
->
 > Non-flagship chips are now experimentally supported. It should work on NPUs that are Hexagon V68 or above.
 >
 > Try our [NPU Model Conversion Guide](https://github.com/xororz/local-dream/tree/master/convert) if you want to run your own models on npu.
@@ -63,7 +61,7 @@ git clone --recursive https://github.com/xororz/local-dream.git
 
 ### 2. Prepare SDKs
 
-1. **Download QNN SDK**: Get [QNN_SDK_2.29](https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/qualcomm_neural_processing_sdk/v2.29.0.241129.zip) and extract
+1. **Download QNN SDK**: Get [QNN_SDK_2.39](https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.39.0.250926/v2.39.0.250926.zip) and extract
 2. **Download Android NDK**: Get [Android NDK](https://developer.android.com/ndk/downloads) and extract
 3. **Configure paths**:
    - Update `QNN_SDK_ROOT` in `app/src/main/cpp/CMakeLists.txt`
@@ -149,6 +147,8 @@ Compatible with devices featuring:
 - **Snapdragon 8 Gen 2**
 - **Snapdragon 8 Gen 3**
 - **Snapdragon 8 Elite**
+- **Snapdragon 8 Elite Gen 5**
+- Non-flagship chips with Hexagon V68 or above (e.g., Snapdragon 7 Gen 1, 8s Gen 3)
 
 > **Note**: Other devices cannot download NPU models
 
@@ -161,17 +161,18 @@ Compatible with devices featuring:
 
 Now supports importing from local SD1.5 based safetensor for CPU/GPU.
 
+Now you can import your own NPU models converted using our easy-to-follow [NPU Model Conversion Guide](https://github.com/xororz/local-dream/tree/master/convert). And you can also download some pre-converted models from [xororz/sd-qnn](https://huggingface.co/xororz/sd-qnn/tree/main) or [Mr-J-369](https://huggingface.co/Mr-J-369). Download `_min` if you are using non-flagship chips. Download `_8gen1` if you are using 8gen1. Download `_8gen2` if you are using 8gen2/3/4/5. We recommend checking the instructions on the original model page to set up prompts and parameters.
+
 <div align="center">
 
-| Model                    | Type  | CPU/GPU | NPU | Clip Skip | Source                                                                              |
-| ------------------------ | ----- | :-----: | :-: | :-------: | ----------------------------------------------------------------------------------- |
-| **Anything V5.0**        | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/9409?modelVersionId=30163)                     |
-| **ChilloutMix**          | SD1.5 |   ✅    | ✅  |     1     | [CivitAI](https://civitai.com/models/6424/chilloutmix?modelVersionId=11732)         |
-| **Absolute Reality**     | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/81458?modelVersionId=132760)                   |
-| **QteaMix**              | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/50696/qteamix-q?modelVersionId=94654)          |
-| **CuteYukiMix**          | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/28169?modelVersionId=265102)                   |
-| **Stable Diffusion 2.1** | SD2.1 |   ❌    | ✅  |     1     | [HuggingFace](https://huggingface.co/stabilityai/stable-diffusion-2-1/tree/main)    |
-| **Pony V5.5**            | SD2.1 |   ❌    | ✅  |     1     | [CivitAI](https://civitai.com/models/95367/pony-diffusion-v5?modelVersionId=205936) |
+| Model                    | Type  | CPU/GPU | NPU | Clip Skip | Source                                                                           |
+| ------------------------ | ----- | :-----: | :-: | :-------: | -------------------------------------------------------------------------------- |
+| **Anything V5.0**        | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/9409?modelVersionId=30163)                  |
+| **ChilloutMix**          | SD1.5 |   ✅    | ✅  |     1     | [CivitAI](https://civitai.com/models/6424/chilloutmix?modelVersionId=11732)      |
+| **Absolute Reality**     | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/81458?modelVersionId=132760)                |
+| **QteaMix**              | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/50696/qteamix-q?modelVersionId=94654)       |
+| **CuteYukiMix**          | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/28169?modelVersionId=265102)                |
+| **Stable Diffusion 2.1** | SD2.1 |   ❌    | ✅  |     1     | [HuggingFace](https://huggingface.co/stabilityai/stable-diffusion-2-1/tree/main) |
 
 </div>
 
