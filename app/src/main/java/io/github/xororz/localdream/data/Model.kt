@@ -62,6 +62,8 @@ val chipsetModelSuffixes = mapOf(
     "SM8650P" to "8gen3",
     "SM8750" to "8gen4",
     "SM8750P" to "8gen4",
+    "SM8850" to "8gen2", // assuming no performance loss
+    "SM8850P" to "8gen2",
 )
 
 sealed class DownloadResult {
@@ -235,6 +237,10 @@ data class Model(
 
         if (!patchFile.exists()) {
             return false
+        }
+
+        if (isCustom) {
+            return true
         }
 
         val fileVerification = FileVerification(context)
@@ -452,6 +458,25 @@ class ModelRepository(private val context: Context) {
             }
         }
 
+        // Check for high resolution patches for NPU models
+        val supportedHighres = mutableListOf<Int>()
+        val highresInfo = mutableMapOf<Int, HighresInfo>()
+
+        if (isNpu) {
+            val patchResolutions = listOf(768, 1024)
+            patchResolutions.forEach { resolution ->
+                val patchFile = File(modelDir, "${resolution}.patch")
+                if (patchFile.exists()) {
+                    supportedHighres.add(resolution)
+                    highresInfo[resolution] = HighresInfo(
+                        size = resolution,
+                        patchFileName = "${resolution}.patch",
+                        isDownloaded = true
+                    )
+                }
+            }
+        }
+
         return Model(
             id = modelId,
             name = modelId,
@@ -462,9 +487,11 @@ class ModelRepository(private val context: Context) {
             isDownloaded = true,
             isPartiallyDownloaded = false,
             defaultPrompt = "masterpiece, best quality, flowers,",
-            defaultNegativePrompt = "worst quality, low quality, normal quality, poorly drawn, lowres, low resolution, signature, watermarks, ugly, out of focus, error, blurry, unclear photo, bad photo",
+            defaultNegativePrompt = "bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = !isNpu,
             useCpuClip = true,
+            supportedHighres = supportedHighres,
+            highresInfo = highresInfo,
             isCustom = true
         )
     }
