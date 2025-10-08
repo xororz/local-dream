@@ -19,6 +19,8 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import io.github.xororz.localdream.data.ModelRepository
 import io.github.xororz.localdream.BuildConfig
+import java.nio.file.Files
+import java.nio.file.Paths
 
 class BackendService : Service() {
     private var process: Process? = null
@@ -115,10 +117,21 @@ class BackendService : Service() {
     }
 
     private fun createNotification(contentText: String): Notification {
+        val openAppIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            openAppIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(this.getString(R.string.backend_notify_title))
             .setContentText(contentText)
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
+            .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
     }
@@ -276,29 +289,28 @@ class BackendService : Service() {
                 "/vendor/lib64",
                 "/vendor/lib64/egl",
             )
-            val vendorEglDir = File("/vendor/lib64/egl")
-            if (vendorEglDir.exists() && vendorEglDir.isDirectory) {
-                try {
-                    vendorEglDir.listFiles()?.forEach { subDir ->
-                        if (subDir.isDirectory && subDir.name.startsWith("mt", ignoreCase = true)) {
-                            systemLibPaths.add(subDir.absolutePath)
+            try {
+                val maliSymlink = File("/system/vendor/lib64/egl/libGLES_mali.so")
+                if (maliSymlink.exists()) {
+                    val realPath = maliSymlink.canonicalPath
+                    val soc = realPath.split("/").getOrNull(realPath.split("/").size - 2)
+
+                    if (soc != null) {
+                        val socPaths = listOf(
+                            "/vendor/lib64/$soc",
+                            "/vendor/lib64/egl/$soc"
+                        )
+
+                        socPaths.forEach { path ->
+                            if (!systemLibPaths.contains(path)) {
+                                systemLibPaths.add(path)
+                                Log.d("LibPath", "Added SoC path: $path")
+                            }
                         }
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
                 }
-            }
-            val vendorLib64 = File("/vendor/lib64")
-            if (vendorLib64.exists() && vendorLib64.isDirectory) {
-                try {
-                    vendorLib64.listFiles()?.forEach { subDir ->
-                        if (subDir.isDirectory && subDir.name.startsWith("mt", ignoreCase = true)) {
-                            systemLibPaths.add(subDir.absolutePath)
-                        }
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
+            } catch (e: Exception) {
+                Log.w("LibPath", "Failed to resolve Mali paths: ${e.message}")
             }
             val systemLibPathsStr = systemLibPaths.joinToString(":")
             env["LD_LIBRARY_PATH"] = systemLibPathsStr

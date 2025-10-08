@@ -316,12 +316,23 @@ class BackgroundGenerationService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
+        val openAppIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            openAppIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(this.getString(R.string.generating_notify))
             .setContentText("Progress: ${(progress * 100).toInt()}%")
             .setProgress(100, (progress * 100).toInt(), false)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
+            .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
     }
