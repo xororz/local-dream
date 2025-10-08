@@ -11,6 +11,7 @@
 
 #include "Config.hpp"
 #include "DPMSolverMultistepScheduler.hpp"
+#include "LaplacianBlend.hpp"
 #include "QnnModel.hpp"
 #include "SDUtils.hpp"
 #include "SafeTensor2MNN.hpp"
@@ -1406,9 +1407,15 @@ GenerationResult generateImage(
               << "ms\n";
 
     // --- Post-process Image ---
-    if (request_has_mask)
-      pixels =
-          xt::eval(original_image * (1.0f - mask_full) + pixels * mask_full);
+    if (request_has_mask) {
+      auto orig_img_view = xt::view(original_image, 0);  // (3, H, W)
+      auto gen_img_view = xt::view(pixels, 0);           // (3, H, W)
+      auto mask_view = xt::view(mask_full, 0);           // (1, H, W)
+
+      auto blended =
+          laplacianPyramidBlend(orig_img_view, gen_img_view, mask_view);
+      pixels = xt::reshape_view(blended, {1, 3, output_size, output_size});
+    }
     auto img = xt::view(pixels, 0);
     auto transp = xt::transpose(img, {1, 2, 0});
     auto norm = xt::clip(((transp + 1.0) / 2.0) * 255.0, 0.0, 255.0);
@@ -1602,8 +1609,6 @@ int main(int argc, char **argv) {
                 xt::xtuple(xmlat_f, xmlat_f, xmlat_f, xmlat_f), 1);
             mask_data.assign(xmlat_f_4.begin(), xmlat_f_4.end());
 
-            gaussianBlur(mask_pix_full_rgb, output_size, output_size,
-                         sample_size / 8);
             std::vector<int> mfull_shape = {output_size, output_size, 3};
             xt::xarray<uint8_t> xmfull_u8 =
                 xt::adapt(mask_pix_full_rgb, mfull_shape);
