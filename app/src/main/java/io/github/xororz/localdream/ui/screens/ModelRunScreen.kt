@@ -96,6 +96,8 @@ import android.net.Uri
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import android.graphics.BitmapFactory
+import android.graphics.Rect as AndroidRect
+import android.graphics.Canvas
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -394,6 +396,11 @@ fun ModelRunScreen(
     var maskBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isInpaintMode by remember { mutableStateOf(false) }
     var savedPathHistory by remember { mutableStateOf<List<PathData>?>(null) }
+    var cropRect by remember { mutableStateOf<AndroidRect?>(null) }
+
+    var snapshotIsInpaintMode by remember { mutableStateOf(false) }
+    var snapshotSelectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var snapshotCropRect by remember { mutableStateOf<AndroidRect?>(null) }
 
     var saveAllJob: Job? by remember { mutableStateOf(null) }
 
@@ -420,11 +427,12 @@ fun ModelRunScreen(
         showCropScreen = true
     }
 
-    fun handleCropComplete(base64String: String, bitmap: Bitmap) {
+    fun handleCropComplete(base64String: String, bitmap: Bitmap, rect: AndroidRect) {
         showCropScreen = false
         selectedImageUri = imageUriForCrop
         imageUriForCrop = null
         croppedBitmap = bitmap
+        cropRect = rect
 
         scope.launch(Dispatchers.IO) {
             try {
@@ -437,6 +445,7 @@ fun ModelRunScreen(
                     Toast.makeText(context, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
                     selectedImageUri = null
                     croppedBitmap = null
+                    cropRect = null
                 }
             }
         }
@@ -553,36 +562,72 @@ fun ModelRunScreen(
         }
 
         coroutineScope.launch {
-            saveImage(
-                context = context,
-                bitmap = bitmap,
-                onSuccess = onSuccess,
-                onError = onError
-            )
-        }
-    }
+            if (snapshotIsInpaintMode && snapshotCropRect != null && snapshotSelectedImageUri != null) {
+                withContext(Dispatchers.IO) {
+                    var originalBitmap: Bitmap? = null
+                    var mutableOriginal: Bitmap? = null
+                    var resizedPatch: Bitmap? = null
+                    try {
+                        originalBitmap =
+                            context.contentResolver.openInputStream(snapshotSelectedImageUri!!)!!
+                                .use {
+                                    BitmapFactory.decodeStream(it)
+                                }
 
-    class BitmapState(var bitmap: Bitmap? = null) {
-        fun clear() {
-            try {
-                if (bitmap?.isRecycled == false) {
-                    bitmap?.recycle()
+                        mutableOriginal = originalBitmap.copy(Bitmap.Config.ARGB_8888, true)
+                        originalBitmap.recycle()
+
+                        val patch = bitmap
+                        resizedPatch = Bitmap.createScaledBitmap(
+                            patch,
+                            snapshotCropRect!!.width(),
+                            snapshotCropRect!!.height(),
+                            true
+                        )
+
+                        val canvas = Canvas(mutableOriginal)
+                        canvas.drawBitmap(
+                            resizedPatch,
+                            snapshotCropRect!!.left.toFloat(),
+                            snapshotCropRect!!.top.toFloat(),
+                            null
+                        )
+
+                        resizedPatch.recycle()
+
+                        saveImage(
+                            context = context,
+                            bitmap = mutableOriginal,
+                            onSuccess = onSuccess,
+                            onError = onError
+                        )
+
+                        mutableOriginal.recycle()
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            onError("Failed to create composite image: ${e.localizedMessage}")
+                        }
+                        originalBitmap?.recycle()
+                        resizedPatch?.recycle()
+                        mutableOriginal?.recycle()
+                    }
                 }
-                bitmap = null
-            } catch (e: Exception) {
-                android.util.Log.e("BitmapState", "clear Bitmap error", e)
+            } else {
+                saveImage(
+                    context = context,
+                    bitmap = bitmap,
+                    onSuccess = onSuccess,
+                    onError = onError
+                )
             }
         }
     }
-
-    val bitmapState = remember { BitmapState() }
 
     fun cleanup() {
         try {
             currentBitmap?.recycle()
             currentBitmap = null
             generationParams = null
-            bitmapState.clear()
             context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
             val backendServiceIntent = Intent(context, BackendService::class.java)
             context.stopService(backendServiceIntent)
@@ -646,10 +691,6 @@ fun ModelRunScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_CREATE -> {
-                    bitmapState.clear()
-                }
-
                 Lifecycle.Event.ON_START -> {
                     if (backendState !is BackendService.BackendState.Running) {
                         val intent = Intent(context, BackendService::class.java).apply {
@@ -693,6 +734,10 @@ fun ModelRunScreen(
                     currentBitmap?.recycle()
                     currentBitmap = state.bitmap
                     imageVersion += 1
+
+                    snapshotIsInpaintMode = isInpaintMode
+                    snapshotSelectedImageUri = selectedImageUri
+                    snapshotCropRect = cropRect
 
                     state.seed?.let { returnedSeed = it }
                     isRunning = false
@@ -864,9 +909,7 @@ fun ModelRunScreen(
             }
         )
     }
-    fun canDisplayBitmap(): Boolean {
-        return bitmapState.bitmap != null && !bitmapState.bitmap!!.isRecycled
-    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1509,9 +1552,13 @@ fun ModelRunScreen(
                                                     IconButton(
                                                         onClick = {
                                                             selectedImageUri = null
+                                                            croppedBitmap?.recycle()
                                                             croppedBitmap = null
+                                                            maskBitmap?.recycle()
                                                             maskBitmap = null
                                                             isInpaintMode = false
+                                                            cropRect = null
+                                                            savedPathHistory = null
                                                         },
                                                         modifier = Modifier
                                                             .size(24.dp)
@@ -1589,6 +1636,7 @@ fun ModelRunScreen(
                                                             }
                                                             IconButton(
                                                                 onClick = {
+                                                                    maskBitmap?.recycle()
                                                                     maskBitmap = null
                                                                     isInpaintMode = false
                                                                     savedPathHistory = null
@@ -1995,8 +2043,8 @@ fun ModelRunScreen(
         if (showCropScreen && imageUriForCrop != null) {
             CropImageScreen(
                 imageUri = imageUriForCrop!!,
-                onCropComplete = { base64String, bitmap ->
-                    handleCropComplete(base64String, bitmap)
+                onCropComplete = { base64String, bitmap, rect ->
+                    handleCropComplete(base64String, bitmap, rect)
                 },
                 onCancel = {
                     showCropScreen = false

@@ -1,36 +1,57 @@
 package io.github.xororz.localdream.ui.screens
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Rect as AndroidRect
 import android.net.Uri
-import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.layout.*
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import io.moyuru.cropify.*
+import io.github.xororz.localdream.R
+import io.moyuru.cropify.Cropify
+import io.moyuru.cropify.CropifyOption
+import io.moyuru.cropify.CropifySize
+import io.moyuru.cropify.rememberCropifyState
+import java.io.ByteArrayOutputStream
+import java.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
-import java.util.Base64
-import android.graphics.Bitmap
-import androidx.activity.compose.BackHandler
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.res.stringResource
-import io.github.xororz.localdream.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CropImageScreen(
     imageUri: Uri,
-    onCropComplete: (String, Bitmap) -> Unit,
+    onCropComplete: (String, Bitmap, AndroidRect) -> Unit,
     onCancel: () -> Unit
 ) {
     val context = LocalContext.current
@@ -45,13 +66,45 @@ fun CropImageScreen(
             isLoading = true
             try {
                 val androidBitmap = bitmap.asAndroidBitmap()
+
+                // Reflection to get frameRect and imageRect
+                val frameRectField =
+                    cropifyState::class.java.getDeclaredField("frameRect\$delegate")
+                frameRectField.isAccessible = true
+                val frameRectState =
+                    frameRectField.get(cropifyState) as State<androidx.compose.ui.geometry.Rect>
+                val frameRect = frameRectState.value
+
+                val imageRectField =
+                    cropifyState::class.java.getDeclaredField("imageRect\$delegate")
+                imageRectField.isAccessible = true
+                val imageRectState =
+                    imageRectField.get(cropifyState) as State<androidx.compose.ui.geometry.Rect>
+                val imageRect = imageRectState.value
+
+                // Get original image dimensions
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                context.contentResolver.openInputStream(imageUri)!!.use {
+                    BitmapFactory.decodeStream(it, null, options)
+                }
+                val originalWidth = options.outWidth
+
+                // Calculate crop rect in original image coordinates
+                val scale = originalWidth.toFloat() / imageRect.width
+                val cropX = ((frameRect.left - imageRect.left) * scale).toInt()
+                val cropY = ((frameRect.top - imageRect.top) * scale).toInt()
+                val cropWidth = (frameRect.width * scale).toInt()
+                val cropHeight = (frameRect.height * scale).toInt()
+
+                val cropRect = AndroidRect(cropX, cropY, cropX + cropWidth, cropY + cropHeight)
+
                 val base64String = withContext(Dispatchers.IO) {
                     val byteArrayOutputStream = ByteArrayOutputStream()
                     androidBitmap.compress(Bitmap.CompressFormat.PNG, 90, byteArrayOutputStream)
                     val byteArray = byteArrayOutputStream.toByteArray()
                     Base64.getEncoder().encodeToString(byteArray)
                 }
-                onCropComplete(base64String, androidBitmap)
+                onCropComplete(base64String, androidBitmap, cropRect)
             } catch (e: Exception) {
                 errorMessage = "Error: ${e.message}"
             } finally {
