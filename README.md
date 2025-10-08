@@ -134,7 +134,7 @@ Open this project in Android Studio and navigate to:
 
 ## NPU High Resolution Support
 
-After downloading a 512 resolution model, you can download patches to enable 768×768 and 1024×1024 image generation. Please note that quantized high-resolution models may produce images with poor layout. We recommend first generating at 512 resolution, then using the high-resolution model for img2img (which is essentially Highres.fix). The suggested img2img denoise_strength is around 0.75.
+After downloading a 512 resolution model, you can download patches to enable 768×768 and 1024×1024 image generation. Please note that quantized high-resolution models may produce images with poor layout. We recommend first generating at 512 resolution, then using the high-resolution model for img2img (which is essentially Highres.fix). The suggested img2img denoise_strength is around 0.8.
 
 ## Device Compatibility
 
