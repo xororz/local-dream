@@ -348,71 +348,32 @@ void generateClipModel(const std::string& dir,
                        const std::vector<std::string>& loras = {},
                        const std::vector<float>& lora_weights = {}) {
   if (clip_skip_2) {
-    generateModel(dir, safetensor_file, "clip", clip_skip_2_structure, loras,
+    generateModel(dir, safetensor_file, "clip_v2", clip_skip_2_structure, loras,
                   lora_weights);
   } else {
-    generateModel(dir, safetensor_file, "clip", clip_structure, loras,
+    generateModel(dir, safetensor_file, "clip_v2", clip_structure, loras,
                   lora_weights);
   }
-
-  int header_size = 246656;
-  int middle_size = 2256;
-  if (clip_skip_2) {
-    header_size = 167888;
-    middle_size = 888;
-  }
-
-  auto filename = dir + "/clip.mnn.slimmed";
-  if (clip_skip_2) {
-    filename = dir + "/clip_skip_2.mnn.slimmed";
-  }
-
-  std::ifstream slimmed_file(filename, std::ios::binary);
-  slimmed_file.seekg(0, std::ios::end);
-  int slimmed_size = slimmed_file.tellg();
-  slimmed_file.seekg(0, std::ios::beg);
-  std::vector<uint8_t> slimmed_data(slimmed_size);
-  slimmed_file.read(reinterpret_cast<char*>(slimmed_data.data()), slimmed_size);
-  slimmed_file.close();
 
   SafeTensorReader reader(dir + "/" + safetensor_file);
 
   reader.read(
       "cond_stage_model.transformer.text_model.embeddings.position_embedding."
       "weight",
-      false);
-  std::vector<uint8_t> pos_emb_bytes(reader.fp16_data.size() *
-                                     sizeof(uint16_t));
-  std::memcpy(pos_emb_bytes.data(), reader.fp16_data.data(),
-              pos_emb_bytes.size());
+      true);
+  std::ofstream pos_emb_file(dir + "/pos_emb.bin", std::ios::binary);
+  pos_emb_file.write(reinterpret_cast<const char*>(reader.data.data()),
+                     reader.data.size() * sizeof(float));
+  pos_emb_file.close();
 
   reader.read(
       "cond_stage_model.transformer.text_model.embeddings.token_embedding."
       "weight",
-      false);
-  std::vector<uint8_t> token_emb_bytes(reader.fp16_data.size() *
-                                       sizeof(uint16_t));
-  std::memcpy(token_emb_bytes.data(), reader.fp16_data.data(),
-              token_emb_bytes.size());
-
-  std::vector<uint8_t> header(slimmed_data.begin(),
-                              slimmed_data.begin() + header_size);
-  std::vector<uint8_t> middle(slimmed_data.begin() + header_size,
-                              slimmed_data.begin() + header_size + middle_size);
-  std::vector<uint8_t> tail(slimmed_data.begin() + header_size + middle_size,
-                            slimmed_data.end());
-
-  std::ofstream output_file(dir + "/clip.mnn", std::ios::binary);
-  output_file.write(reinterpret_cast<const char*>(header.data()),
-                    header.size());
-  output_file.write(reinterpret_cast<const char*>(pos_emb_bytes.data()),
-                    pos_emb_bytes.size());
-  output_file.write(reinterpret_cast<const char*>(middle.data()),
-                    middle.size());
-  output_file.write(reinterpret_cast<const char*>(token_emb_bytes.data()),
-                    token_emb_bytes.size());
-  output_file.write(reinterpret_cast<const char*>(tail.data()), tail.size());
-  output_file.close();
+      true);
+  std::ofstream token_emb_file(dir + "/token_emb.bin", std::ios::binary);
+  token_emb_file.write(reinterpret_cast<const char*>(reader.data.data()),
+                       reader.data.size() * sizeof(float));
+  token_emb_file.close();
 }
 
 void generateMNNModels(const std::string& dir,

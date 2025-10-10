@@ -12,6 +12,7 @@
 #include "Config.hpp"
 #include "DPMSolverMultistepScheduler.hpp"
 #include "LaplacianBlend.hpp"
+#include "PromptProcessor.hpp"
 #include "QnnModel.hpp"
 #include "SDUtils.hpp"
 #include "SafeTensor2MNN.hpp"
@@ -55,11 +56,15 @@ bool ponyv55 = false;
 bool use_mnn = false;
 bool use_safety_checker = false;
 bool use_mnn_clip = false;
+bool use_clip_v2 = false;
 float nsfw_threshold = 0.5f;
 std::string clipPath, unetPath, vaeDecoderPath, vaeEncoderPath,
     safetyCheckerPath, tokenizerPath, patchPath, modelDir;
+std::vector<float> pos_emb;
+std::vector<float> token_emb;
 int resolution = 512;
 std::shared_ptr<tokenizers::Tokenizer> tokenizer;
+PromptProcessor promptProcessor;
 std::unique_ptr<QnnModel> clipApp = nullptr;
 std::unique_ptr<QnnModel> unetApp = nullptr;
 std::unique_ptr<QnnModel> vaeDecoderApp = nullptr;
@@ -353,6 +358,50 @@ void processCommandLine(int argc, char **argv) {
       case OPT_CLIP:
         clipPath = pal::g_optArg;
         modelDir = std::filesystem::path(clipPath).parent_path().string();
+
+        if (clipPath.length() >= 8 &&
+            clipPath.substr(clipPath.length() - 8) == "clip.mnn") {
+          std::filesystem::path clipPathObj(clipPath);
+          std::filesystem::path parentDir = clipPathObj.parent_path();
+          std::filesystem::path v2Path = parentDir / "clip_v2.mnn";
+
+          if (std::filesystem::exists(v2Path)) {
+            QNN_INFO("Found clip_v2.mnn, upgrading from %s to %s",
+                     clipPath.c_str(), v2Path.string().c_str());
+            clipPath = v2Path.string();
+            use_clip_v2 = true;
+
+            // pos_emb.bin token_emb.bin
+            std::filesystem::path posEmbPath = parentDir / "pos_emb.bin";
+            std::filesystem::path tokenEmbPath = parentDir / "token_emb.bin";
+
+            if (!std::filesystem::exists(posEmbPath))
+              showHelpAndExit("pos_emb.bin not found: " + posEmbPath.string());
+            if (!std::filesystem::exists(tokenEmbPath))
+              showHelpAndExit("token_emb.bin not found: " +
+                              tokenEmbPath.string());
+
+            std::ifstream posFile(posEmbPath, std::ios::binary);
+            posFile.seekg(0, std::ios::end);
+            size_t posSize = posFile.tellg() / sizeof(float);
+            posFile.seekg(0, std::ios::beg);
+            pos_emb.resize(posSize);
+            posFile.read(reinterpret_cast<char *>(pos_emb.data()),
+                         posSize * sizeof(float));
+            posFile.close();
+            QNN_INFO("Loaded pos_emb.bin: %zu floats", posSize);
+
+            std::ifstream tokenFile(tokenEmbPath, std::ios::binary);
+            tokenFile.seekg(0, std::ios::end);
+            size_t tokenSize = tokenFile.tellg() / sizeof(float);
+            tokenFile.seekg(0, std::ios::beg);
+            token_emb.resize(tokenSize);
+            tokenFile.read(reinterpret_cast<char *>(token_emb.data()),
+                           tokenSize * sizeof(float));
+            tokenFile.close();
+            QNN_INFO("Loaded token_emb.bin: %zu floats", tokenSize);
+          }
+        }
         break;
       case OPT_UNET:
         unetPath = pal::g_optArg;
@@ -549,28 +598,118 @@ void processCommandLine(int argc, char **argv) {
 }  // namespace qnn
 
 // --- Text Processing ---
-std::vector<int> EncodeText(const std::string &text, int bos, int pad,
-                            int max_length) {
-  int sd21_pad = 0;
-  std::vector<int> ids = tokenizer->Encode(text);
-  ids.insert(ids.begin(), bos);
-  if (ids.size() > max_length - 1) ids.resize(max_length - 1);
-  int pad_len = max_length - ids.size();
-  ids.push_back(pad);
-  for (int i = 0; i < pad_len - 1; i++)
-    ids.push_back((text_embedding_size == 1024) ? sd21_pad : pad);
-  return ids;
+struct ProcessedPrompt {
+  std::vector<int> ids;                    // CLIP
+  std::vector<float> weighted_embeddings;  // CLIP V2 (77*768)
+};
+
+ProcessedPrompt processWeightedPrompt(const std::string &prompt_text,
+                                      int max_len = 77) {
+  ProcessedPrompt result;
+
+  auto tokens = promptProcessor.process(prompt_text);
+
+  // embedding (77 x 768)
+  std::vector<float> embeddings(max_len * 768, 0.0f);
+  std::vector<int> ids;
+  std::vector<float> weights;
+
+  int current_pos = 1;
+  ids.push_back(49406);  // BOS token
+
+  for (const auto &token : tokens) {
+    if (current_pos >= max_len - 1) break;
+
+    if (token.is_embedding) {
+      int emb_size = token.embedding_data.size();
+      int emb_tokens = emb_size / 768;
+
+      int pad_id = (text_embedding_size == 1024) ? 0 : 49407;
+      for (int i = 0; i < emb_tokens && current_pos < max_len - 1; i++) {
+        ids.push_back(pad_id);
+        for (int j = 0; j < 768; j++) {
+          embeddings[current_pos * 768 + j] =
+              token.embedding_data[i * 768 + j] * token.weight;
+        }
+        current_pos++;
+      }
+    } else {
+      // tokenize
+      std::vector<int> token_ids = tokenizer->Encode(token.text);
+
+      for (int tid : token_ids) {
+        if (current_pos >= max_len - 1) break;
+        ids.push_back(tid);
+
+        if (current_pos < max_len) {
+          weights.push_back(token.weight);
+        }
+        current_pos++;
+      }
+    }
+  }
+
+  while (ids.size() < max_len) {
+    ids.push_back(49407);  // PAD/EOS token
+    weights.push_back(1.0f);
+  }
+
+  if (ids.size() > max_len) {
+    ids.resize(max_len);
+  }
+
+  result.ids = ids;
+
+  if (use_clip_v2 && !token_emb.empty() && !pos_emb.empty()) {
+    for (int i = 0; i < max_len; i++) {
+      int token_id = ids[i];
+      float weight = (i < weights.size()) ? weights[i] : 1.0f;
+
+      bool has_emb = false;
+      for (int j = 0; j < 768; j++) {
+        if (embeddings[i * 768 + j] != 0.0f) {
+          has_emb = true;
+          break;
+        }
+      }
+
+      if (!has_emb) {
+        for (int j = 0; j < 768; j++) {
+          embeddings[i * 768 + j] =
+              (token_emb[token_id * 768 + j] + pos_emb[i * 768 + j]) * weight;
+        }
+      }
+    }
+  }
+
+  result.weighted_embeddings = embeddings;
+  return result;
 }
 
-std::vector<int> processPrompt(const std::string &prompt_in,
-                               const std::string &neg = "", int max_len = 77) {
-  std::vector<int> p_ids = EncodeText(prompt_in, 49406, 49407, max_len);
-  std::vector<int> n_ids = EncodeText(neg, 49406, 49407, max_len);
-  std::vector<int> ids;
-  ids.reserve(2 * max_len);
-  ids.insert(ids.end(), n_ids.begin(), n_ids.end());
-  ids.insert(ids.end(), p_ids.begin(), p_ids.end());
-  return ids;
+struct ProcessedPromptPair {
+  std::vector<int> ids;                    // old (2*77)
+  std::vector<float> negative_embeddings;  // new embedding (77*768)
+  std::vector<float> positive_embeddings;  // new embedding (77*768)
+};
+
+ProcessedPromptPair processPromptPair(const std::string &positive,
+                                      const std::string &negative,
+                                      int max_len = 77) {
+  ProcessedPromptPair result;
+
+  auto pos_result = processWeightedPrompt(positive, max_len);
+  auto neg_result = processWeightedPrompt(negative, max_len);
+
+  result.ids.reserve(2 * max_len);
+  result.ids.insert(result.ids.end(), neg_result.ids.begin(),
+                    neg_result.ids.end());
+  result.ids.insert(result.ids.end(), pos_result.ids.begin(),
+                    pos_result.ids.end());
+
+  result.negative_embeddings = neg_result.weighted_embeddings;
+  result.positive_embeddings = pos_result.weighted_embeddings;
+
+  return result;
 }
 xt::xarray<float> blend_vae_encoder_tiles(
     const std::vector<std::pair<xt::xarray<float>, xt::xarray<float>>>
@@ -721,8 +860,12 @@ GenerationResult generateImage(
     const int batch_size = 2;
 
     // --- CLIP ---
-    std::vector<int> clip_input_ids =
-        processPrompt(prompt, negative_prompt, 77);
+    ProcessedPromptPair processed =
+        processPromptPair(prompt, negative_prompt, 77);
+
+    std::vector<int> clip_input_ids = processed.ids;  // old (2*77)
+    auto parsed_input_text = tokenizer->Decode(clip_input_ids);
+    QNN_INFO("Parsed Input Text: %s", parsed_input_text.c_str());
     std::vector<float> text_embedding_float(batch_size * 77 *
                                             text_embedding_size);
     auto clip_start = std::chrono::high_resolution_clock::now();
@@ -765,30 +908,60 @@ GenerationResult generateImage(
         sessionCreated = true;
       }
 
-      auto input = currentClipInterpreter->getSessionInput(currentClipSession,
-                                                           "input_ids");
-      currentClipInterpreter->resizeTensor(input, {1, 77});
-      currentClipInterpreter->resizeSession(currentClipSession);
+      if (use_clip_v2) {
+        auto input = currentClipInterpreter->getSessionInput(currentClipSession,
+                                                             "input_embedding");
+        currentClipInterpreter->resizeTensor(input, {1, 77, 768});
+        currentClipInterpreter->resizeSession(currentClipSession);
 
-      if (dynamicCreated) currentClipInterpreter->releaseModel();
+        if (dynamicCreated) currentClipInterpreter->releaseModel();
 
-      memcpy(input->host<int>(), input_ids_ptr, 77 * sizeof(int32_t));
-      currentClipInterpreter->runSession(currentClipSession);
-      auto out = currentClipInterpreter->getSessionOutput(currentClipSession,
-                                                          "last_hidden_state");
-      memcpy(embed_ptr, out->host<float>(),
-             77 * text_embedding_size * sizeof(float));
+        memcpy(input->host<float>(), processed.negative_embeddings.data(),
+               77 * 768 * sizeof(float));
+        currentClipInterpreter->runSession(currentClipSession);
+        auto out = currentClipInterpreter->getSessionOutput(
+            currentClipSession, "last_hidden_state");
+        memcpy(embed_ptr, out->host<float>(),
+               77 * text_embedding_size * sizeof(float));
 
-      memcpy(input->host<int>(), input_ids_ptr + 77, 77 * sizeof(int32_t));
-      currentClipInterpreter->runSession(currentClipSession);
-      out = currentClipInterpreter->getSessionOutput(currentClipSession,
-                                                     "last_hidden_state");
-      memcpy(embed_ptr + 77 * text_embedding_size, out->host<float>(),
-             77 * text_embedding_size * sizeof(float));
+        memcpy(input->host<float>(), processed.positive_embeddings.data(),
+               77 * 768 * sizeof(float));
+        currentClipInterpreter->runSession(currentClipSession);
+        out = currentClipInterpreter->getSessionOutput(currentClipSession,
+                                                       "last_hidden_state");
+        memcpy(embed_ptr + 77 * text_embedding_size, out->host<float>(),
+               77 * text_embedding_size * sizeof(float));
 
-      if (sessionCreated)
-        currentClipInterpreter->releaseSession(currentClipSession);
-      if (dynamicCreated) delete currentClipInterpreter;
+        if (sessionCreated)
+          currentClipInterpreter->releaseSession(currentClipSession);
+        if (dynamicCreated) delete currentClipInterpreter;
+
+      } else {
+        auto input = currentClipInterpreter->getSessionInput(currentClipSession,
+                                                             "input_ids");
+        currentClipInterpreter->resizeTensor(input, {1, 77});
+        currentClipInterpreter->resizeSession(currentClipSession);
+
+        if (dynamicCreated) currentClipInterpreter->releaseModel();
+
+        memcpy(input->host<int>(), input_ids_ptr, 77 * sizeof(int32_t));
+        currentClipInterpreter->runSession(currentClipSession);
+        auto out = currentClipInterpreter->getSessionOutput(
+            currentClipSession, "last_hidden_state");
+        memcpy(embed_ptr, out->host<float>(),
+               77 * text_embedding_size * sizeof(float));
+
+        memcpy(input->host<int>(), input_ids_ptr + 77, 77 * sizeof(int32_t));
+        currentClipInterpreter->runSession(currentClipSession);
+        out = currentClipInterpreter->getSessionOutput(currentClipSession,
+                                                       "last_hidden_state");
+        memcpy(embed_ptr + 77 * text_embedding_size, out->host<float>(),
+               77 * text_embedding_size * sizeof(float));
+
+        if (sessionCreated)
+          currentClipInterpreter->releaseSession(currentClipSession);
+        if (dynamicCreated) delete currentClipInterpreter;
+      }
     } else {
       if (!clipApp) throw std::runtime_error("Global clipApp not initialized!");
       if (StatusCode::SUCCESS !=
@@ -1482,6 +1655,26 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
+  // Load embeddings
+  if (!modelDir.empty()) {
+    std::filesystem::path modelPath(modelDir);
+    std::filesystem::path embeddingsPath =
+        modelPath.parent_path().parent_path() / "embeddings";
+    if (std::filesystem::exists(embeddingsPath)) {
+      try {
+        promptProcessor.loadEmbeddings(embeddingsPath.string());
+        QNN_INFO("Loaded %zu embeddings from %s",
+                 promptProcessor.getEmbeddingCount(),
+                 embeddingsPath.string().c_str());
+      } catch (const std::exception &e) {
+        QNN_WARN("Failed to load embeddings: %s", e.what());
+      }
+    } else {
+      QNN_INFO("Embeddings directory not found: %s",
+               embeddingsPath.string().c_str());
+    }
+  }
+
   MNN::ScheduleConfig cfg_common;
   cfg_common.type = MNN_FORWARD_CPU;
   cfg_common.numThread = 1;
@@ -1498,8 +1691,14 @@ int main(int argc, char **argv) {
       QNN_ERROR("Failed create persistent MNN CLIP session (hybrid)!");
     else {
       QNN_INFO("Persistent MNN CLIP session (hybrid) created.");
-      auto input = clipInterpreter->getSessionInput(clipSession, "input_ids");
-      clipInterpreter->resizeTensor(input, {1, 77});
+      if (use_clip_v2) {
+        auto input =
+            clipInterpreter->getSessionInput(clipSession, "input_embedding");
+        clipInterpreter->resizeTensor(input, {1, 77, 768});
+      } else {
+        auto input = clipInterpreter->getSessionInput(clipSession, "input_ids");
+        clipInterpreter->resizeTensor(input, {1, 77});
+      }
       clipInterpreter->resizeSession(clipSession);
       clipInterpreter->releaseModel();
     }

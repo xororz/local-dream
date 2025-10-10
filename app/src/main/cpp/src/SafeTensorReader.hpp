@@ -1,3 +1,6 @@
+#ifndef SAFE_TENSOR_READER_HPP
+#define SAFE_TENSOR_READER_HPP
+
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -206,3 +209,5 @@ class SafeTensorReader {
 
   int get_tensor_count() const { return tensor_map_.size(); }
 };
+
+#endif  // SAFE_TENSOR_READER_HPP

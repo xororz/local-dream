@@ -176,4 +176,18 @@
     <string name="selected_lora_files">已选择的 LoRA 文件:</string>
     <string name="copying_lora_files">拷贝 LoRA 文件中...</string>
     <string name="lora_weight">权重:</string>
+
+    <!-- Embedding Manager -->
+    <string name="embedding_management">Embedding 管理</string>
+    <string name="embedding_manager">Embedding 管理器</string>
+    <string name="no_embeddings">没有找到 embedding 文件</string>
+    <string name="import_embedding">导入 Embedding</string>
+    <string name="delete_embedding">删除 Embedding</string>
+    <string name="delete_embedding_confirm">确定要删除 embedding \"%s\" 吗？</string>
+    <string name="embedding_deleted">Embedding 删除成功</string>
+    <string name="embedding_imported">Embedding 导入成功</string>
+    <string name="embedding_import_failed">Embedding 导入失败: %s</string>
+    <string name="select_embedding_file">选择 Embedding 文件</string>
+    <string name="embedding_file_hint">选择一个 safetensors 格式的 embedding 文件</string>
+    <string name="only_safetensors_supported">仅支持 .safetensors 文件</string>
 </resources>

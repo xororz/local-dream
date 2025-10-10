@@ -135,6 +135,7 @@ fun ModelListScreen(
 
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showFileManagerDialog by remember { mutableStateOf(false) }
+    var showEmbeddingManagerDialog by remember { mutableStateOf(false) }
     var showCustomModelDialog by remember { mutableStateOf(false) }
     var showCustomNpuModelDialog by remember { mutableStateOf(false) }
     var isConverting by remember { mutableStateOf(false) }
@@ -191,9 +192,14 @@ fun ModelListScreen(
         stringResource(R.string.npu_models)
     )
 
-    BackHandler(enabled = isSelectionMode) {
-        isSelectionMode = false
-        selectedModels = emptySet()
+    BackHandler(enabled = isSelectionMode || showSettingsDialog) {
+        when {
+            showSettingsDialog -> showSettingsDialog = false
+            isSelectionMode -> {
+                isSelectionMode = false
+                selectedModels = emptySet()
+            }
+        }
     }
     LaunchedEffect(downloadError) {
         downloadError?.let {
@@ -208,7 +214,8 @@ fun ModelListScreen(
     }
     if (showHelpDialog) {
         AlertDialog(
-            onDismissRequest = { showHelpDialog = false },
+//            onDismissRequest = { showHelpDialog = false },
+            onDismissRequest = { },
             title = {
                 Text(
                     text = stringResource(R.string.about_app),
@@ -275,171 +282,6 @@ fun ModelListScreen(
         )
     }
 
-    if (showSettingsDialog) {
-        AlertDialog(
-            onDismissRequest = { showSettingsDialog = false },
-            title = { Text(stringResource(R.string.settings)) },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(24.dp)
-                ) {
-                    // Download source settings section
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CloudDownload,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                stringResource(R.string.download_source),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                        Text(
-                            stringResource(R.string.download_settings_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-                        OutlinedTextField(
-                            value = tempBaseUrl,
-                            onValueChange = { tempBaseUrl = it },
-                            label = { Text(stringResource(R.string.download_from)) },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("https://your-mirror-site.com/") },
-                            singleLine = true
-                        )
-                    }
-
-                    // Feature settings section
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Tune,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                stringResource(R.string.feature_settings),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = "img2img",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    stringResource(R.string.img2img_hint),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                )
-                            }
-                            val preferences = LocalContext.current.getSharedPreferences(
-                                "app_prefs",
-                                Context.MODE_PRIVATE
-                            )
-                            var useImg2img by remember {
-                                mutableStateOf(preferences.getBoolean("use_img2img", true).also {
-                                    if (!preferences.contains("use_img2img")) {
-                                        preferences.edit { putBoolean("use_img2img", true) }
-                                    }
-                                })
-                            }
-                            Switch(
-                                checked = useImg2img,
-                                onCheckedChange = {
-                                    useImg2img = it
-                                    preferences.edit {
-                                        putBoolean("use_img2img", it)
-                                    }
-                                }
-                            )
-                        }
-                    }
-
-                    // File management section
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Folder,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                stringResource(R.string.file_management),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                showSettingsDialog = false
-                                showFileManagerDialog = true
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FolderOpen,
-                                contentDescription = null,
-                                modifier = Modifier.padding(end = 8.dp)
-                            )
-                            Text(stringResource(R.string.file_manager))
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            if (tempBaseUrl.isNotEmpty()) {
-                                generationPreferences.saveBaseUrl(tempBaseUrl)
-                                modelRepository.updateBaseUrl(tempBaseUrl)
-                                version += 1
-                                showSettingsDialog = false
-                            }
-                        }
-                    }
-                ) {
-                    Text(stringResource(R.string.confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSettingsDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            }
-        )
-    }
     LaunchedEffect(showSettingsDialog) {
         if (showSettingsDialog) {
             tempBaseUrl = currentBaseUrl
@@ -458,6 +300,24 @@ fun ModelListScreen(
             }
         )
     }
+
+    if (showEmbeddingManagerDialog) {
+        EmbeddingManagerDialog(
+            context = context,
+            onDismiss = { showEmbeddingManagerDialog = false },
+            onEmbeddingDeleted = {
+                scope.launch {
+                    snackbarHostState.showSnackbar(context.getString(R.string.embedding_deleted))
+                }
+            },
+            onEmbeddingImported = {
+                scope.launch {
+                    snackbarHostState.showSnackbar(context.getString(R.string.embedding_imported))
+                }
+            }
+        )
+    }
+
     if (showCustomModelDialog) {
         CustomModelDialog(
             onDismiss = { showCustomModelDialog = false },
@@ -955,6 +815,248 @@ fun ModelListScreen(
         }
     }
 
+    if (showSettingsDialog) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text(stringResource(R.string.settings)) },
+                        navigationIcon = {
+                            IconButton(onClick = { showSettingsDialog = false }) {
+                                Icon(Icons.Default.ArrowBack, stringResource(R.string.back))
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        )
+                    )
+                }
+            ) { paddingValues ->
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues)
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp),
+                    contentPadding = PaddingValues(vertical = 16.dp)
+                ) {
+                    // Download source settings section
+                    item {
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CloudDownload,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    stringResource(R.string.download_source),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Text(
+                                stringResource(R.string.download_settings_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+                            OutlinedTextField(
+                                value = tempBaseUrl,
+                                onValueChange = { tempBaseUrl = it },
+                                label = { Text(stringResource(R.string.download_from)) },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("https://your-mirror-site.com/") },
+                                singleLine = true
+                            )
+                        }
+                    }
+
+                    // Feature settings section
+                    item {
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    stringResource(R.string.feature_settings),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = "img2img",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            stringResource(R.string.img2img_hint),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                    val preferences = LocalContext.current.getSharedPreferences(
+                                        "app_prefs",
+                                        Context.MODE_PRIVATE
+                                    )
+                                    var useImg2img by remember {
+                                        mutableStateOf(
+                                            preferences.getBoolean("use_img2img", true).also {
+                                                if (!preferences.contains("use_img2img")) {
+                                                    preferences.edit {
+                                                        putBoolean(
+                                                            "use_img2img",
+                                                            true
+                                                        )
+                                                    }
+                                                }
+                                            })
+                                    }
+                                    Switch(
+                                        checked = useImg2img,
+                                        onCheckedChange = {
+                                            useImg2img = it
+                                            preferences.edit {
+                                                putBoolean("use_img2img", it)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Embedding management section
+                    item {
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Description,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    stringResource(R.string.embedding_management),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    showEmbeddingManagerDialog = true
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Description,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 8.dp)
+                                )
+                                Text(stringResource(R.string.embedding_manager))
+                            }
+                        }
+                    }
+
+                    // File management section
+                    item {
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Folder,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    stringResource(R.string.file_management),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    showFileManagerDialog = true
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FolderOpen,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 8.dp)
+                                )
+                                Text(stringResource(R.string.file_manager))
+                            }
+                        }
+                    }
+
+                    // Save button at the bottom
+                    item {
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    if (tempBaseUrl.isNotEmpty()) {
+                                        generationPreferences.saveBaseUrl(tempBaseUrl)
+                                        modelRepository.updateBaseUrl(tempBaseUrl)
+                                        version += 1
+                                    }
+                                    showSettingsDialog = false
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                        ) {
+                            Text(stringResource(R.string.save))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if (isConverting) {
         Box(
             modifier = Modifier
@@ -1231,7 +1333,7 @@ fun ModelCard(
                     }
                 }
 
-                if (!model.runOnCpu && model.isDownloaded && model.supportedHighres.isNotEmpty() && !Model.isMinimalDevice()) {
+                if (!model.runOnCpu && model.isDownloaded && model.supportedHighres.isNotEmpty() && (!Model.isMinimalDevice() || model.isCustom)) {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
@@ -2234,6 +2336,280 @@ suspend fun extractNpuModel(
     }
 }
 
+@Composable
+fun EmbeddingManagerDialog(
+    context: Context,
+    onDismiss: () -> Unit,
+    onEmbeddingDeleted: () -> Unit,
+    onEmbeddingImported: () -> Unit
+) {
+    var embeddingFiles by remember { mutableStateOf<List<File>>(emptyList()) }
+    var showDeleteConfirm by remember { mutableStateOf<File?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+
+    fun loadEmbeddings() {
+        val embeddingsDir = File(context.filesDir, "embeddings")
+        if (!embeddingsDir.exists()) {
+            embeddingsDir.mkdirs()
+        }
+        embeddingFiles = embeddingsDir.listFiles()?.filter {
+            it.isFile && it.extension == "safetensors"
+        }?.sortedBy { it.name } ?: emptyList()
+        isLoading = false
+    }
+
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val embeddingPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            scope.launch {
+                importEmbedding(context, it, {
+                    loadEmbeddings()
+                    onEmbeddingImported()
+                }) { error ->
+                    errorMessage = error
+                }
+            }
+        }
+    }
+
+    if (errorMessage != null) {
+        AlertDialog(
+            onDismissRequest = { errorMessage = null },
+            title = { Text(stringResource(R.string.embedding_import_failed, "")) },
+            text = { Text(errorMessage ?: "") },
+            confirmButton = {
+                TextButton(onClick = { errorMessage = null }) {
+                    Text(stringResource(R.string.confirm))
+                }
+            }
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        loadEmbeddings()
+    }
+
+    if (showDeleteConfirm != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = null },
+            title = { Text(stringResource(R.string.delete_embedding)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.delete_embedding_confirm,
+                        showDeleteConfirm!!.name
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val fileToDelete = showDeleteConfirm!!
+                        if (fileToDelete.delete()) {
+                            onEmbeddingDeleted()
+                            loadEmbeddings()
+                        }
+                        showDeleteConfirm = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text(stringResource(R.string.delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = stringResource(R.string.embedding_manager),
+                style = MaterialTheme.typography.headlineSmall
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(400.dp)
+            ) {
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else if (embeddingFiles.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Description,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                stringResource(R.string.no_embeddings),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(embeddingFiles) { file ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Description,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Column {
+                                            Text(
+                                                text = file.nameWithoutExtension,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Text(
+                                                text = formatFileSize(file.length()),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(
+                                                    alpha = 0.6f
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    IconButton(
+                                        onClick = { showDeleteConfirm = file },
+                                        colors = IconButtonDefaults.iconButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.error
+                                        )
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = stringResource(R.string.delete_embedding)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        embeddingPickerLauncher.launch("application/octet-stream")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.import_embedding))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close))
+            }
+        }
+    )
+}
+
+suspend fun importEmbedding(
+    context: Context,
+    fileUri: Uri,
+    onSuccess: () -> Unit,
+    onError: (String) -> Unit
+) = withContext(Dispatchers.IO) {
+    try {
+        val embeddingsDir = File(context.filesDir, "embeddings")
+        if (!embeddingsDir.exists()) {
+            embeddingsDir.mkdirs()
+        }
+
+        val fileName =
+            context.contentResolver.query(fileUri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                cursor.moveToFirst()
+                cursor.getString(nameIndex)
+            } ?: "embedding_${System.currentTimeMillis()}.safetensors"
+
+        // Validate file extension
+        if (!fileName.endsWith(".safetensors", ignoreCase = true)) {
+            withContext(Dispatchers.Main) {
+                onError(context.getString(R.string.only_safetensors_supported))
+            }
+            return@withContext
+        }
+
+        val targetFile = File(embeddingsDir, fileName)
+
+        context.contentResolver.openInputStream(fileUri)?.use { input ->
+            targetFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+
+        withContext(Dispatchers.Main) {
+            onSuccess()
+        }
+    } catch (e: Exception) {
+        withContext(Dispatchers.Main) {
+            onError(e.message ?: "Unknown error")
+        }
+    }
+}
+
 suspend fun convertCustomModel(
     context: Context,
     modelName: String,
@@ -2368,10 +2744,12 @@ suspend fun convertCustomModel(
             "--convert",
             modelDir.absolutePath
         )
+        val clipSourceFile =
+            File(modelDir, if (clipSkip == 2) "clip_skip_2.mnn" else "clip_skip_1.mnn")
+        val clipTargetFile = File(modelDir, "clip_v2.mnn")
+        clipSourceFile.copyTo(clipTargetFile, overwrite = true)
         if (clipSkip == 2) {
-            command += listOf(
-                "--clip_skip_2"
-            )
+            command += listOf("--clip_skip_2")
         }
         val env = mutableMapOf<String, String>()
         val systemLibPaths = listOf(
@@ -2408,9 +2786,13 @@ suspend fun convertCustomModel(
         val finishedFile = File(modelDir, "finished")
         if (finishedFile.exists()) {
             modelFile.delete()
-            val clipSlimmedFile = File(modelDir, "clip.mnn.slimmed")
-            if (clipSlimmedFile.exists()) {
-                clipSlimmedFile.delete()
+            val clipSkip1File = File(modelDir, "clip_skip_1.mnn")
+            if (clipSkip1File.exists()) {
+                clipSkip1File.delete()
+            }
+            val clipSkip2File = File(modelDir, "clip_skip_2.mnn")
+            if (clipSkip2File.exists()) {
+                clipSkip2File.delete()
             }
 
             loraFiles.forEachIndexed { index, _ ->

@@ -174,4 +174,18 @@
     <string name="selected_lora_files">Selected LoRA files:</string>
     <string name="copying_lora_files">Copying LoRA files...</string>
     <string name="lora_weight">Weight:</string>
+
+    <!-- Embedding Manager -->
+    <string name="embedding_management">Embedding Management</string>
+    <string name="embedding_manager">Embedding Manager</string>
+    <string name="no_embeddings">No embedding files found</string>
+    <string name="import_embedding">Import Embedding</string>
+    <string name="delete_embedding">Delete Embedding</string>
+    <string name="delete_embedding_confirm">Are you sure you want to delete the embedding \"%s\"?</string>
+    <string name="embedding_deleted">Embedding deleted successfully</string>
+    <string name="embedding_imported">Embedding imported successfully</string>
+    <string name="embedding_import_failed">Embedding import failed: %s</string>
+    <string name="select_embedding_file">Select Embedding File</string>
+    <string name="embedding_file_hint">Select a safetensors embedding file</string>
+    <string name="only_safetensors_supported">Only .safetensors files are supported</string>
 </resources>

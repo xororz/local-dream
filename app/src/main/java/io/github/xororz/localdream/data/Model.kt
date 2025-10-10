@@ -530,9 +530,19 @@ class ModelRepository(private val context: Context) {
                 "xororz/AnythingV5/resolve/main/tokenizer.json"
             ),
             ModelFile(
-                "clip.mnn",
+                "clip_v2.mnn",
                 "clip",
-                "xororz/AnythingV5/resolve/main/clip_fp16.mnn"
+                "xororz/AnythingV5/resolve/main/clip_v2.mnn"
+            ),
+            ModelFile(
+                "pos_emb.bin",
+                "pos_emb",
+                "xororz/AnythingV5/resolve/main/pos_emb.bin"
+            ),
+            ModelFile(
+                "token_emb.bin",
+                "token_emb",
+                "xororz/AnythingV5/resolve/main/token_emb.bin"
             ),
             ModelFile(
                 "vae_encoder.bin",
@@ -591,7 +601,22 @@ class ModelRepository(private val context: Context) {
                 "tokenizer",
                 "xororz/AnythingV5/resolve/main/tokenizer.json"
             ),
-            ModelFile("clip.mnn", "clip", "xororz/AnythingV5/resolve/main/clip_fp16.mnn"),
+
+            ModelFile(
+                "clip_v2.mnn",
+                "clip",
+                "xororz/AnythingV5/resolve/main/clip_v2.mnn"
+            ),
+            ModelFile(
+                "pos_emb.bin",
+                "pos_emb",
+                "xororz/AnythingV5/resolve/main/pos_emb.bin"
+            ),
+            ModelFile(
+                "token_emb.bin",
+                "token_emb",
+                "xororz/AnythingV5/resolve/main/token_emb.bin"
+            ),
             ModelFile(
                 "vae_encoder.mnn",
                 "vae_encoder",
@@ -642,9 +667,19 @@ class ModelRepository(private val context: Context) {
                 "xororz/QteaMix/resolve/main/tokenizer.json"
             ),
             ModelFile(
-                "clip.mnn",
+                "clip_v2.mnn",
                 "clip",
-                "xororz/QteaMix/resolve/main/clip_fp16.mnn"
+                "xororz/QteaMix/resolve/main/clip_v2.mnn"
+            ),
+            ModelFile(
+                "pos_emb.bin",
+                "pos_emb",
+                "xororz/QteaMix/resolve/main/pos_emb.bin"
+            ),
+            ModelFile(
+                "token_emb.bin",
+                "token_emb",
+                "xororz/QteaMix/resolve/main/token_emb.bin"
             ),
             ModelFile(
                 "vae_encoder.bin",
@@ -703,7 +738,21 @@ class ModelRepository(private val context: Context) {
                 "tokenizer",
                 "xororz/AnythingV5/resolve/main/tokenizer.json"
             ),
-            ModelFile("clip.mnn", "clip", "xororz/QteaMix/resolve/main/clip_fp16.mnn"),
+            ModelFile(
+                "clip_v2.mnn",
+                "clip",
+                "xororz/QteaMix/resolve/main/clip_v2.mnn"
+            ),
+            ModelFile(
+                "pos_emb.bin",
+                "pos_emb",
+                "xororz/QteaMix/resolve/main/pos_emb.bin"
+            ),
+            ModelFile(
+                "token_emb.bin",
+                "token_emb",
+                "xororz/QteaMix/resolve/main/token_emb.bin"
+            ),
             ModelFile(
                 "vae_encoder.mnn",
                 "vae_encoder",
@@ -754,9 +803,19 @@ class ModelRepository(private val context: Context) {
                 "xororz/CuteYukiMix/resolve/main/tokenizer.json"
             ),
             ModelFile(
-                "clip.mnn",
+                "clip_v2.mnn",
                 "clip",
-                "xororz/CuteYukiMix/resolve/main/clip_fp16.mnn"
+                "xororz/CuteYukiMix/resolve/main/clip_v2.mnn"
+            ),
+            ModelFile(
+                "pos_emb.bin",
+                "pos_emb",
+                "xororz/CuteYukiMix/resolve/main/pos_emb.bin"
+            ),
+            ModelFile(
+                "token_emb.bin",
+                "token_emb",
+                "xororz/CuteYukiMix/resolve/main/token_emb.bin"
             ),
             ModelFile(
                 "vae_encoder.bin",
@@ -815,7 +874,21 @@ class ModelRepository(private val context: Context) {
                 "tokenizer",
                 "xororz/CuteYukiMix/resolve/main/tokenizer.json"
             ),
-            ModelFile("clip.mnn", "clip", "xororz/QteaMix/resolve/main/clip_fp16.mnn"),
+            ModelFile(
+                "clip_v2.mnn",
+                "clip",
+                "xororz/CuteYukiMix/resolve/main/clip_v2.mnn"
+            ),
+            ModelFile(
+                "pos_emb.bin",
+                "pos_emb",
+                "xororz/CuteYukiMix/resolve/main/pos_emb.bin"
+            ),
+            ModelFile(
+                "token_emb.bin",
+                "token_emb",
+                "xororz/CuteYukiMix/resolve/main/token_emb.bin"
+            ),
             ModelFile(
                 "vae_encoder.mnn",
                 "vae_encoder",
@@ -865,7 +938,21 @@ class ModelRepository(private val context: Context) {
                 "tokenizer",
                 "xororz/AbsoluteReality/resolve/main/tokenizer.json"
             ),
-            ModelFile("clip.mnn", "clip", "xororz/AbsoluteReality/resolve/main/clip_fp16.mnn"),
+            ModelFile(
+                "clip_v2.mnn",
+                "clip",
+                "xororz/AbsoluteReality/resolve/main/clip_v2.mnn"
+            ),
+            ModelFile(
+                "pos_emb.bin",
+                "pos_emb",
+                "xororz/AbsoluteReality/resolve/main/pos_emb.bin"
+            ),
+            ModelFile(
+                "token_emb.bin",
+                "token_emb",
+                "xororz/AbsoluteReality/resolve/main/token_emb.bin"
+            ),
             ModelFile(
                 "vae_encoder.bin",
                 "vae_encoder",
@@ -924,7 +1011,21 @@ class ModelRepository(private val context: Context) {
                 "tokenizer",
                 "xororz/AbsoluteReality/resolve/main/tokenizer.json"
             ),
-            ModelFile("clip.mnn", "clip", "xororz/AbsoluteReality/resolve/main/clip_fp16.mnn"),
+            ModelFile(
+                "clip_v2.mnn",
+                "clip",
+                "xororz/AbsoluteReality/resolve/main/clip_v2.mnn"
+            ),
+            ModelFile(
+                "pos_emb.bin",
+                "pos_emb",
+                "xororz/AbsoluteReality/resolve/main/pos_emb.bin"
+            ),
+            ModelFile(
+                "token_emb.bin",
+                "token_emb",
+                "xororz/AbsoluteReality/resolve/main/token_emb.bin"
+            ),
             ModelFile(
                 "vae_encoder.mnn",
                 "vae_encoder",
@@ -974,7 +1075,21 @@ class ModelRepository(private val context: Context) {
                 "tokenizer",
                 "xororz/ChilloutMix/resolve/main/tokenizer.json"
             ),
-            ModelFile("clip.mnn", "clip", "xororz/ChilloutMix/resolve/main/clip_fp16.mnn"),
+            ModelFile(
+                "clip_v2.mnn",
+                "clip",
+                "xororz/ChilloutMix/resolve/main/clip_v2.mnn"
+            ),
+            ModelFile(
+                "pos_emb.bin",
+                "pos_emb",
+                "xororz/ChilloutMix/resolve/main/pos_emb.bin"
+            ),
+            ModelFile(
+                "token_emb.bin",
+                "token_emb",
+                "xororz/ChilloutMix/resolve/main/token_emb.bin"
+            ),
             ModelFile(
                 "vae_encoder.bin",
                 "vae_encoder",
@@ -1033,7 +1148,21 @@ class ModelRepository(private val context: Context) {
                 "tokenizer",
                 "xororz/ChilloutMix/resolve/main/tokenizer.json"
             ),
-            ModelFile("clip.mnn", "clip", "xororz/ChilloutMix/resolve/main/clip_fp16.mnn"),
+            ModelFile(
+                "clip_v2.mnn",
+                "clip",
+                "xororz/ChilloutMix/resolve/main/clip_v2.mnn"
+            ),
+            ModelFile(
+                "pos_emb.bin",
+                "pos_emb",
+                "xororz/ChilloutMix/resolve/main/pos_emb.bin"
+            ),
+            ModelFile(
+                "token_emb.bin",
+                "token_emb",
+                "xororz/ChilloutMix/resolve/main/token_emb.bin"
+            ),
             ModelFile(
                 "vae_encoder.mnn",
                 "vae_encoder",
