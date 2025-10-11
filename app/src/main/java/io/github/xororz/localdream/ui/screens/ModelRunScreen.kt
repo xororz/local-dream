@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -406,8 +407,8 @@ fun ModelRunScreen(
 
     fun saveAllFields() {
         saveAllJob?.cancel()
-        saveAllJob = scope.launch {
-            delay(500)
+        saveAllJob = scope.launch(Dispatchers.IO) {
+            delay(1000)
             generationPreferences.saveAllFields(
                 modelId = modelId,
                 prompt = prompt,
@@ -652,34 +653,35 @@ fun ModelRunScreen(
 
     LaunchedEffect(modelId) {
         if (!hasInitialized) {
-            generationPreferences.getPreferences(modelId).collect { prefs ->
-                if (!hasInitialized && prefs.prompt.isEmpty() && prefs.negativePrompt.isEmpty()) {
-                    model?.let { m ->
-                        if (m.defaultPrompt.isNotEmpty()) {
-                            generationPreferences.savePrompt(modelId, m.defaultPrompt)
-                        }
-                        if (m.defaultNegativePrompt.isNotEmpty()) {
-                            generationPreferences.saveNegativePrompt(
-                                modelId,
-                                m.defaultNegativePrompt
-                            )
-                        }
+            val prefs = generationPreferences.getPreferences(modelId).first()
+
+            if (prefs.prompt.isEmpty() && prefs.negativePrompt.isEmpty()) {
+                model?.let { m ->
+                    if (m.defaultPrompt.isNotEmpty()) {
+                        generationPreferences.savePrompt(modelId, m.defaultPrompt)
+                        prompt = m.defaultPrompt
+                    }
+                    if (m.defaultNegativePrompt.isNotEmpty()) {
+                        generationPreferences.saveNegativePrompt(
+                            modelId,
+                            m.defaultNegativePrompt
+                        )
+                        negativePrompt = m.defaultNegativePrompt
                     }
                 }
-                hasInitialized = true
+            } else {
+                prompt = prefs.prompt
+                negativePrompt = prefs.negativePrompt
             }
-        }
-    }
-    LaunchedEffect(modelId) {
-        generationPreferences.getPreferences(modelId).collect { prefs ->
-            prompt = prefs.prompt
-            negativePrompt = prefs.negativePrompt
+
             steps = prefs.steps
             cfg = prefs.cfg
             seed = prefs.seed
             size = if (model?.runOnCpu == true) prefs.size else resolution
             denoiseStrength = prefs.denoiseStrength
             useOpenCL = prefs.useOpenCL
+
+            hasInitialized = true
         }
     }
     DisposableEffect(Unit) {
@@ -876,6 +878,7 @@ fun ModelRunScreen(
                                 seed = ""
                                 prompt = model?.defaultPrompt ?: ""
                                 negativePrompt = model?.defaultNegativePrompt ?: ""
+                                denoiseStrength = 0.6f
                             }
                         }
                         showResetConfirmDialog = false
