@@ -354,4 +354,61 @@ inline void PrintEncodeResult(const std::vector<int> &ids) {
   }
   std::cout << "]" << std::endl;
 }
+
+// Encodes an RGB byte array into PNG format
+inline std::vector<uint8_t> encodePNG(const std::vector<uint8_t> &rgb_data,
+                                      int width, int height) {
+  std::vector<uint8_t> png_buffer;
+
+  stbi_write_png_to_func(
+      [](void *context, void *data, int size) {
+        auto &buffer = *static_cast<std::vector<uint8_t> *>(context);
+        buffer.insert(buffer.end(), static_cast<uint8_t *>(data),
+                      static_cast<uint8_t *>(data) + size);
+      },
+      &png_buffer, width, height, 3, rgb_data.data(), width * 3);
+
+  return png_buffer;
+}
+
+// Encodes an RGB byte array into JPEG format (quality adjustable)
+inline std::vector<uint8_t> encodeJPEG(const std::vector<uint8_t> &rgb_data,
+                                       int width, int height, int quality = 95) {
+  std::vector<uint8_t> jpeg_buffer;
+
+  stbi_write_jpg_to_func(
+      [](void *context, void *data, int size) {
+        auto &buffer = *static_cast<std::vector<uint8_t> *>(context);
+        buffer.insert(buffer.end(), static_cast<uint8_t *>(data),
+                      static_cast<uint8_t *>(data) + size);
+      },
+      &jpeg_buffer, width, height, 3, rgb_data.data(), quality);
+
+  return jpeg_buffer;
+}
+
+// Decodes a PNG byte array to RGB
+inline std::vector<uint8_t> decodePNG(const std::vector<uint8_t> &png_data,
+                                      int &width, int &height) {
+  int channels;
+  uint8_t *decoded_data = stbi_load_from_memory(
+      png_data.data(), png_data.size(), &width, &height, &channels, 3);
+
+  if (!decoded_data) {
+    std::string error_msg = stbi_failure_reason();
+    throw std::runtime_error("Failed to decode PNG: " + error_msg);
+  }
+
+  std::vector<uint8_t> rgb_data(width * height * 3);
+  std::memcpy(rgb_data.data(), decoded_data, width * height * 3);
+  stbi_image_free(decoded_data);
+
+  return rgb_data;
+}
+
+// Reads an RGB byte array directly (no decoding needed)
+inline std::vector<uint8_t> readRGBFromBinary(const std::string &binary_data) {
+  return std::vector<uint8_t>(binary_data.begin(), binary_data.end());
+}
+
 #endif
