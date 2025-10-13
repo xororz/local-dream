@@ -188,4 +188,14 @@
     <string name="select_embedding_file">Select Embedding File</string>
     <string name="embedding_file_hint">Select a safetensors embedding file</string>
     <string name="only_safetensors_supported">Only .safetensors files are supported</string>
+
+    <!-- Upscaler -->
+    <string name="select_upscaler_model">Select Upscaler Model</string>
+    <string name="upscaling_image">Upscaling image…</string>
+    <string name="upscale_failed">Upscale failed: %s</string>
+    <string name="download_model_first">Please download the model first</string>
+    <string name="upscaler_anime">Anime</string>
+    <string name="upscaler_anime_desc">Optimized for anime and cartoon images</string>
+    <string name="upscaler_realistic">Realistic</string>
+    <string name="upscaler_realistic_desc">Optimized for realistic photos</string>
 </resources>

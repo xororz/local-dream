@@ -37,6 +37,10 @@ If you like it, please consider [sponsor](https://github.com/xororz/local-dream?
 <img src="./assets/demo2.jpg" alt="Feature Demo" width="600">
 </div>
 
+- **prompt weights** - Emphasize certain words in prompts. E.g., `(masterpiece:1.5)`. Same format as [Automatic1111](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
+- **embeddings** - Support for custom embeddings like [EasyNegative](https://civitai.com/models/7808/easynegative). SafeTensor format is required. Convert `pt` to `safetensors` using [this](https://chino.icu/local-dream/pt2sf.py)
+- **upscalers** - 4x upscaling with [realesrgan_x4plus_anime_6b](https://github.com/xinntao/Real-ESRGAN/) and [4x-UltraSharpV2_Lite](https://huggingface.co/Kim2091/UltraSharpV2)
+
 ## 🔧 Build Instructions
 
 > **Note**: Building on Linux/WSL is recommended. Other platforms are not verified.
@@ -69,18 +73,15 @@ git clone --recursive https://github.com/xororz/local-dream.git
 
 ### 3. Build Libraries
 
-<details>
-<summary><strong>🐧 Linux</strong></summary>
+**Linux**
 
 ```bash
 cd app/src/main/cpp/
 bash ./build.sh
 ```
 
-</details>
-
 <details>
-<summary><strong>🪟 Windows</strong></summary>
+<summary><strong>Windows</strong></summary>
 
 ```powershell
 # Install dependencies if needed:
@@ -98,7 +99,7 @@ dos2unix SampleApp.patch
 </details>
 
 <details>
-<summary><strong>🍎 macOS</strong></summary>
+<summary><strong>macOS</strong></summary>
 
 ```bash
 # Install dependencies with Homebrew:
@@ -203,8 +204,11 @@ Custom seed support for reproducible image generation:
 - **[MoyuruAizawa/Cropify](https://github.com/MoyuruAizawa/Cropify)** - Image cropping
 - **AOSP, Material Design, Jetpack Compose** - UI framework
 
-### NSFW Detection Model
+### Models
 
+- **[CompVis/stable-diffusion](https://github.com/CompVis/stable-diffusion)** and all other model creators
+- **[xinntao/Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)** - Image upscaling
+- **[Kim2091/UltraSharpV2](https://huggingface.co/Kim2091/UltraSharpV2)** - Image upscaling
 - **[bhky/opennsfw2](https://github.com/bhky/opennsfw2)** - NSFW content filtering
 
 ---
