@@ -59,7 +59,7 @@ bool use_mnn_clip = false;
 bool use_clip_v2 = false;
 float nsfw_threshold = 0.5f;
 std::string clipPath, unetPath, vaeDecoderPath, vaeEncoderPath,
-    safetyCheckerPath, tokenizerPath, patchPath, modelDir;
+    safetyCheckerPath, tokenizerPath, patchPath, modelDir, upscalerPath;
 std::vector<float> pos_emb;
 std::vector<float> token_emb;
 int resolution = 512;
@@ -69,6 +69,7 @@ std::unique_ptr<QnnModel> clipApp = nullptr;
 std::unique_ptr<QnnModel> unetApp = nullptr;
 std::unique_ptr<QnnModel> vaeDecoderApp = nullptr;
 std::unique_ptr<QnnModel> vaeEncoderApp = nullptr;
+std::unique_ptr<QnnModel> upscalerApp = nullptr;
 MNN::Interpreter *clipInterpreter = nullptr;
 MNN::Interpreter *unetInterpreter = nullptr;
 MNN::Interpreter *vaeDecoderInterpreter = nullptr;
@@ -98,6 +99,38 @@ bool use_opencl;
 bool cvt_model = false;
 std::string model_dir;
 bool clip_skip_2 = false;
+
+// QNN function pointers and backend path for dynamic model loading
+QnnFunctionPointers g_qnnSystemFuncs;
+std::string g_backendPathCmd;
+
+// Global function to create QNN models dynamically
+std::unique_ptr<QnnModel> createQnnModel(const std::string &modelPath,
+                                         const std::string &modelName) {
+  using namespace qnn::tools;
+  QnnFunctionPointers funcs = g_qnnSystemFuncs;
+  void *backendHandle = nullptr;
+  void *modelHandle = nullptr;
+  dynamicloadutil::StatusCode drvStatus =
+      dynamicloadutil::getQnnFunctionPointers(g_backendPathCmd, modelPath,
+                                              &funcs, &backendHandle, false,
+                                              &modelHandle);
+  if (drvStatus != dynamicloadutil::StatusCode::SUCCESS) {
+    QNN_ERROR("Failed get QNN func ptrs for %s.", modelName.c_str());
+    return nullptr;
+  }
+  std::string inputListPaths, opPackagePaths, outputPath, saveBinaryName;
+  bool debug = false;
+  bool dumpOutputs = false;
+  iotensor::OutputDataType outputDataType =
+      iotensor::OutputDataType::FLOAT_ONLY;
+  iotensor::InputDataType inputDataType = iotensor::InputDataType::FLOAT;
+  sample_app::ProfilingLevel profilingLevel = ProfilingLevel::OFF;
+  return std::make_unique<QnnModel>(
+      funcs, inputListPaths, opPackagePaths, backendHandle, outputPath, debug,
+      outputDataType, inputDataType, profilingLevel, dumpOutputs, modelPath,
+      saveBinaryName);
+}
 
 namespace qnn {
 namespace tools {
@@ -534,39 +567,13 @@ void processCommandLine(int argc, char **argv) {
     showHelpAndExit("Requires --system_library for QNN");
   if (backendPathCmd.empty()) showHelpAndExit("Requires --backend for QNN");
 
-  QnnFunctionPointers qnnSystemFuncs;
+  // Store in global variables for dynamic model loading
+  g_backendPathCmd = backendPathCmd;
   dynamicloadutil::StatusCode sysStatus =
       dynamicloadutil::getQnnSystemFunctionPointers(systemLibraryPathCmd,
-                                                    &qnnSystemFuncs);
+                                                    &g_qnnSystemFuncs);
   if (sysStatus != dynamicloadutil::StatusCode::SUCCESS)
     showHelpAndExit("Failed get QNN system func ptrs.");
-
-  auto createQnnModel =
-      [&](std::string modelPath,
-          const std::string &modelName) -> std::unique_ptr<QnnModel> {
-    QnnFunctionPointers funcs = qnnSystemFuncs;
-    void *backendHandle = nullptr;
-    void *modelHandle = nullptr;
-    dynamicloadutil::StatusCode drvStatus =
-        dynamicloadutil::getQnnFunctionPointers(backendPathCmd, modelPath,
-                                                &funcs, &backendHandle, false,
-                                                &modelHandle);
-    if (drvStatus != dynamicloadutil::StatusCode::SUCCESS) {
-      QNN_ERROR("Failed get QNN func ptrs for %s.", modelName.c_str());
-      return nullptr;
-    }
-    std::string inputListPaths, opPackagePaths, outputPath, saveBinaryName;
-    bool debug = false;
-    bool dumpOutputs = false;
-    iotensor::OutputDataType outputDataType =
-        iotensor::OutputDataType::FLOAT_ONLY;
-    iotensor::InputDataType inputDataType = iotensor::InputDataType::FLOAT;
-    sample_app::ProfilingLevel profilingLevel = ProfilingLevel::OFF;
-    return std::make_unique<QnnModel>(
-        funcs, inputListPaths, opPackagePaths, backendHandle, outputPath, debug,
-        outputDataType, inputDataType, profilingLevel, dumpOutputs, modelPath,
-        saveBinaryName);
-  };
 
   std::string finalUnetPath =
       processPatchLogic(unetPath, patchPath, resolution);
@@ -827,6 +834,156 @@ xt::xarray<float> blend_vae_output_tiles(
       xt::reshape_view(weight_map, {1, 1, output_h, output_w});
 
   return accumulated / weight_expanded;
+}
+
+// --- Upscaler Tiling ---
+std::vector<int> calculate_tile_positions(int dimension, int tile_size,
+                                          int min_overlap) {
+  if (dimension <= tile_size) {
+    return {0};
+  }
+
+  int num_tiles = 1;
+  int effective_tile_size = tile_size - min_overlap;
+  if (dimension > tile_size) {
+    num_tiles +=
+        (dimension - tile_size + effective_tile_size - 1) / effective_tile_size;
+  }
+
+  std::vector<int> positions;
+  positions.reserve(num_tiles);
+  positions.push_back(0);
+
+  if (num_tiles == 1) {
+    return positions;
+  }
+
+  int total_distance = dimension - tile_size;
+  int num_strides = num_tiles - 1;
+
+  int base_stride = total_distance / num_strides;
+  int remainder = total_distance % num_strides;
+
+  int current_pos = 0;
+  for (int i = 0; i < num_strides; ++i) {
+    int stride = base_stride + (i < remainder ? 1 : 0);
+    current_pos += stride;
+    positions.push_back(current_pos);
+  }
+
+  positions.back() = dimension - tile_size;
+
+  return positions;
+}
+
+xt::xarray<uint8_t> upscaleImageWithModel(
+    const std::vector<uint8_t> &input_image, int width, int height,
+    std::unique_ptr<QnnModel> &upscaler) {
+  if (!upscaler) {
+    throw std::runtime_error("Upscaler model not provided");
+  }
+
+  const int tile_size = 192;
+  const int output_tile_size = 768;
+  const int min_overlap = 12;
+  const float scale_factor = 4.0f;
+
+  auto x_coords = calculate_tile_positions(width, tile_size, min_overlap);
+  auto y_coords = calculate_tile_positions(height, tile_size, min_overlap);
+  int num_tiles_w = x_coords.size();
+  int num_tiles_h = y_coords.size();
+
+  int output_width = width * scale_factor;
+  int output_height = height * scale_factor;
+
+  QNN_INFO("Upscaling %dx%d to %dx%d using %dx%d tiles (variable overlap)",
+           width, height, output_width, output_height, num_tiles_w,
+           num_tiles_h);
+
+  std::vector<int> input_shape = {1, height, width, 3};
+  xt::xarray<uint8_t> input_hwc_u8 = xt::adapt(input_image, input_shape);
+  xt::xarray<float> input_hwc_f32 = xt::cast<float>(input_hwc_u8) / 255.0f;
+  xt::xarray<float> input_chw =
+      xt::transpose(input_hwc_f32, {0, 3, 1, 2});  // (1, 3, H, W)
+
+  std::vector<int> output_shape = {1, 3, output_height, output_width};
+  xt::xarray<float> accumulated_output = xt::zeros<float>(output_shape);
+  xt::xarray<float> weight_map =
+      xt::zeros<float>({output_height, output_width});
+
+  int output_overlap = min_overlap * scale_factor;
+  int fade_size = output_overlap / 2;
+  xt::xarray<float> tile_weight =
+      xt::ones<float>({output_tile_size, output_tile_size});
+
+  if (fade_size > 0) {
+    for (int i = 0; i < fade_size; ++i) {
+      float alpha = static_cast<float>(i + 1) / fade_size;
+      xt::view(tile_weight, i, xt::all()) *= alpha;
+      xt::view(tile_weight, output_tile_size - 1 - i, xt::all()) *= alpha;
+      xt::view(tile_weight, xt::all(), i) *= alpha;
+      xt::view(tile_weight, xt::all(), output_tile_size - 1 - i) *= alpha;
+    }
+  }
+
+  int tile_count = 0;
+  for (int y : y_coords) {
+    for (int x : x_coords) {
+      xt::xarray<float> input_tile =
+          xt::view(input_chw, 0, xt::all(), xt::range(y, y + tile_size),
+                   xt::range(x, x + tile_size));
+
+      std::vector<float> tile_input_vec(input_tile.begin(), input_tile.end());
+      std::vector<float> tile_output_vec(1 * 3 * output_tile_size *
+                                         output_tile_size);
+
+      if (StatusCode::SUCCESS !=
+          upscaler->executeUpscalerGraphs(tile_input_vec.data(),
+                                          tile_output_vec.data())) {
+        throw std::runtime_error("Upscaler execution failed for tile");
+      }
+
+      std::vector<int> tile_output_shape = {1, 3, output_tile_size,
+                                            output_tile_size};
+      xt::xarray<float> output_tile =
+          xt::adapt(tile_output_vec, tile_output_shape);
+
+      int out_x = x * scale_factor;
+      int out_y = y * scale_factor;
+
+      for (int c = 0; c < 3; ++c) {
+        auto acc_slice = xt::view(accumulated_output, 0, c,
+                                  xt::range(out_y, out_y + output_tile_size),
+                                  xt::range(out_x, out_x + output_tile_size));
+        auto tile_slice = xt::view(output_tile, 0, c, xt::all(), xt::all());
+        acc_slice += tile_slice * tile_weight;
+      }
+
+      auto weight_slice =
+          xt::view(weight_map, xt::range(out_y, out_y + output_tile_size),
+                   xt::range(out_x, out_x + output_tile_size));
+      weight_slice += tile_weight;
+
+      tile_count++;
+      QNN_INFO("Processed upscaler tile %d/%d", tile_count,
+               num_tiles_w * num_tiles_h);
+    }
+  }
+
+  weight_map = xt::maximum(weight_map, 1e-8f);
+  xt::xarray<float> weight_expanded =
+      xt::reshape_view(weight_map, {1, 1, output_height, output_width});
+
+  xt::xarray<float> normalized_output = accumulated_output / weight_expanded;
+
+  auto output_hwc = xt::transpose(normalized_output, {0, 2, 3, 1});
+  auto output_clamped = xt::clip(output_hwc, 0.0f, 1.0f);
+  auto output_normalized = output_clamped * 255.0f;
+  xt::xarray<uint8_t> output_uint8 = xt::cast<uint8_t>(output_normalized);
+
+  QNN_INFO("Upscaling completed: %d tiles processed", tile_count);
+
+  return output_uint8;
 }
 
 // --- Image Generation ---
@@ -1737,6 +1894,10 @@ int main(int argc, char **argv) {
       status = sample_app::initializeQnnApp("VAEEncoder", vaeEncoderApp);
       if (status != EXIT_SUCCESS) return status;
     }
+    if (upscalerApp) {
+      status = sample_app::initializeQnnApp("Upscaler", upscalerApp);
+      if (status != EXIT_SUCCESS) return status;
+    }
   }
 
   // --- HTTP Server ---
@@ -1744,147 +1905,265 @@ int main(int argc, char **argv) {
   svr.Get("/health", [](const httplib::Request &, httplib::Response &res) {
     res.status = 200;
   });
-  svr.Post("/generate", [&](const httplib::Request &req,
-                            httplib::Response &res) {
-    try {
-      auto json = nlohmann::json::parse(req.body);
-      if (!json.contains("prompt"))
-        throw std::invalid_argument("Missing 'prompt'");
-      prompt = json["prompt"].get<std::string>();
-      negative_prompt = json.value("negative_prompt", "");
-      steps = json.value("steps", 20);
-      cfg = json.value("cfg", 7.5f);
-      use_opencl = json.value("use_opencl", false);
-      seed = json.value(
-          "seed",
-          (unsigned)hashSeed(
-              std::chrono::system_clock::now().time_since_epoch().count()));
-      int req_size = json.value("size", 512);
-      denoise_strength = json.value("denoise_strength", 0.6f);
-      request_img2img = false;
-      request_has_mask = false;
-      img_data.clear();
-      mask_data.clear();
-      mask_data_full.clear();
-      output_size = req_size;
-      sample_size = req_size / 8;
-
-      if (json.contains("image")) {
-        request_img2img = true;
-        std::string img_b64 = json["image"].get<std::string>();
+  svr.Post(
+      "/generate", [&](const httplib::Request &req, httplib::Response &res) {
         try {
-          std::string dec_str = base64_decode(img_b64);
-          std::vector<uint8_t> dec_buf(dec_str.begin(), dec_str.end());
-          std::vector<uint8_t> dec_pix;
-          decode_image(dec_buf, dec_pix, output_size);
-          if (dec_pix.size() != 3 * output_size * output_size)
-            throw std::runtime_error("Img size mismatch");
-          std::vector<int> img_shape = {1, output_size, output_size, 3};
-          xt::xarray<uint8_t> xt_u8 = xt::adapt(dec_pix, img_shape);
-          xt::xarray<float> xt_f = xt::cast<float>(xt_u8);
-          xt_f = xt::eval(xt_f / 127.5f - 1.0f);
-          xt_f = xt::transpose(xt_f, {0, 3, 1, 2});
-          img_data.assign(xt_f.begin(), xt_f.end());
-          if (json.contains("mask")) {
-            request_has_mask = true;
-            std::string mask_b64 = json["mask"].get<std::string>();
-            std::string dec_mask_str = base64_decode(mask_b64);
-            std::vector<uint8_t> dec_mask_buf(dec_mask_str.begin(),
-                                              dec_mask_str.end());
-            std::vector<uint8_t> mask_pix_lat_rgb, mask_pix_full_rgb;
-            decode_image(dec_mask_buf, mask_pix_lat_rgb, sample_size);
-            decode_image(dec_mask_buf, mask_pix_full_rgb, output_size);
-            if (mask_pix_lat_rgb.empty() || mask_pix_full_rgb.empty())
-              throw std::runtime_error("Mask decode empty");
-            std::vector<int> mlat_shape = {sample_size, sample_size, 3};
-            xt::xarray<uint8_t> xmlat_u8 =
-                xt::adapt(mask_pix_lat_rgb, mlat_shape);
-            xt::xarray<float> xmlat_f =
-                xt::mean(xt::cast<float>(xmlat_u8), {2});
-            xmlat_f = xt::eval(xmlat_f / 255.0f);
-            xmlat_f =
-                xt::reshape_view(xmlat_f, {1, 1, sample_size, sample_size});
-            xt::xarray<float> xmlat_f_4 = xt::concatenate(
-                xt::xtuple(xmlat_f, xmlat_f, xmlat_f, xmlat_f), 1);
-            mask_data.assign(xmlat_f_4.begin(), xmlat_f_4.end());
+          auto json = nlohmann::json::parse(req.body);
+          if (!json.contains("prompt"))
+            throw std::invalid_argument("Missing 'prompt'");
+          prompt = json["prompt"].get<std::string>();
+          negative_prompt = json.value("negative_prompt", "");
+          steps = json.value("steps", 20);
+          cfg = json.value("cfg", 7.5f);
+          use_opencl = json.value("use_opencl", false);
+          seed = json.value(
+              "seed",
+              (unsigned)hashSeed(
+                  std::chrono::system_clock::now().time_since_epoch().count()));
+          int req_size = json.value("size", 512);
+          denoise_strength = json.value("denoise_strength", 0.6f);
+          request_img2img = false;
+          request_has_mask = false;
+          img_data.clear();
+          mask_data.clear();
+          mask_data_full.clear();
+          output_size = req_size;
+          sample_size = req_size / 8;
 
-            std::vector<int> mfull_shape = {output_size, output_size, 3};
-            xt::xarray<uint8_t> xmfull_u8 =
-                xt::adapt(mask_pix_full_rgb, mfull_shape);
-            xt::xarray<float> xmfull_f =
-                xt::mean(xt::cast<float>(xmfull_u8), {2});
-            xmfull_f = xt::eval(xmfull_f / 255.0f);
-            xmfull_f =
-                xt::reshape_view(xmfull_f, {1, 1, output_size, output_size});
-            xt::xarray<float> xmfull_f_3 =
-                xt::concatenate(xt::xtuple(xmfull_f, xmfull_f, xmfull_f), 1);
-            mask_data_full.assign(xmfull_f_3.begin(), xmfull_f_3.end());
-          }
-        } catch (const std::exception &e) {
-          throw std::invalid_argument("Err proc img/mask: " +
-                                      std::string(e.what()));
-        }
-      }
-      std::cout << "Req Rcvd (globals): P:" << prompt
-                << " NP:" << negative_prompt << " S:" << steps << " CFG:" << cfg
-                << " Seed:" << seed << " Size:" << output_size
-                << " Img2Img:" << request_img2img
-                << " Mask:" << request_has_mask
-                << " Denoise:" << denoise_strength << std::endl;
-      res.set_header("Content-Type", "text/event-stream");
-      res.set_header("Cache-Control", "no-cache");
-      res.set_header("Connection", "keep-alive");
-      res.set_header("Access-Control-Allow-Origin", "*");
-      res.set_chunked_content_provider(
-          "text/event-stream", [&](intptr_t, httplib::DataSink &sink) -> bool {
+          if (json.contains("image")) {
+            request_img2img = true;
+            std::string img_b64 = json["image"].get<std::string>();
             try {
-              auto result = generateImage([&sink](int s, int t) {
-                nlohmann::json p = {
-                    {"type", "progress"}, {"step", s}, {"total_steps", t}};
-                std::string ev = "event: progress\ndata: " + p.dump() + "\n\n";
-                sink.write(ev.c_str(), ev.size());
-              });
-              auto enc_start = std::chrono::high_resolution_clock::now();
-              std::string image_str_result(result.image_data.begin(),
-                                           result.image_data.end());
-              std::string enc_img = base64_encode(image_str_result);
-              auto enc_end = std::chrono::high_resolution_clock::now();
-              std::cout
-                  << "Enc time: "
-                  << std::chrono::duration_cast<std::chrono::milliseconds>(
-                         enc_end - enc_start)
-                         .count()
-                  << "ms\n";
-              nlohmann::json c = {
-                  {"type", "complete"},
-                  {"image", enc_img},
-                  {"seed", seed},
-                  {"width", result.width},
-                  {"height", result.height},
-                  {"channels", result.channels},
-                  {"generation_time_ms", result.generation_time_ms},
-                  {"first_step_time_ms", result.first_step_time_ms}};
-              std::string ev = "event: complete\ndata: " + c.dump() + "\n\n";
-              sink.write(ev.c_str(), ev.size());
-              sink.done();
-              return true;
+              std::string dec_str = base64_decode(img_b64);
+              std::vector<uint8_t> dec_buf(dec_str.begin(), dec_str.end());
+              std::vector<uint8_t> dec_pix;
+              decode_image(dec_buf, dec_pix, output_size);
+              if (dec_pix.size() != 3 * output_size * output_size)
+                throw std::runtime_error("Img size mismatch");
+              std::vector<int> img_shape = {1, output_size, output_size, 3};
+              xt::xarray<uint8_t> xt_u8 = xt::adapt(dec_pix, img_shape);
+              xt::xarray<float> xt_f = xt::cast<float>(xt_u8);
+              xt_f = xt::eval(xt_f / 127.5f - 1.0f);
+              xt_f = xt::transpose(xt_f, {0, 3, 1, 2});
+              img_data.assign(xt_f.begin(), xt_f.end());
+              if (json.contains("mask")) {
+                request_has_mask = true;
+                std::string mask_b64 = json["mask"].get<std::string>();
+                std::string dec_mask_str = base64_decode(mask_b64);
+                std::vector<uint8_t> dec_mask_buf(dec_mask_str.begin(),
+                                                  dec_mask_str.end());
+                std::vector<uint8_t> mask_pix_lat_rgb, mask_pix_full_rgb;
+                decode_image(dec_mask_buf, mask_pix_lat_rgb, sample_size);
+                decode_image(dec_mask_buf, mask_pix_full_rgb, output_size);
+                if (mask_pix_lat_rgb.empty() || mask_pix_full_rgb.empty())
+                  throw std::runtime_error("Mask decode empty");
+                std::vector<int> mlat_shape = {sample_size, sample_size, 3};
+                xt::xarray<uint8_t> xmlat_u8 =
+                    xt::adapt(mask_pix_lat_rgb, mlat_shape);
+                xt::xarray<float> xmlat_f =
+                    xt::mean(xt::cast<float>(xmlat_u8), {2});
+                xmlat_f = xt::eval(xmlat_f / 255.0f);
+                xmlat_f =
+                    xt::reshape_view(xmlat_f, {1, 1, sample_size, sample_size});
+                xt::xarray<float> xmlat_f_4 = xt::concatenate(
+                    xt::xtuple(xmlat_f, xmlat_f, xmlat_f, xmlat_f), 1);
+                mask_data.assign(xmlat_f_4.begin(), xmlat_f_4.end());
+
+                std::vector<int> mfull_shape = {output_size, output_size, 3};
+                xt::xarray<uint8_t> xmfull_u8 =
+                    xt::adapt(mask_pix_full_rgb, mfull_shape);
+                xt::xarray<float> xmfull_f =
+                    xt::mean(xt::cast<float>(xmfull_u8), {2});
+                xmfull_f = xt::eval(xmfull_f / 255.0f);
+                xmfull_f = xt::reshape_view(xmfull_f,
+                                            {1, 1, output_size, output_size});
+                xt::xarray<float> xmfull_f_3 = xt::concatenate(
+                    xt::xtuple(xmfull_f, xmfull_f, xmfull_f), 1);
+                mask_data_full.assign(xmfull_f_3.begin(), xmfull_f_3.end());
+              }
             } catch (const std::exception &e) {
-              nlohmann::json err = {{"type", "error"}, {"message", e.what()}};
-              std::string ev = "event: error\ndata: " + err.dump() + "\n\n";
-              sink.write(ev.c_str(), ev.size());
-              sink.done();
-              return false;
+              throw std::invalid_argument("Err proc img/mask: " +
+                                          std::string(e.what()));
             }
-          });
-    } catch (const nlohmann::json::parse_error &e) {
-      nlohmann::json err = {
-          {"error",
-           {{"message", "Invalid JSON: " + std::string(e.what())},
-            {"type", "request_error"}}}};
-      res.status = 400;
-      res.set_content(err.dump(), "application/json");
+          }
+          std::cout << "Req Rcvd (globals): P:" << prompt
+                    << " NP:" << negative_prompt << " S:" << steps
+                    << " CFG:" << cfg << " Seed:" << seed
+                    << " Size:" << output_size << " Img2Img:" << request_img2img
+                    << " Mask:" << request_has_mask
+                    << " Denoise:" << denoise_strength << std::endl;
+          res.set_header("Content-Type", "text/event-stream");
+          res.set_header("Cache-Control", "no-cache");
+          res.set_header("Connection", "keep-alive");
+          res.set_header("Access-Control-Allow-Origin", "*");
+          res.set_chunked_content_provider(
+              "text/event-stream",
+              [&](intptr_t, httplib::DataSink &sink) -> bool {
+                try {
+                  auto result = generateImage([&sink](int s, int t) {
+                    nlohmann::json p = {
+                        {"type", "progress"}, {"step", s}, {"total_steps", t}};
+                    std::string ev =
+                        "event: progress\ndata: " + p.dump() + "\n\n";
+                    sink.write(ev.c_str(), ev.size());
+                  });
+                  auto enc_start = std::chrono::high_resolution_clock::now();
+                  std::string image_str_result(result.image_data.begin(),
+                                               result.image_data.end());
+                  std::string enc_img = base64_encode(image_str_result);
+                  auto enc_end = std::chrono::high_resolution_clock::now();
+                  std::cout
+                      << "Enc time: "
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(
+                             enc_end - enc_start)
+                             .count()
+                      << "ms\n";
+                  nlohmann::json c = {
+                      {"type", "complete"},
+                      {"image", enc_img},
+                      {"seed", seed},
+                      {"width", result.width},
+                      {"height", result.height},
+                      {"channels", result.channels},
+                      {"generation_time_ms", result.generation_time_ms},
+                      {"first_step_time_ms", result.first_step_time_ms}};
+                  std::string ev =
+                      "event: complete\ndata: " + c.dump() + "\n\n";
+                  auto send_start = std::chrono::high_resolution_clock::now();
+                  sink.write(ev.c_str(), ev.size());
+                  auto send_end = std::chrono::high_resolution_clock::now();
+                  std::cout
+                      << "Image send time: "
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(
+                             send_end - send_start)
+                             .count()
+                      << "ms, size: " << ev.size() << " bytes\n";
+                  sink.done();
+                  return true;
+                } catch (const std::exception &e) {
+                  nlohmann::json err = {{"type", "error"},
+                                        {"message", e.what()}};
+                  std::string ev = "event: error\ndata: " + err.dump() + "\n\n";
+                  sink.write(ev.c_str(), ev.size());
+                  sink.done();
+                  return false;
+                }
+              });
+        } catch (const nlohmann::json::parse_error &e) {
+          nlohmann::json err = {
+              {"error",
+               {{"message", "Invalid JSON: " + std::string(e.what())},
+                {"type", "request_error"}}}};
+          res.status = 400;
+          res.set_content(err.dump(), "application/json");
+          res.set_header("Access-Control-Allow-Origin", "*");
+        } catch (const std::invalid_argument &e) {
+          nlohmann::json err = {
+              {"error",
+               {{"message", "Invalid Arg: " + std::string(e.what())},
+                {"type", "request_error"}}}};
+          res.status = 400;
+          res.set_content(err.dump(), "application/json");
+          res.set_header("Access-Control-Allow-Origin", "*");
+        } catch (const std::exception &e) {
+          nlohmann::json err = {
+              {"error",
+               {{"message", "Server Err: " + std::string(e.what())},
+                {"type", "server_error"}}}};
+          res.status = 500;
+          res.set_content(err.dump(), "application/json");
+          res.set_header("Access-Control-Allow-Origin", "*");
+        }
+      });
+
+  // Binary protocol upscale endpoint - optimized for performance
+  svr.Post("/upscale", [&](const httplib::Request &req,
+                           httplib::Response &res) {
+    std::unique_ptr<QnnModel> tempUpscalerApp = nullptr;
+
+    try {
+      // Read parameters from headers
+      if (!req.has_header("X-Image-Width")) {
+        throw std::invalid_argument("Missing 'X-Image-Width' header");
+      }
+      if (!req.has_header("X-Image-Height")) {
+        throw std::invalid_argument("Missing 'X-Image-Height' header");
+      }
+      if (!req.has_header("X-Upscaler-Path")) {
+        throw std::invalid_argument("Missing 'X-Upscaler-Path' header");
+      }
+
+      int width = std::stoi(req.get_header_value("X-Image-Width"));
+      int height = std::stoi(req.get_header_value("X-Image-Height"));
+      std::string upscaler_path = req.get_header_value("X-Upscaler-Path");
+
+      QNN_INFO("Binary upscale request: %dx%d, upscaler: %s", width, height,
+               upscaler_path.c_str());
+
+      std::vector<uint8_t> image_data(req.body.begin(), req.body.end());
+
+      if (image_data.size() != width * height * 3) {
+        throw std::invalid_argument(
+            "Image data size mismatch. Expected " +
+            std::to_string(width * height * 3) + " bytes, got " +
+            std::to_string(image_data.size()) + " bytes");
+      }
+
+      tempUpscalerApp = createQnnModel(upscaler_path, "upscaler");
+      if (!tempUpscalerApp) {
+        throw std::runtime_error("Failed to create upscaler model from: " +
+                                 upscaler_path);
+      }
+
+      auto status = sample_app::initializeQnnApp("Upscaler", tempUpscalerApp);
+      if (status != EXIT_SUCCESS) {
+        throw std::runtime_error("Failed to initialize upscaler model");
+      }
+
+      auto start_time = std::chrono::high_resolution_clock::now();
+
+      xt::xarray<uint8_t> upscaled =
+          upscaleImageWithModel(image_data, width, height, tempUpscalerApp);
+
+      auto end_time = std::chrono::high_resolution_clock::now();
+      int duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         end_time - start_time)
+                         .count();
+
+      int output_width = width * 4;
+      int output_height = height * 4;
+
+      auto encode_start = std::chrono::high_resolution_clock::now();
+      std::vector<uint8_t> output_rgb(upscaled.begin(), upscaled.end());
+      std::vector<uint8_t> output_jpeg =
+          encodeJPEG(output_rgb, output_width, output_height, 95);
+      auto encode_end = std::chrono::high_resolution_clock::now();
+      int encode_duration =
+          std::chrono::duration_cast<std::chrono::milliseconds>(encode_end -
+                                                                encode_start)
+              .count();
+
+      QNN_INFO("Upscaling completed in %d ms: %dx%d -> %dx%d", duration, width,
+               height, output_width, output_height);
+      QNN_INFO("JPEG encoding time: %d ms, size: %zu KB", encode_duration,
+               output_jpeg.size() / 1024);
+
+      res.status = 200;
+      res.set_content(std::string(output_jpeg.begin(), output_jpeg.end()),
+                      "image/jpeg");
+      res.set_header("X-Output-Width", std::to_string(output_width));
+      res.set_header("X-Output-Height", std::to_string(output_height));
+      res.set_header("X-Duration-Ms", std::to_string(duration));
       res.set_header("Access-Control-Allow-Origin", "*");
+      res.set_header("Access-Control-Expose-Headers",
+                     "X-Output-Width,X-Output-Height,X-Duration-Ms");
+
+      // Release the temporary upscaler model
+      tempUpscalerApp.reset();
+      QNN_INFO("Upscaler model released");
+
     } catch (const std::invalid_argument &e) {
+      if (tempUpscalerApp) tempUpscalerApp.reset();
       nlohmann::json err = {
           {"error",
            {{"message", "Invalid Arg: " + std::string(e.what())},
@@ -1893,6 +2172,7 @@ int main(int argc, char **argv) {
       res.set_content(err.dump(), "application/json");
       res.set_header("Access-Control-Allow-Origin", "*");
     } catch (const std::exception &e) {
+      if (tempUpscalerApp) tempUpscalerApp.reset();
       nlohmann::json err = {
           {"error",
            {{"message", "Server Err: " + std::string(e.what())},
@@ -1924,6 +2204,7 @@ int main(int argc, char **argv) {
   unetApp.reset();
   vaeDecoderApp.reset();
   vaeEncoderApp.reset();
+  upscalerApp.reset();
 
   return EXIT_SUCCESS;
 }

@@ -454,6 +454,83 @@ class QnnModel : public QnnSampleApp {
     }
     return returnStatus;
   }
+
+  StatusCode executeUpscalerGraphs(float *input_image, float *output_image) {
+    auto returnStatus = StatusCode::SUCCESS;
+
+    size_t graphIdx = 0;
+    QNN_DEBUG("Starting upscaler execution for graphIdx: %d", graphIdx);
+
+    // set input/output tensor
+    if (inputs == nullptr || outputs == nullptr) {
+      if (qnn::tools::iotensor::StatusCode::SUCCESS !=
+          m_ioTensor.setupInputAndOutputTensors(&inputs, &outputs,
+                                                (*m_graphsInfo)[graphIdx])) {
+        QNN_ERROR(
+            "Error in setting up Input and output Tensors for graphIdx: %d",
+            graphIdx);
+        returnStatus = StatusCode::FAILURE;
+        return returnStatus;
+      }
+    }
+    auto graphInfo = (*m_graphsInfo)[graphIdx];
+
+    if (graphInfo.numInputTensors != 1) {
+      QNN_ERROR("Expecting 1 input tensors, got %d", graphInfo.numInputTensors);
+      returnStatus = StatusCode::FAILURE;
+      return returnStatus;
+    }
+
+    // input_image (quantized to uint8, 1x3x192x192)
+    {
+      // uint8_t *input_uint8 =
+      //     static_cast<uint8_t *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[0]).data);
+      // int elementCount = 1 * 3 * 192 * 192;
+      // qnn::tools::datautil::floatToTfN(
+      //     input_uint8, input_image,
+      //     inputs[0].v1.quantizeParams.scaleOffsetEncoding.offset,
+      //     inputs[0].v1.quantizeParams.scaleOffsetEncoding.scale,
+      //     elementCount);
+      memcpy(static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[0]).data),
+             input_image, 1 * 3 * 192 * 192 * sizeof(float));
+    }
+
+    // execute graph
+    QNN_DEBUG("Executing upscaler graph: %d", graphIdx);
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    auto executeStatus = m_qnnFunctionPointers.qnnInterface.graphExecute(
+        graphInfo.graph, inputs, graphInfo.numInputTensors, outputs,
+        graphInfo.numOutputTensors, m_profileBackendHandle, nullptr);
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    int duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       end_time - start_time)
+                       .count();
+    QNN_INFO("upscaler graph execution time: %d ms", duration);
+
+    if (QNN_GRAPH_NO_ERROR != executeStatus) {
+      returnStatus = StatusCode::FAILURE;
+      QNN_ERROR("upscaler graph execution failed!");
+    }
+
+    // get output
+    // if (StatusCode::SUCCESS == returnStatus) {
+    //   float *tmp = nullptr;
+    //   int elementCount = 1 * 3 * 768 * 768;
+    //   if (qnn::tools::iotensor::StatusCode::SUCCESS !=
+    //       m_ioTensor.convertToFloat(&tmp, &outputs[0])) {
+    //     returnStatus = StatusCode::FAILURE;
+    //     return returnStatus;
+    //   }
+    //   memcpy(output_image, tmp, elementCount * sizeof(float));
+    //   free(tmp);
+    // }
+    memcpy(output_image,
+           static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(outputs[0]).data),
+           1 * 3 * 768 * 768 * sizeof(float));
+    return returnStatus;
+  }
 };
 
 #endif  // QNNMODEL_HPP

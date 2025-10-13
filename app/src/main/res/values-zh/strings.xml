@@ -35,7 +35,7 @@
     <string name="available_models">可用模型</string>
     <string name="selected_items">已选择 %d 项</string>
     <string name="download_settings">下载设置</string>
-    <string name="download">点击下载</string>
+    <string name="download">下载</string>
     <string name="download_from">下载地址</string>
     <string name="download_settings_hint">设置模型下载地址\n默认为https://huggingface.co/\n国内用户可使用镜像https://hf-mirror.com/</string>
     <string name="model_size">总大小：约%s</string>
@@ -190,4 +190,14 @@
     <string name="select_embedding_file">选择 Embedding 文件</string>
     <string name="embedding_file_hint">选择一个 safetensors 格式的 embedding 文件</string>
     <string name="only_safetensors_supported">仅支持 .safetensors 文件</string>
+
+    <!-- Upscaler -->
+    <string name="select_upscaler_model">选择超分模型</string>
+    <string name="upscaling_image">正在超分辨率处理…</string>
+    <string name="upscale_failed">超分失败: %s</string>
+    <string name="download_model_first">请先下载模型</string>
+    <string name="upscaler_anime">动漫</string>
+    <string name="upscaler_anime_desc">针对动漫和卡通图像优化</string>
+    <string name="upscaler_realistic">真实</string>
+    <string name="upscaler_realistic_desc">针对真实照片优化</string>
 </resources>

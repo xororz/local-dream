@@ -12,6 +12,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,11 +29,20 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
 import io.github.xororz.localdream.data.ModelRepository
+import io.github.xororz.localdream.data.Model
+import io.github.xororz.localdream.data.UpscalerRepository
+import io.github.xororz.localdream.data.UpscalerModel
+import io.github.xororz.localdream.data.DownloadResult
 import io.github.xororz.localdream.service.BackendService
+import java.net.URL
+import java.net.HttpURLConnection
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -103,6 +113,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.foundation.gestures.detectTransformGestures
+import io.github.xororz.localdream.data.DownloadProgress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 
@@ -178,25 +189,50 @@ private suspend fun saveImage(
 ) {
     withContext(Dispatchers.IO) {
         try {
+            val startTime = System.currentTimeMillis()
+            android.util.Log.d(
+                "SaveImage",
+                "Start saving image - size: ${bitmap.width}x${bitmap.height}"
+            )
+
+            // Save as JPEG if width or height is greater than 1024, otherwise save as PNG
+            val isLargeImage = bitmap.width > 1024 || bitmap.height > 1024
+            val format = if (isLargeImage) Bitmap.CompressFormat.JPEG else Bitmap.CompressFormat.PNG
+            val extension = if (isLargeImage) "jpg" else "png"
+            val mimeType = if (isLargeImage) "image/jpeg" else "image/png"
+            val quality = if (isLargeImage) 95 else 100
+
+            android.util.Log.d("SaveImage", "Save format: ${if (isLargeImage) "JPEG" else "PNG"}")
+
             val timestamp = System.currentTimeMillis()
-            val filename = "generated_image_$timestamp.png"
+            val filename = "generated_image_$timestamp.$extension"
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // Android 10 MediaStore API
                 val contentValues = ContentValues().apply {
                     put(MediaStore.Images.Media.DISPLAY_NAME, filename)
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                    put(MediaStore.Images.Media.MIME_TYPE, mimeType)
                     put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
                 }
 
                 val resolver = context.contentResolver
+                val createUriTime = System.currentTimeMillis()
                 val uri =
                     resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
                         ?: throw IOException("Failed to create MediaStore entry")
+                android.util.Log.d(
+                    "SaveImage",
+                    "Create URI took: ${System.currentTimeMillis() - createUriTime}ms"
+                )
 
+                val compressStartTime = System.currentTimeMillis()
                 resolver.openOutputStream(uri)?.use { outputStream ->
-                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+                    bitmap.compress(format, quality, outputStream)
                 } ?: throw IOException("Failed to open output stream")
+                android.util.Log.d(
+                    "SaveImage",
+                    "Compression and writing took: ${System.currentTimeMillis() - compressStartTime}ms"
+                )
             } else {
                 // Android 9
                 val imagesDir = File(
@@ -211,17 +247,25 @@ private suspend fun saveImage(
                 }
 
                 val file = File(imagesDir, filename)
+                val compressStartTime = System.currentTimeMillis()
                 FileOutputStream(file).use { out ->
-                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    bitmap.compress(format, quality, out)
                 }
+                android.util.Log.d(
+                    "SaveImage",
+                    "Compression and writing took: ${System.currentTimeMillis() - compressStartTime}ms"
+                )
 
                 MediaScannerConnection.scanFile(
                     context,
                     arrayOf(file.toString()),
-                    arrayOf("image/png"),
+                    arrayOf(mimeType),
                     null
                 )
             }
+
+            val totalTime = System.currentTimeMillis() - startTime
+            android.util.Log.d("SaveImage", "Save complete - total time: ${totalTime}ms")
 
             withContext(Dispatchers.Main) {
                 onSuccess()
@@ -404,10 +448,17 @@ fun ModelRunScreen(
 
     var saveAllJob: Job? by remember { mutableStateOf(null) }
 
+    // Upscaler related states
+    var showUpscalerDialog by remember { mutableStateOf(false) }
+    var isUpscaling by remember { mutableStateOf(false) }
+    val upscalerRepository = remember { UpscalerRepository(context) }
+    val upscalerPreferences =
+        remember { context.getSharedPreferences("upscaler_prefs", Context.MODE_PRIVATE) }
+
     fun saveAllFields() {
         saveAllJob?.cancel()
-        saveAllJob = scope.launch {
-            delay(500)
+        saveAllJob = scope.launch(Dispatchers.IO) {
+            delay(1000)
             generationPreferences.saveAllFields(
                 modelId = modelId,
                 prompt = prompt,
@@ -652,34 +703,35 @@ fun ModelRunScreen(
 
     LaunchedEffect(modelId) {
         if (!hasInitialized) {
-            generationPreferences.getPreferences(modelId).collect { prefs ->
-                if (!hasInitialized && prefs.prompt.isEmpty() && prefs.negativePrompt.isEmpty()) {
-                    model?.let { m ->
-                        if (m.defaultPrompt.isNotEmpty()) {
-                            generationPreferences.savePrompt(modelId, m.defaultPrompt)
-                        }
-                        if (m.defaultNegativePrompt.isNotEmpty()) {
-                            generationPreferences.saveNegativePrompt(
-                                modelId,
-                                m.defaultNegativePrompt
-                            )
-                        }
+            val prefs = generationPreferences.getPreferences(modelId).first()
+
+            if (prefs.prompt.isEmpty() && prefs.negativePrompt.isEmpty()) {
+                model?.let { m ->
+                    if (m.defaultPrompt.isNotEmpty()) {
+                        generationPreferences.savePrompt(modelId, m.defaultPrompt)
+                        prompt = m.defaultPrompt
+                    }
+                    if (m.defaultNegativePrompt.isNotEmpty()) {
+                        generationPreferences.saveNegativePrompt(
+                            modelId,
+                            m.defaultNegativePrompt
+                        )
+                        negativePrompt = m.defaultNegativePrompt
                     }
                 }
-                hasInitialized = true
+            } else {
+                prompt = prefs.prompt
+                negativePrompt = prefs.negativePrompt
             }
-        }
-    }
-    LaunchedEffect(modelId) {
-        generationPreferences.getPreferences(modelId).collect { prefs ->
-            prompt = prefs.prompt
-            negativePrompt = prefs.negativePrompt
+
             steps = prefs.steps
             cfg = prefs.cfg
             seed = prefs.seed
             size = if (model?.runOnCpu == true) prefs.size else resolution
             denoiseStrength = prefs.denoiseStrength
             useOpenCL = prefs.useOpenCL
+
+            hasInitialized = true
         }
     }
     DisposableEffect(Unit) {
@@ -876,6 +928,7 @@ fun ModelRunScreen(
                                 seed = ""
                                 prompt = model?.defaultPrompt ?: ""
                                 negativePrompt = model?.defaultNegativePrompt ?: ""
+                                denoiseStrength = 0.6f
                             }
                         }
                         showResetConfirmDialog = false
@@ -1428,11 +1481,11 @@ fun ModelRunScreen(
                                                     "start service sent"
                                                 )
                                             },
-                                            enabled = serviceState !is GenerationState.Progress,
+                                            enabled = serviceState !is GenerationState.Progress && !isUpscaling,
                                             modifier = Modifier.fillMaxWidth(),
                                             shape = MaterialTheme.shapes.medium
                                         ) {
-                                            if (serviceState is GenerationState.Progress) {
+                                            if (serviceState is GenerationState.Progress || isUpscaling) {
                                                 CircularProgressIndicator(
                                                     modifier = Modifier.size(24.dp),
                                                     color = MaterialTheme.colorScheme.onPrimary
@@ -1757,6 +1810,23 @@ fun ModelRunScreen(
                                                                 Icon(
                                                                     imageVector = Icons.Default.Report,
                                                                     contentDescription = "report inappropriate content"
+                                                                )
+                                                            }
+                                                        }
+
+                                                        // Upscaler button - only show for NPU runtime and resolution <= 1024
+                                                        if (model?.runOnCpu == false &&
+                                                            generationParams?.size?.let { it <= 1024 } == true
+                                                        ) {
+                                                            FilledTonalIconButton(
+                                                                onClick = {
+                                                                    showUpscalerDialog = true
+                                                                },
+                                                                enabled = !isRunning && !isUpscaling
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.AutoFixHigh,
+                                                                    contentDescription = "upscale image"
                                                                 )
                                                             }
                                                         }
@@ -2199,6 +2269,111 @@ fun ModelRunScreen(
             )
         }
     }
+
+    // Upscaler dialog
+    if (showUpscalerDialog) {
+        var tempSelectedUpscalerId by remember {
+            mutableStateOf(upscalerPreferences.getString("${modelId}_selected_upscaler", null))
+        }
+        var downloadingUpscalerId by remember { mutableStateOf<String?>(null) }
+        var downloadProgress by remember { mutableStateOf<DownloadProgress?>(null) }
+
+        UpscalerSelectDialog(
+            upscalers = upscalerRepository.upscalers,
+            selectedUpscalerId = tempSelectedUpscalerId,
+            downloadingUpscalerId = downloadingUpscalerId,
+            downloadProgress = downloadProgress,
+            onDismiss = { showUpscalerDialog = false },
+            onSelectUpscaler = { upscalerId ->
+                tempSelectedUpscalerId = upscalerId
+            },
+            onConfirm = {
+                val selectedUpscaler =
+                    upscalerRepository.upscalers.find { it.id == tempSelectedUpscalerId }
+                if (selectedUpscaler != null && selectedUpscaler.isDownloaded) {
+                    // Save selection
+                    upscalerPreferences.edit()
+                        .putString("${modelId}_selected_upscaler", selectedUpscaler.id).apply()
+                    showUpscalerDialog = false
+
+                    // Execute upscale
+                    currentBitmap?.let { bitmap ->
+                        isUpscaling = true
+                        scope.launch {
+                            try {
+                                val upscaledBitmap = performUpscale(
+                                    context = context,
+                                    bitmap = bitmap,
+                                    modelId = modelId,
+                                    upscalerId = selectedUpscaler.id
+                                )
+                                currentBitmap = upscaledBitmap
+                                imageVersion++
+                                generationParams = generationParams?.copy(
+                                    size = upscaledBitmap.width
+                                )
+                            } catch (e: Exception) {
+                                Toast.makeText(
+                                    context,
+                                    context.getString(
+                                        R.string.upscale_failed,
+                                        e.message ?: "Unknown error"
+                                    ),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } finally {
+                                isUpscaling = false
+                            }
+                        }
+                    }
+                } else if (selectedUpscaler != null && !selectedUpscaler.isDownloaded) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.download_model_first),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            },
+            onDownload = { upscaler ->
+                downloadingUpscalerId = upscaler.id
+                downloadProgress = null
+                scope.launch {
+                    upscalerRepository.downloadUpscaler(upscaler).collect { result ->
+                        when (result) {
+                            is DownloadResult.Progress -> {
+                                downloadProgress = result.progress
+                            }
+
+                            is DownloadResult.Success -> {
+                                downloadingUpscalerId = null
+                                downloadProgress = null
+                                upscalerRepository.refreshUpscalerState(upscaler.id)
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.download_done),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+
+                            is DownloadResult.Error -> {
+                                downloadingUpscalerId = null
+                                downloadProgress = null
+                                Toast.makeText(
+                                    context,
+                                    context.getString(
+                                        R.string.error_download_failed,
+                                        result.message
+                                    ),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                }
+            }
+        )
+    }
+
     AnimatedVisibility(
         visible = isCheckingBackend,
         enter = fadeIn(),
@@ -2226,5 +2401,269 @@ fun ModelRunScreen(
                 )
             }
         }
+    }
+
+    // Upscaling overlay
+    if (isUpscaling) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                CircularProgressIndicator()
+                Text(
+                    stringResource(R.string.upscaling_image),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun UpscalerSelectDialog(
+    upscalers: List<UpscalerModel>,
+    selectedUpscalerId: String?,
+    downloadingUpscalerId: String?,
+    downloadProgress: DownloadProgress?,
+    onDismiss: () -> Unit,
+    onSelectUpscaler: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDownload: (UpscalerModel) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.select_upscaler_model)) },
+        text = {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(upscalers) { upscaler ->
+                    UpscalerModelCard(
+                        upscaler = upscaler,
+                        isSelected = upscaler.id == selectedUpscalerId,
+                        isDownloading = upscaler.id == downloadingUpscalerId,
+                        downloadProgress = if (upscaler.id == downloadingUpscalerId) downloadProgress else null,
+                        onSelect = { onSelectUpscaler(upscaler.id) },
+                        onDownload = { onDownload(upscaler) }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.cancel))
+                }
+                Button(
+                    onClick = onConfirm,
+                    enabled = selectedUpscalerId != null
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun UpscalerModelCard(
+    upscaler: UpscalerModel,
+    isSelected: Boolean,
+    isDownloading: Boolean,
+    downloadProgress: DownloadProgress?,
+    onSelect: () -> Unit,
+    onDownload: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelect() },
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
+        ),
+        border = if (isSelected) {
+            BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            null
+        }
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = upscaler.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = upscaler.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (isDownloading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else if (!upscaler.isDownloaded) {
+                    FilledTonalButton(onClick = onDownload) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = stringResource(R.string.download),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(stringResource(R.string.download))
+                    }
+                } else if (isSelected) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "selected",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            // Show progress bar when downloading
+            if (isDownloading && downloadProgress != null) {
+                LinearProgressIndicator(
+                    progress = downloadProgress.progress,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 16.dp)
+                )
+            }
+        }
+    }
+}
+
+suspend fun performUpscale(
+    context: Context,
+    bitmap: Bitmap,
+    modelId: String,
+    upscalerId: String
+): Bitmap = withContext(Dispatchers.IO) {
+    val totalStartTime = System.currentTimeMillis()
+
+    // Get upscaler model path
+    val upscalerModelsDir = File(Model.getModelsDir(context), upscalerId)
+    val upscalerFile = File(upscalerModelsDir, "upscaler.bin")
+
+    if (!upscalerFile.exists()) {
+        throw Exception("Upscaler model file not found: ${upscalerFile.absolutePath}")
+    }
+
+    // Convert bitmap to RGB bytes
+    val prepareStartTime = System.currentTimeMillis()
+    val width = bitmap.width
+    val height = bitmap.height
+    val pixels = IntArray(width * height)
+    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+    val rgbBytes = ByteArray(width * height * 3)
+    for (i in pixels.indices) {
+        val pixel = pixels[i]
+        rgbBytes[i * 3] = ((pixel shr 16) and 0xFF).toByte()
+        rgbBytes[i * 3 + 1] = ((pixel shr 8) and 0xFF).toByte()
+        rgbBytes[i * 3 + 2] = (pixel and 0xFF).toByte()
+    }
+    android.util.Log.d(
+        "UpscaleBinary",
+        "Prepare RGB data took: ${System.currentTimeMillis() - prepareStartTime}ms"
+    )
+
+    // Prepare binary request
+    val url = URL("http://localhost:8081/upscale")
+    val connection = url.openConnection() as HttpURLConnection
+
+    try {
+        connection.requestMethod = "POST"
+        connection.setRequestProperty("Content-Type", "application/octet-stream")
+        connection.setRequestProperty("X-Image-Width", width.toString())
+        connection.setRequestProperty("X-Image-Height", height.toString())
+        connection.setRequestProperty("X-Upscaler-Path", upscalerFile.absolutePath)
+        connection.doOutput = true
+        connection.connectTimeout = 300000 // 5 minutes
+        connection.readTimeout = 300000
+
+        // Send RGB binary data directly
+        val sendStartTime = System.currentTimeMillis()
+        connection.outputStream.use { os ->
+            os.write(rgbBytes)
+        }
+        android.util.Log.d(
+            "UpscaleBinary",
+            "Send data took: ${System.currentTimeMillis() - sendStartTime}ms"
+        )
+
+        // Read response
+        val responseCode = connection.responseCode
+        if (responseCode == HttpURLConnection.HTTP_OK) {
+            // Read JPEG binary data
+            val readStartTime = System.currentTimeMillis()
+            val imageBytes = connection.inputStream.use { it.readBytes() }
+            android.util.Log.d(
+                "UpscaleBinary",
+                "Receive JPEG data took: ${System.currentTimeMillis() - readStartTime}ms, size: ${imageBytes.size / 1024}KB"
+            )
+
+            // Decode JPEG to Bitmap
+            val decodeStartTime = System.currentTimeMillis()
+            val resultBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            android.util.Log.d(
+                "UpscaleBinary",
+                "Decode JPEG took: ${System.currentTimeMillis() - decodeStartTime}ms"
+            )
+
+            if (resultBitmap == null) {
+                throw Exception("Failed to decode JPEG response")
+            }
+
+            // Read response headers
+            val resultWidth =
+                connection.getHeaderField("X-Output-Width")?.toIntOrNull() ?: resultBitmap.width
+            val resultHeight =
+                connection.getHeaderField("X-Output-Height")?.toIntOrNull() ?: resultBitmap.height
+            val durationMs = connection.getHeaderField("X-Duration-Ms")?.toIntOrNull() ?: 0
+
+            android.util.Log.d("UpscaleBinary", "=== Upscale complete ===")
+            android.util.Log.d("UpscaleBinary", "Server processing took: ${durationMs}ms")
+            android.util.Log.d(
+                "UpscaleBinary",
+                "Client total time: ${System.currentTimeMillis() - totalStartTime}ms"
+            )
+            android.util.Log.d("UpscaleBinary", "Output size: ${resultWidth}x${resultHeight}")
+
+            resultBitmap
+        } else {
+            val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }
+            throw Exception("Upscale failed with response code: $responseCode, error: $errorBody")
+        }
+    } finally {
+        connection.disconnect()
     }
 }

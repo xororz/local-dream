@@ -207,80 +207,124 @@ class BackgroundGenerationService : Service() {
                 }
 
                 response.body?.let { responseBody ->
+                    val streamStartTime = System.currentTimeMillis()
+                    android.util.Log.d("BgGenService", "Reading streaming response")
+
                     val reader = BufferedReader(InputStreamReader(responseBody.byteStream()))
-                    var buffer = StringBuilder()
+                    var messageCount = 0
 
+                    // Read line by line for efficiency
                     while (isActive) {
-                        val char = reader.read()
-                        if (char == -1) break
+                        val readLineStart = System.currentTimeMillis()
+                        val line = reader.readLine() ?: break
+                        val readLineTime = System.currentTimeMillis() - readLineStart
 
-                        when (char.toChar()) {
-                            '\n' -> {
-                                val line = buffer.toString()
-                                if (line.startsWith("data: ")) {
-                                    val data = line.substring(6).trim()
-                                    if (data == "[DONE]") break
+                        if (line.startsWith("data: ")) {
+                            val data = line.substring(6).trim()
+                            if (data == "[DONE]") break
 
-                                    val message = JSONObject(data)
-                                    when (message.optString("type")) {
-                                        "progress" -> {
-                                            val step = message.optInt("step")
-                                            val totalSteps = message.optInt("total_steps")
-                                            val progress = step.toFloat() / totalSteps
-                                            updateState(GenerationState.Progress(progress))
-                                            updateNotification(progress)
-                                        }
+                            val jsonParseStart = System.currentTimeMillis()
+                            val message = JSONObject(data)
+                            val jsonParseTime = System.currentTimeMillis() - jsonParseStart
+                            messageCount++
 
-                                        "complete" -> {
-                                            val base64Image = message.optString("image")
-                                            val returnedSeed =
-                                                message.optLong("seed", -1).takeIf { it != -1L }
-                                            val size = message.optInt("width", 256)
-
-                                            if (base64Image.isNullOrEmpty()) {
-                                                throw IOException("no image data")
-                                            }
-
-                                            val imageBytes = Base64.getDecoder().decode(base64Image)
-                                            val bitmap = Bitmap.createBitmap(
-                                                size,
-                                                size,
-                                                Bitmap.Config.ARGB_8888
-                                            )
-                                            val pixels = IntArray(size * size)
-
-                                            for (i in 0 until size * size) {
-                                                val index = i * 3
-                                                val r = imageBytes[index].toInt() and 0xFF
-                                                val g = imageBytes[index + 1].toInt() and 0xFF
-                                                val b = imageBytes[index + 2].toInt() and 0xFF
-                                                pixels[i] =
-                                                    (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-                                            }
-                                            bitmap.setPixels(pixels, 0, size, 0, 0, size, size)
-
-                                            updateState(
-                                                GenerationState.Complete(
-                                                    bitmap,
-                                                    returnedSeed
-                                                )
-                                            )
-
-                                            delay(500)
-                                            stopSelf()
-                                        }
-
-                                        "error" -> {
-                                            val errorMsg =
-                                                message.optString("message", "unknown error")
-                                            throw IOException(errorMsg)
-                                        }
-                                    }
+                            when (message.optString("type")) {
+                                "progress" -> {
+                                    val step = message.optInt("step")
+                                    val totalSteps = message.optInt("total_steps")
+                                    val progress = step.toFloat() / totalSteps
+                                    updateState(GenerationState.Progress(progress))
+                                    updateNotification(progress)
                                 }
-                                buffer = StringBuilder()
-                            }
 
-                            else -> buffer.append(char.toChar())
+                                "complete" -> {
+                                    android.util.Log.d(
+                                        "BgGenService",
+                                        "=== Received complete message, parsing... ==="
+                                    )
+                                    android.util.Log.d(
+                                        "BgGenService",
+                                        "readLine took: ${readLineTime}ms, line length: ${line.length}"
+                                    )
+                                    android.util.Log.d(
+                                        "BgGenService",
+                                        "JSONObject parsing took: ${jsonParseTime}ms, data length: ${data.length}"
+                                    )
+                                    val completeStartTime = System.currentTimeMillis()
+
+                                    // 1. Extract fields from JSON
+                                    val extractStart = System.currentTimeMillis()
+                                    val base64Image = message.optString("image")
+                                    val returnedSeed =
+                                        message.optLong("seed", -1).takeIf { it != -1L }
+                                    val size = message.optInt("width", 256)
+                                    android.util.Log.d(
+                                        "BgGenService",
+                                        "JSON extraction took: ${System.currentTimeMillis() - extractStart}ms, Base64 length: ${base64Image.length}"
+                                    )
+
+                                    if (base64Image.isNullOrEmpty()) {
+                                        throw IOException("no image data")
+                                    }
+
+                                    // 2. Base64 decode
+                                    val decodeStartTime = System.currentTimeMillis()
+                                    val imageBytes = Base64.getDecoder().decode(base64Image)
+                                    android.util.Log.d(
+                                        "BgGenService",
+                                        "Base64 decoding took: ${System.currentTimeMillis() - decodeStartTime}ms, decoded size: ${imageBytes.size} bytes"
+                                    )
+
+                                    // 3. RGB conversion + Bitmap creation
+                                    val bitmapStartTime = System.currentTimeMillis()
+                                    val bitmap = Bitmap.createBitmap(
+                                        size,
+                                        size,
+                                        Bitmap.Config.ARGB_8888
+                                    )
+                                    val pixels = IntArray(size * size)
+
+                                    for (i in 0 until size * size) {
+                                        val index = i * 3
+                                        val r = imageBytes[index].toInt() and 0xFF
+                                        val g = imageBytes[index + 1].toInt() and 0xFF
+                                        val b = imageBytes[index + 2].toInt() and 0xFF
+                                        pixels[i] =
+                                            (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                                    }
+                                    bitmap.setPixels(pixels, 0, size, 0, 0, size, size)
+                                    android.util.Log.d(
+                                        "BgGenService",
+                                        "RGB conversion + Bitmap creation took: ${System.currentTimeMillis() - bitmapStartTime}ms"
+                                    )
+
+                                    android.util.Log.d(
+                                        "BgGenService",
+                                        "=== Total processing time for complete message: ${System.currentTimeMillis() - completeStartTime}ms, size: ${size}x${size} ==="
+                                    )
+
+                                    updateState(
+                                        GenerationState.Complete(
+                                            bitmap,
+                                            returnedSeed
+                                        )
+                                    )
+
+                                    // Delay to allow UI to update before stopping service
+                                    delay(500)
+                                    stopSelf()
+                                }
+
+                                "error" -> {
+                                    val errorMsg =
+                                        message.optString("message", "unknown error")
+                                    android.util.Log.e(
+                                        "BgGenService",
+                                        "Received error message: $errorMsg"
+                                    )
+                                    throw IOException(errorMsg)
+                                }
+                            }
                         }
                     }
                 }

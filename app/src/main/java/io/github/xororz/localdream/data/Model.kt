@@ -353,6 +353,163 @@ data class Model(
     }
 }
 
+data class UpscalerModel(
+    val id: String,
+    val name: String,
+    val description: String,
+    val baseUrl: String,
+    val file: ModelFile,
+    val isDownloaded: Boolean = false
+)
+
+class UpscalerRepository(private val context: Context) {
+    private val generationPreferences = GenerationPreferences(context)
+
+    private var _baseUrl = mutableStateOf("https://huggingface.co/")
+    var baseUrl: String
+        get() = _baseUrl.value
+        private set(value) {
+            _baseUrl.value = value
+        }
+
+    var upscalers by mutableStateOf(initializeUpscalers())
+        private set
+
+    init {
+        CoroutineScope(Dispatchers.Main).launch {
+            generationPreferences.getBaseUrl().collect { url ->
+                baseUrl = url
+                upscalers = initializeUpscalers()
+            }
+        }
+    }
+
+    fun updateBaseUrl(newUrl: String) {
+        baseUrl = newUrl
+        upscalers = initializeUpscalers()
+    }
+
+    private fun initializeUpscalers(): List<UpscalerModel> {
+        val soc = getDeviceSoc()
+        val suffix = Model.getChipsetSuffix(soc) ?: "min"
+
+        return listOf(
+            createAnimeUpscaler(suffix),
+            createRealisticUpscaler(suffix)
+        )
+    }
+
+    private fun createAnimeUpscaler(suffix: String): UpscalerModel {
+        val id = "upscaler_anime"
+        val file = ModelFile(
+            "upscaler.bin",
+            "upscaler",
+            "xororz/upscaler/resolve/main/realesrgan_x4plus_anime_6b/upscaler_${suffix}.bin"
+        )
+
+        val modelsDir = File(Model.getModelsDir(context), id)
+        val upscalerFile = File(modelsDir, "upscaler.bin")
+
+        val isDownloaded = if (upscalerFile.exists()) {
+            val fileVerification = FileVerification(context)
+            runBlocking {
+                val savedSize = fileVerification.getFileSize(id, "upscaler.bin")
+                savedSize != null && upscalerFile.length() == savedSize
+            }
+        } else {
+            false
+        }
+
+        return UpscalerModel(
+            id = id,
+            name = context.getString(R.string.upscaler_anime),
+            description = context.getString(R.string.upscaler_anime_desc),
+            baseUrl = baseUrl,
+            file = file,
+            isDownloaded = isDownloaded
+        )
+    }
+
+    private fun createRealisticUpscaler(suffix: String): UpscalerModel {
+        val id = "upscaler_realistic"
+        val file = ModelFile(
+            "upscaler.bin",
+            "upscaler",
+            "xororz/upscaler/resolve/main/4x_UltraSharpV2_Lite/upscaler_${suffix}.bin"
+        )
+
+        val modelsDir = File(Model.getModelsDir(context), id)
+        val upscalerFile = File(modelsDir, "upscaler.bin")
+
+        val isDownloaded = if (upscalerFile.exists()) {
+            val fileVerification = FileVerification(context)
+            runBlocking {
+                val savedSize = fileVerification.getFileSize(id, "upscaler.bin")
+                savedSize != null && upscalerFile.length() == savedSize
+            }
+        } else {
+            false
+        }
+
+        return UpscalerModel(
+            id = id,
+            name = context.getString(R.string.upscaler_realistic),
+            description = context.getString(R.string.upscaler_realistic_desc),
+            baseUrl = baseUrl,
+            file = file,
+            isDownloaded = isDownloaded
+        )
+    }
+
+    fun downloadUpscaler(upscaler: UpscalerModel): Flow<DownloadResult> = flow {
+        val modelsDir = File(Model.getModelsDir(context), upscaler.id).apply {
+            if (!exists()) mkdirs()
+        }
+
+        val downloadManager = DownloadManager(context)
+
+        try {
+            downloadManager.downloadWithResume(
+                modelId = upscaler.id,
+                files = listOf(upscaler.file),
+                baseUrl = upscaler.baseUrl,
+                modelDir = modelsDir
+            ).collect { result ->
+                emit(result)
+            }
+        } catch (e: Exception) {
+            emit(DownloadResult.Error(e.message ?: "Download failed"))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    fun refreshUpscalerState(upscalerId: String) {
+        upscalers = upscalers.map { upscaler ->
+            if (upscaler.id == upscalerId) {
+                val modelsDir = File(Model.getModelsDir(context), upscaler.id)
+                val upscalerFile = File(modelsDir, "upscaler.bin")
+
+                val isDownloaded = if (upscalerFile.exists()) {
+                    val fileVerification = FileVerification(context)
+                    runBlocking {
+                        val savedSize = fileVerification.getFileSize(upscaler.id, "upscaler.bin")
+                        savedSize != null && upscalerFile.length() == savedSize
+                    }
+                } else {
+                    false
+                }
+
+                upscaler.copy(isDownloaded = isDownloaded)
+            } else {
+                upscaler
+            }
+        }
+    }
+
+    fun refreshAll() {
+        upscalers = initializeUpscalers()
+    }
+}
+
 class ModelRepository(private val context: Context) {
     private val generationPreferences = GenerationPreferences(context)
 
