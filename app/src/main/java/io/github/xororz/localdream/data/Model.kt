@@ -644,7 +644,7 @@ class ModelRepository(private val context: Context) {
             isDownloaded = true,
             isPartiallyDownloaded = false,
             defaultPrompt = "masterpiece, best quality, flowers,",
-            defaultNegativePrompt = "bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
+            defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = !isNpu,
             useCpuClip = true,
             supportedHighres = supportedHighres,
@@ -743,7 +743,7 @@ class ModelRepository(private val context: Context) {
             isDownloaded = fullyDownloaded,
             isPartiallyDownloaded = partiallyDownloaded,
             defaultPrompt = "masterpiece, best quality, 1girl, solo, cute, white hair,",
-            defaultNegativePrompt = "bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
+            defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             useCpuClip = true,
             supportedHighres = supportedHighres,
             highresInfo = highresInfo
@@ -808,7 +808,7 @@ class ModelRepository(private val context: Context) {
             isDownloaded = fullyDownloaded,
             isPartiallyDownloaded = partiallyDownloaded,
             defaultPrompt = "masterpiece, best quality, 1girl, solo, cute, white hair,",
-            defaultNegativePrompt = "bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
+            defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = true
         )
     }
@@ -880,7 +880,7 @@ class ModelRepository(private val context: Context) {
             isDownloaded = fullyDownloaded,
             isPartiallyDownloaded = partiallyDownloaded,
             defaultPrompt = "chibi, best quality, 1girl, solo, cute, pink hair,",
-            defaultNegativePrompt = "bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
+            defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             useCpuClip = true,
             supportedHighres = supportedHighres,
             highresInfo = highresInfo
@@ -944,7 +944,7 @@ class ModelRepository(private val context: Context) {
             isDownloaded = fullyDownloaded,
             isPartiallyDownloaded = partiallyDownloaded,
             defaultPrompt = "chibi, best quality, 1girl, solo, cute, pink hair,",
-            defaultNegativePrompt = "bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
+            defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = true
         )
     }
@@ -1016,7 +1016,7 @@ class ModelRepository(private val context: Context) {
             isDownloaded = fullyDownloaded,
             isPartiallyDownloaded = partiallyDownloaded,
             defaultPrompt = "masterpiece, best quality, 1girl, solo, cute, white hair,",
-            defaultNegativePrompt = "bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
+            defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             useCpuClip = true,
             supportedHighres = supportedHighres,
             highresInfo = highresInfo
@@ -1080,7 +1080,7 @@ class ModelRepository(private val context: Context) {
             isDownloaded = fullyDownloaded,
             isPartiallyDownloaded = partiallyDownloaded,
             defaultPrompt = "masterpiece, best quality, 1girl, solo, cute, white hair,",
-            defaultNegativePrompt = "bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
+            defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = true
         )
     }
