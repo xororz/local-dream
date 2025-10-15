@@ -117,166 +117,10 @@ import io.github.xororz.localdream.data.DownloadProgress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 
+import io.github.xororz.localdream.utils.performUpscale
+import io.github.xororz.localdream.utils.saveImage
+import io.github.xororz.localdream.utils.reportImage
 
-private suspend fun reportImage(
-    context: Context,
-    bitmap: Bitmap,
-    modelName: String,
-    params: GenerationParameters,
-    onSuccess: () -> Unit,
-    onError: (String) -> Unit
-) {
-    withContext(Dispatchers.IO) {
-        try {
-            val byteArrayOutputStream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.PNG, 90, byteArrayOutputStream)
-            val byteArray = byteArrayOutputStream.toByteArray()
-            val base64Image = Base64.getEncoder().encodeToString(byteArray)
-
-            val jsonObject = JSONObject().apply {
-                put("model_name", modelName)
-                put("generation_params", JSONObject().apply {
-                    put("prompt", params.prompt)
-                    put("negative_prompt", params.negativePrompt)
-                    put("steps", params.steps)
-                    put("cfg", params.cfg)
-                    put("seed", params.seed ?: JSONObject.NULL)
-                    put("size", params.size)
-                    put("run_on_cpu", params.runOnCpu)
-                    put("generation_time", params.generationTime ?: JSONObject.NULL)
-                })
-                put("image_data", base64Image)
-            }
-
-            val client = OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .writeTimeout(60, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS)
-                .build()
-
-            val requestBody = jsonObject.toString()
-                .toRequestBody("application/json".toMediaTypeOrNull())
-
-            val request = Request.Builder()
-                .url("https://report.chino.icu/report")
-                .post(requestBody)
-                .build()
-
-            val response = client.newCall(request).execute()
-
-            withContext(Dispatchers.Main) {
-                if (response.isSuccessful) {
-                    onSuccess()
-                } else {
-                    onError("Report failed: ${response.code}")
-                }
-            }
-
-        } catch (e: Exception) {
-            withContext(Dispatchers.Main) {
-//                onError("Failed to report: ${e.localizedMessage}")
-                onError("Network Error")
-            }
-        }
-    }
-}
-
-private suspend fun saveImage(
-    context: Context,
-    bitmap: Bitmap,
-    onSuccess: () -> Unit,
-    onError: (String) -> Unit
-) {
-    withContext(Dispatchers.IO) {
-        try {
-            val startTime = System.currentTimeMillis()
-            android.util.Log.d(
-                "SaveImage",
-                "Start saving image - size: ${bitmap.width}x${bitmap.height}"
-            )
-
-            // Save as JPEG if width or height is greater than 1024, otherwise save as PNG
-            val isLargeImage = bitmap.width > 1024 || bitmap.height > 1024
-            val format = if (isLargeImage) Bitmap.CompressFormat.JPEG else Bitmap.CompressFormat.PNG
-            val extension = if (isLargeImage) "jpg" else "png"
-            val mimeType = if (isLargeImage) "image/jpeg" else "image/png"
-            val quality = if (isLargeImage) 95 else 100
-
-            android.util.Log.d("SaveImage", "Save format: ${if (isLargeImage) "JPEG" else "PNG"}")
-
-            val timestamp = System.currentTimeMillis()
-            val filename = "generated_image_$timestamp.$extension"
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Android 10 MediaStore API
-                val contentValues = ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, filename)
-                    put(MediaStore.Images.Media.MIME_TYPE, mimeType)
-                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
-                }
-
-                val resolver = context.contentResolver
-                val createUriTime = System.currentTimeMillis()
-                val uri =
-                    resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-                        ?: throw IOException("Failed to create MediaStore entry")
-                android.util.Log.d(
-                    "SaveImage",
-                    "Create URI took: ${System.currentTimeMillis() - createUriTime}ms"
-                )
-
-                val compressStartTime = System.currentTimeMillis()
-                resolver.openOutputStream(uri)?.use { outputStream ->
-                    bitmap.compress(format, quality, outputStream)
-                } ?: throw IOException("Failed to open output stream")
-                android.util.Log.d(
-                    "SaveImage",
-                    "Compression and writing took: ${System.currentTimeMillis() - compressStartTime}ms"
-                )
-            } else {
-                // Android 9
-                val imagesDir = File(
-                    Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_PICTURES
-                    ),
-                    "LocalDream"
-                )
-
-                if (!imagesDir.exists()) {
-                    imagesDir.mkdirs()
-                }
-
-                val file = File(imagesDir, filename)
-                val compressStartTime = System.currentTimeMillis()
-                FileOutputStream(file).use { out ->
-                    bitmap.compress(format, quality, out)
-                }
-                android.util.Log.d(
-                    "SaveImage",
-                    "Compression and writing took: ${System.currentTimeMillis() - compressStartTime}ms"
-                )
-
-                MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(file.toString()),
-                    arrayOf(mimeType),
-                    null
-                )
-            }
-
-            val totalTime = System.currentTimeMillis() - startTime
-            android.util.Log.d("SaveImage", "Save complete - total time: ${totalTime}ms")
-
-            withContext(Dispatchers.Main) {
-                onSuccess()
-            }
-        } catch (e: Exception) {
-            withContext(Dispatchers.Main) {
-                onError("Failed to save: ${e.localizedMessage}")
-            }
-        }
-    }
-}
 
 private fun checkStoragePermission(context: Context): Boolean {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -425,6 +269,9 @@ fun ModelRunScreen(
     var hasInitialized by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
 
+    val isFirstPage by remember { derivedStateOf { pagerState.currentPage == 0 } }
+    val isSecondPage by remember { derivedStateOf { pagerState.currentPage == 1 } }
+
     var isPreviewMode by remember { mutableStateOf(false) }
     var scale by remember { mutableStateOf(1f) }
     var offsetX by remember { mutableStateOf(0f) }
@@ -472,6 +319,22 @@ fun ModelRunScreen(
             )
         }
     }
+
+    val onStepsChange = remember { { value: Float -> steps = value; saveAllFields() } }
+    val onCfgChange = remember { { value: Float -> cfg = value; saveAllFields() } }
+    val onSizeChange = remember {
+        { value: Float ->
+            val rounded = (value / 64).roundToInt() * 64
+            size = rounded.coerceIn(128, 512)
+            saveAllFields()
+        }
+    }
+    val onDenoiseStrengthChange =
+        remember { { value: Float -> denoiseStrength = value; saveAllFields() } }
+    val onSeedChange = remember { { value: String -> seed = value; saveAllFields() } }
+    val onPromptChange = remember { { value: String -> prompt = value; saveAllFields() } }
+    val onNegativePromptChange =
+        remember { { value: String -> negativePrompt = value; saveAllFields() } }
 
     fun processSelectedImage(uri: Uri) {
         imageUriForCrop = uri
@@ -626,7 +489,6 @@ fun ModelRunScreen(
                                 }
 
                         mutableOriginal = originalBitmap.copy(Bitmap.Config.ARGB_8888, true)
-                        originalBitmap.recycle()
 
                         val patch = bitmap
                         resizedPatch = Bitmap.createScaledBitmap(
@@ -644,23 +506,16 @@ fun ModelRunScreen(
                             null
                         )
 
-                        resizedPatch.recycle()
-
                         saveImage(
                             context = context,
                             bitmap = mutableOriginal,
                             onSuccess = onSuccess,
                             onError = onError
                         )
-
-                        mutableOriginal.recycle()
                     } catch (e: Exception) {
                         withContext(Dispatchers.Main) {
                             onError("Failed to create composite image: ${e.localizedMessage}")
                         }
-                        originalBitmap?.recycle()
-                        resizedPatch?.recycle()
-                        mutableOriginal?.recycle()
                     }
                 }
             } else {
@@ -676,7 +531,6 @@ fun ModelRunScreen(
 
     fun cleanup() {
         try {
-            currentBitmap?.recycle()
             currentBitmap = null
             generationParams = null
             context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
@@ -783,7 +637,6 @@ fun ModelRunScreen(
                 withContext(Dispatchers.Main) {
                     android.util.Log.d("ModelRunScreen", "update bitmap")
 
-                    currentBitmap?.recycle()
                     currentBitmap = state.bitmap
                     imageVersion += 1
 
@@ -910,26 +763,25 @@ fun ModelRunScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        scope.launch {
-                            generationPreferences.saveSteps(modelId, 20f)
-                            generationPreferences.saveCfg(modelId, 7f)
-                            generationPreferences.saveSeed(modelId, "")
-                            generationPreferences.savePrompt(modelId, model?.defaultPrompt ?: "")
-                            generationPreferences.saveNegativePrompt(
-                                modelId,
-                                model?.defaultNegativePrompt ?: ""
-                            )
-                            generationPreferences.saveSize(modelId, 256)
-                            generationPreferences.saveDenoiseStrength(modelId, 0.6f)
+                        steps = 20f
+                        cfg = 7f
+                        seed = ""
+                        prompt = model?.defaultPrompt ?: ""
+                        negativePrompt = model?.defaultNegativePrompt ?: ""
+                        denoiseStrength = 0.6f
 
-                            withContext(Dispatchers.Main) {
-                                steps = 20f
-                                cfg = 7f
-                                seed = ""
-                                prompt = model?.defaultPrompt ?: ""
-                                negativePrompt = model?.defaultNegativePrompt ?: ""
-                                denoiseStrength = 0.6f
-                            }
+                        scope.launch(Dispatchers.IO) {
+                            generationPreferences.saveAllFields(
+                                modelId = modelId,
+                                prompt = model?.defaultPrompt ?: "",
+                                negativePrompt = model?.defaultNegativePrompt ?: "",
+                                steps = 20f,
+                                cfg = 7f,
+                                seed = "",
+                                size = 256,
+                                denoiseStrength = 0.6f,
+                                useOpenCL = useOpenCL
+                            )
                         }
                         showResetConfirmDialog = false
                     },
@@ -1016,7 +868,7 @@ fun ModelRunScreen(
                                     }
                                 },
                                 colors = ButtonDefaults.textButtonColors(
-                                    contentColor = if (pagerState.currentPage == 0)
+                                    contentColor = if (isFirstPage)
                                         MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                 )
@@ -1031,7 +883,7 @@ fun ModelRunScreen(
                                     }
                                 },
                                 colors = ButtonDefaults.textButtonColors(
-                                    contentColor = if (pagerState.currentPage == 1)
+                                    contentColor = if (isSecondPage)
                                         MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                 )
@@ -1142,10 +994,7 @@ fun ModelRunScreen(
                                                                 )
                                                                 Slider(
                                                                     value = steps,
-                                                                    onValueChange = {
-                                                                        steps = it
-                                                                        saveAllFields()
-                                                                    },
+                                                                    onValueChange = onStepsChange,
                                                                     valueRange = 1f..50f,
                                                                     steps = 48,
                                                                     modifier = Modifier.fillMaxWidth()
@@ -1159,10 +1008,7 @@ fun ModelRunScreen(
                                                                 )
                                                                 Slider(
                                                                     value = cfg,
-                                                                    onValueChange = {
-                                                                        cfg = it
-                                                                        saveAllFields()
-                                                                    },
+                                                                    onValueChange = onCfgChange,
                                                                     valueRange = 1f..30f,
                                                                     steps = 57,
                                                                     modifier = Modifier.fillMaxWidth()
@@ -1180,15 +1026,7 @@ fun ModelRunScreen(
                                                                     )
                                                                     Slider(
                                                                         value = size.toFloat(),
-                                                                        onValueChange = { newValue ->
-                                                                            val rounded =
-                                                                                (newValue / 64).roundToInt() * 64
-                                                                            size = rounded.coerceIn(
-                                                                                128,
-                                                                                512
-                                                                            )
-                                                                            saveAllFields()
-                                                                        },
+                                                                        onValueChange = onSizeChange,
                                                                         valueRange = 128f..512f,
                                                                         steps = 5,
                                                                         modifier = Modifier.fillMaxWidth()
@@ -1246,10 +1084,7 @@ fun ModelRunScreen(
                                                                     )
                                                                     Slider(
                                                                         value = denoiseStrength,
-                                                                        onValueChange = {
-                                                                            denoiseStrength = it
-                                                                            saveAllFields()
-                                                                        },
+                                                                        onValueChange = onDenoiseStrengthChange,
                                                                         valueRange = 0f..1f,
                                                                         steps = 99,
                                                                         modifier = Modifier.fillMaxWidth()
@@ -1264,10 +1099,7 @@ fun ModelRunScreen(
                                                             ) {
                                                                 OutlinedTextField(
                                                                     value = seed,
-                                                                    onValueChange = {
-                                                                        seed = it
-                                                                        saveAllFields()
-                                                                    },
+                                                                    onValueChange = onSeedChange,
                                                                     label = { Text(stringResource(R.string.random_seed)) },
                                                                     keyboardOptions = KeyboardOptions(
                                                                         keyboardType = KeyboardType.Number
@@ -1365,10 +1197,7 @@ fun ModelRunScreen(
 
                                         OutlinedTextField(
                                             value = prompt,
-                                            onValueChange = {
-                                                prompt = it
-                                                saveAllFields()
-                                            },
+                                            onValueChange = onPromptChange,
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clickable(
@@ -1398,10 +1227,7 @@ fun ModelRunScreen(
 
                                         OutlinedTextField(
                                             value = negativePrompt,
-                                            onValueChange = {
-                                                negativePrompt = it
-                                                saveAllFields()
-                                            },
+                                            onValueChange = onNegativePromptChange,
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clickable(
@@ -1605,9 +1431,7 @@ fun ModelRunScreen(
                                                     IconButton(
                                                         onClick = {
                                                             selectedImageUri = null
-                                                            croppedBitmap?.recycle()
                                                             croppedBitmap = null
-                                                            maskBitmap?.recycle()
                                                             maskBitmap = null
                                                             isInpaintMode = false
                                                             cropRect = null
@@ -1689,7 +1513,6 @@ fun ModelRunScreen(
                                                             }
                                                             IconButton(
                                                                 onClick = {
-                                                                    maskBitmap?.recycle()
                                                                     maskBitmap = null
                                                                     isInpaintMode = false
                                                                     savedPathHistory = null
@@ -1868,7 +1691,7 @@ fun ModelRunScreen(
                                                         .fillMaxWidth()
                                                         .aspectRatio(1f)
                                                         .clickable {
-                                                            if (currentBitmap != null && !currentBitmap!!.isRecycled) {
+                                                            if (currentBitmap != null) {
                                                                 isPreviewMode = true
                                                                 scale = 1f
                                                                 offsetX = 0f
@@ -1879,13 +1702,11 @@ fun ModelRunScreen(
                                                     shadowElevation = 4.dp
                                                 ) {
                                                     currentBitmap?.let { bitmap ->
-                                                        if (!bitmap.isRecycled) {
-                                                            Image(
-                                                                bitmap = bitmap.asImageBitmap(),
-                                                                contentDescription = "generated image",
-                                                                modifier = Modifier.fillMaxSize()
-                                                            )
-                                                        }
+                                                        Image(
+                                                            bitmap = bitmap.asImageBitmap(),
+                                                            contentDescription = "generated image",
+                                                            modifier = Modifier.fillMaxSize()
+                                                        )
                                                     }
                                                 }
                                             }
@@ -2137,7 +1958,7 @@ fun ModelRunScreen(
             )
         }
     }
-    if (isPreviewMode && currentBitmap != null && !currentBitmap!!.isRecycled) {
+    if (isPreviewMode && currentBitmap != null) {
         BackHandler {
             scale = 1f
             offsetX = 0f
@@ -2558,112 +2379,5 @@ fun UpscalerModelCard(
                 )
             }
         }
-    }
-}
-
-suspend fun performUpscale(
-    context: Context,
-    bitmap: Bitmap,
-    modelId: String,
-    upscalerId: String
-): Bitmap = withContext(Dispatchers.IO) {
-    val totalStartTime = System.currentTimeMillis()
-
-    // Get upscaler model path
-    val upscalerModelsDir = File(Model.getModelsDir(context), upscalerId)
-    val upscalerFile = File(upscalerModelsDir, "upscaler.bin")
-
-    if (!upscalerFile.exists()) {
-        throw Exception("Upscaler model file not found: ${upscalerFile.absolutePath}")
-    }
-
-    // Convert bitmap to RGB bytes
-    val prepareStartTime = System.currentTimeMillis()
-    val width = bitmap.width
-    val height = bitmap.height
-    val pixels = IntArray(width * height)
-    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-
-    val rgbBytes = ByteArray(width * height * 3)
-    for (i in pixels.indices) {
-        val pixel = pixels[i]
-        rgbBytes[i * 3] = ((pixel shr 16) and 0xFF).toByte()
-        rgbBytes[i * 3 + 1] = ((pixel shr 8) and 0xFF).toByte()
-        rgbBytes[i * 3 + 2] = (pixel and 0xFF).toByte()
-    }
-    android.util.Log.d(
-        "UpscaleBinary",
-        "Prepare RGB data took: ${System.currentTimeMillis() - prepareStartTime}ms"
-    )
-
-    // Prepare binary request
-    val url = URL("http://localhost:8081/upscale")
-    val connection = url.openConnection() as HttpURLConnection
-
-    try {
-        connection.requestMethod = "POST"
-        connection.setRequestProperty("Content-Type", "application/octet-stream")
-        connection.setRequestProperty("X-Image-Width", width.toString())
-        connection.setRequestProperty("X-Image-Height", height.toString())
-        connection.setRequestProperty("X-Upscaler-Path", upscalerFile.absolutePath)
-        connection.doOutput = true
-        connection.connectTimeout = 300000 // 5 minutes
-        connection.readTimeout = 300000
-
-        // Send RGB binary data directly
-        val sendStartTime = System.currentTimeMillis()
-        connection.outputStream.use { os ->
-            os.write(rgbBytes)
-        }
-        android.util.Log.d(
-            "UpscaleBinary",
-            "Send data took: ${System.currentTimeMillis() - sendStartTime}ms"
-        )
-
-        // Read response
-        val responseCode = connection.responseCode
-        if (responseCode == HttpURLConnection.HTTP_OK) {
-            // Read JPEG binary data
-            val readStartTime = System.currentTimeMillis()
-            val imageBytes = connection.inputStream.use { it.readBytes() }
-            android.util.Log.d(
-                "UpscaleBinary",
-                "Receive JPEG data took: ${System.currentTimeMillis() - readStartTime}ms, size: ${imageBytes.size / 1024}KB"
-            )
-
-            // Decode JPEG to Bitmap
-            val decodeStartTime = System.currentTimeMillis()
-            val resultBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-            android.util.Log.d(
-                "UpscaleBinary",
-                "Decode JPEG took: ${System.currentTimeMillis() - decodeStartTime}ms"
-            )
-
-            if (resultBitmap == null) {
-                throw Exception("Failed to decode JPEG response")
-            }
-
-            // Read response headers
-            val resultWidth =
-                connection.getHeaderField("X-Output-Width")?.toIntOrNull() ?: resultBitmap.width
-            val resultHeight =
-                connection.getHeaderField("X-Output-Height")?.toIntOrNull() ?: resultBitmap.height
-            val durationMs = connection.getHeaderField("X-Duration-Ms")?.toIntOrNull() ?: 0
-
-            android.util.Log.d("UpscaleBinary", "=== Upscale complete ===")
-            android.util.Log.d("UpscaleBinary", "Server processing took: ${durationMs}ms")
-            android.util.Log.d(
-                "UpscaleBinary",
-                "Client total time: ${System.currentTimeMillis() - totalStartTime}ms"
-            )
-            android.util.Log.d("UpscaleBinary", "Output size: ${resultWidth}x${resultHeight}")
-
-            resultBitmap
-        } else {
-            val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }
-            throw Exception("Upscale failed with response code: $responseCode, error: $errorBody")
-        }
-    } finally {
-        connection.disconnect()
     }
 }

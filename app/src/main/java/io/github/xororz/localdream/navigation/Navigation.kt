@@ -10,4 +10,5 @@ sealed class Screen(val route: String) {
                 "model_run/$modelId"
             }
     }
+    object Upscale : Screen("upscale")
 }

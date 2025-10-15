@@ -20,6 +20,7 @@ import androidx.navigation.navArgument
 import io.github.xororz.localdream.navigation.Screen
 import io.github.xororz.localdream.ui.screens.ModelListScreen
 import io.github.xororz.localdream.ui.screens.ModelRunScreen
+import io.github.xororz.localdream.ui.screens.UpscaleScreen
 import io.github.xororz.localdream.ui.theme.LocalDreamTheme
 import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
@@ -145,6 +146,9 @@ class MainActivity : ComponentActivity() {
                                 resolution = resolution,
                                 navController = navController
                             )
+                        }
+                        composable(Screen.Upscale.route) {
+                            UpscaleScreen(navController)
                         }
                     }
                 }

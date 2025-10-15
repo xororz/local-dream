@@ -57,6 +57,7 @@ bool use_mnn = false;
 bool use_safety_checker = false;
 bool use_mnn_clip = false;
 bool use_clip_v2 = false;
+bool upscaler_mode = false;
 float nsfw_threshold = 0.5f;
 std::string clipPath, unetPath, vaeDecoderPath, vaeEncoderPath,
     safetyCheckerPath, tokenizerPath, patchPath, modelDir, upscalerPath;
@@ -344,6 +345,7 @@ void processCommandLine(int argc, char **argv) {
     OPT_VAE_ENCODER_ARG = 29,
     OPT_CONVERT = 30,
     OPT_CONVERT_CLIP_SKIP_2 = 31,
+    OPT_UPSCALER_MODE = 32,
     OPT_BACKEND = 3,
     OPT_LOG_LEVEL = 10,
     OPT_VERSION = 13,
@@ -373,6 +375,7 @@ void processCommandLine(int argc, char **argv) {
       {"system_library", pal::required_argument, NULL, OPT_SYSTEM_LIBRARY},
       {"version", pal::no_argument, NULL, OPT_VERSION},
       {"patch", pal::required_argument, NULL, OPT_PATCH},
+      {"upscaler_mode", pal::no_argument, NULL, OPT_UPSCALER_MODE},
       {NULL, 0, NULL, 0}};
   std::string backendPathCmd, systemLibraryPathCmd;
   QnnLog_Level_t logLevel = QNN_LOG_LEVEL_ERROR;
@@ -498,9 +501,27 @@ void processCommandLine(int argc, char **argv) {
                    resolution);
         }
         break;
+      case OPT_UPSCALER_MODE:
+        upscaler_mode = true;
+        break;
       default:
         showHelpAndExit("Invalid argument passed.");
     }
+  }
+
+  if (upscaler_mode) {
+    if (use_mnn) return;
+    if (systemLibraryPathCmd.empty())
+      showHelpAndExit("Requires --system_library for QNN");
+    if (backendPathCmd.empty()) showHelpAndExit("Requires --backend for QNN");
+
+    g_backendPathCmd = backendPathCmd;
+    dynamicloadutil::StatusCode sysStatus =
+        dynamicloadutil::getQnnSystemFunctionPointers(systemLibraryPathCmd,
+                                                      &g_qnnSystemFuncs);
+    if (sysStatus != dynamicloadutil::StatusCode::SUCCESS)
+      showHelpAndExit("Failed get QNN system func ptrs.");
+    return;
   }
   if (cvt_model) {
     if (!std::filesystem::exists(model_dir)) {
@@ -965,8 +986,8 @@ xt::xarray<uint8_t> upscaleImageWithModel(
       weight_slice += tile_weight;
 
       tile_count++;
-      QNN_INFO("Processed upscaler tile %d/%d", tile_count,
-               num_tiles_w * num_tiles_h);
+      std::cout << "Processed tile " << tile_count << "/"
+                << (num_tiles_w * num_tiles_h) << std::endl;
     }
   }
 
@@ -981,7 +1002,157 @@ xt::xarray<uint8_t> upscaleImageWithModel(
   auto output_normalized = output_clamped * 255.0f;
   xt::xarray<uint8_t> output_uint8 = xt::cast<uint8_t>(output_normalized);
 
-  QNN_INFO("Upscaling completed: %d tiles processed", tile_count);
+  return output_uint8;
+}
+
+// Upscale image using MNN model
+xt::xarray<uint8_t> upscaleImageWithMNN(const std::vector<uint8_t> &input_image,
+                                        int width, int height,
+                                        const std::string &model_path,
+                                        bool use_opencl) {
+  const int tile_size = 192;
+  const int output_tile_size = 768;
+  const int min_overlap = 12;
+  const float scale_factor = 4.0f;
+
+  auto interpreter = std::shared_ptr<MNN::Interpreter>(
+      MNN::Interpreter::createFromFile(model_path.c_str()));
+  if (!interpreter) {
+    throw std::runtime_error("Failed to create MNN interpreter from: " +
+                             model_path);
+  }
+
+  MNN::ScheduleConfig config;
+  MNN::BackendConfig backendConfig;
+  if (use_opencl) {
+    auto cache_file = model_path + ".mnnc";
+    interpreter->setCacheFile(cache_file.c_str());
+    config.type = MNN_FORWARD_OPENCL;
+    config.mode = MNN_GPU_MEMORY_BUFFER | MNN_GPU_TUNING_FAST;
+    backendConfig.precision = MNN::BackendConfig::Precision_Low;
+  } else {
+    config.type = MNN_FORWARD_CPU;
+    config.numThread = 4;
+    backendConfig.memory = MNN::BackendConfig::Memory_Low;
+  }
+  backendConfig.power = MNN::BackendConfig::Power_High;
+  config.backendConfig = &backendConfig;
+
+  auto session = interpreter->createSession(config);
+  if (!session) {
+    throw std::runtime_error("Failed to create MNN session");
+  }
+
+  auto x_coords = calculate_tile_positions(width, tile_size, min_overlap);
+  auto y_coords = calculate_tile_positions(height, tile_size, min_overlap);
+  int num_tiles_w = x_coords.size();
+  int num_tiles_h = y_coords.size();
+
+  int output_width = width * scale_factor;
+  int output_height = height * scale_factor;
+
+  QNN_INFO("Upscaling %dx%d to %dx%d using MNN (%s), %dx%d tiles", width,
+           height, output_width, output_height, use_opencl ? "OpenCL" : "CPU",
+           num_tiles_w, num_tiles_h);
+
+  std::vector<int> input_shape = {1, height, width, 3};
+  xt::xarray<uint8_t> input_hwc_u8 = xt::adapt(input_image, input_shape);
+  xt::xarray<float> input_hwc_f32 = xt::cast<float>(input_hwc_u8) / 255.0f;
+  xt::xarray<float> input_chw =
+      xt::transpose(input_hwc_f32, {0, 3, 1, 2});  // (1, 3, H, W)
+
+  std::vector<int> output_shape = {1, 3, output_height, output_width};
+  xt::xarray<float> accumulated_output = xt::zeros<float>(output_shape);
+  xt::xarray<float> weight_map =
+      xt::zeros<float>({output_height, output_width});
+
+  int output_overlap = min_overlap * scale_factor;
+  int fade_size = output_overlap / 2;
+  xt::xarray<float> tile_weight =
+      xt::ones<float>({output_tile_size, output_tile_size});
+
+  if (fade_size > 0) {
+    for (int i = 0; i < fade_size; ++i) {
+      float alpha = static_cast<float>(i + 1) / fade_size;
+      xt::view(tile_weight, i, xt::all()) *= alpha;
+      xt::view(tile_weight, output_tile_size - 1 - i, xt::all()) *= alpha;
+      xt::view(tile_weight, xt::all(), i) *= alpha;
+      xt::view(tile_weight, xt::all(), output_tile_size - 1 - i) *= alpha;
+    }
+  }
+
+  // Get input and output tensors
+  auto input_tensor = interpreter->getSessionInput(session, nullptr);
+  auto output_tensor = interpreter->getSessionOutput(session, nullptr);
+
+  int tile_count = 0;
+  for (int y : y_coords) {
+    for (int x : x_coords) {
+      xt::xarray<float> input_tile =
+          xt::view(input_chw, 0, xt::all(), xt::range(y, y + tile_size),
+                   xt::range(x, x + tile_size));
+
+      // Prepare input tensor
+      std::vector<int> dims = {1, 3, tile_size, tile_size};
+      interpreter->resizeTensor(input_tensor, dims);
+      interpreter->resizeSession(session);
+
+      auto host_tensor = MNN::Tensor::create<float>(
+          dims, const_cast<float *>(input_tile.data()), MNN::Tensor::CAFFE);
+      input_tensor->copyFromHostTensor(host_tensor);
+      delete host_tensor;
+
+      // Run inference
+      if (interpreter->runSession(session) != 0) {
+        throw std::runtime_error("MNN inference failed for tile");
+      }
+
+      // Get output
+      auto output_host =
+          MNN::Tensor::create<float>({1, 3, output_tile_size, output_tile_size},
+                                     nullptr, MNN::Tensor::CAFFE);
+      output_tensor->copyToHostTensor(output_host);
+
+      std::vector<int> tile_output_shape = {1, 3, output_tile_size,
+                                            output_tile_size};
+      xt::xarray<float> output_tile = xt::adapt(
+          output_host->host<float>(), output_tile_size * output_tile_size * 3,
+          xt::no_ownership(), tile_output_shape);
+
+      int out_x = x * scale_factor;
+      int out_y = y * scale_factor;
+
+      for (int c = 0; c < 3; ++c) {
+        auto acc_slice = xt::view(accumulated_output, 0, c,
+                                  xt::range(out_y, out_y + output_tile_size),
+                                  xt::range(out_x, out_x + output_tile_size));
+        auto tile_slice = xt::view(output_tile, 0, c, xt::all(), xt::all());
+        acc_slice += tile_slice * tile_weight;
+      }
+
+      auto weight_slice =
+          xt::view(weight_map, xt::range(out_y, out_y + output_tile_size),
+                   xt::range(out_x, out_x + output_tile_size));
+      weight_slice += tile_weight;
+
+      delete output_host;
+
+      tile_count++;
+      std::cout << "Processed tile " << tile_count << "/"
+                << (num_tiles_w * num_tiles_h) << std::endl;
+    }
+  }
+
+  weight_map = xt::maximum(weight_map, 1e-8f);
+  xt::xarray<float> weight_expanded =
+      xt::reshape_view(weight_map, {1, 1, output_height, output_width});
+
+  xt::xarray<float> normalized_output = accumulated_output / weight_expanded;
+
+  auto output_hwc = xt::transpose(normalized_output, {0, 2, 3, 1});
+  auto output_clamped = xt::clip(output_hwc, 0.0f, 1.0f);
+  auto output_normalized = output_clamped * 255.0f;
+  xt::xarray<uint8_t> output_uint8 = xt::cast<uint8_t>(output_normalized);
 
   return output_uint8;
 }
@@ -1803,101 +1974,108 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   sample_app::processCommandLine(argc, argv);
-  try {
-    auto blob = LoadBytesFromFile(tokenizerPath);
-    tokenizer = tokenizers::Tokenizer::FromBlobJSON(blob);
-    if (!tokenizer) throw std::runtime_error("Tokenizer creation failed.");
-  } catch (const std::exception &e) {
-    std::cerr << "Failed load tokenizer: " << e.what() << std::endl;
-    return EXIT_FAILURE;
-  }
 
-  // Load embeddings
-  if (!modelDir.empty()) {
-    std::filesystem::path modelPath(modelDir);
-    std::filesystem::path embeddingsPath =
-        modelPath.parent_path().parent_path() / "embeddings";
-    if (std::filesystem::exists(embeddingsPath)) {
-      try {
-        promptProcessor.loadEmbeddings(embeddingsPath.string());
-        QNN_INFO("Loaded %zu embeddings from %s",
-                 promptProcessor.getEmbeddingCount(),
-                 embeddingsPath.string().c_str());
-      } catch (const std::exception &e) {
-        QNN_WARN("Failed to load embeddings: %s", e.what());
-      }
-    } else {
-      QNN_INFO("Embeddings directory not found: %s",
-               embeddingsPath.string().c_str());
+  if (!upscaler_mode) {
+    try {
+      auto blob = LoadBytesFromFile(tokenizerPath);
+      tokenizer = tokenizers::Tokenizer::FromBlobJSON(blob);
+      if (!tokenizer) throw std::runtime_error("Tokenizer creation failed.");
+    } catch (const std::exception &e) {
+      std::cerr << "Failed load tokenizer: " << e.what() << std::endl;
+      return EXIT_FAILURE;
     }
-  }
 
-  MNN::ScheduleConfig cfg_common;
-  cfg_common.type = MNN_FORWARD_CPU;
-  cfg_common.numThread = 1;
-  MNN::BackendConfig bkCfg_common;
-  bkCfg_common.memory = MNN::BackendConfig::Memory_Low;
-  bkCfg_common.power = MNN::BackendConfig::Power_High;
-  cfg_common.backendConfig = &bkCfg_common;
-  MNN::ScheduleConfig cfg_mnn_clip = cfg_common;
-  cfg_mnn_clip.numThread = 4;
-
-  if (use_mnn_clip && clipInterpreter) {
-    clipSession = clipInterpreter->createSession(cfg_mnn_clip);
-    if (!clipSession)
-      QNN_ERROR("Failed create persistent MNN CLIP session (hybrid)!");
-    else {
-      QNN_INFO("Persistent MNN CLIP session (hybrid) created.");
-      if (use_clip_v2) {
-        auto input =
-            clipInterpreter->getSessionInput(clipSession, "input_embedding");
-        clipInterpreter->resizeTensor(input, {1, 77, 768});
+    // Load embeddings
+    if (!modelDir.empty()) {
+      std::filesystem::path modelPath(modelDir);
+      std::filesystem::path embeddingsPath =
+          modelPath.parent_path().parent_path() / "embeddings";
+      if (std::filesystem::exists(embeddingsPath)) {
+        try {
+          promptProcessor.loadEmbeddings(embeddingsPath.string());
+          QNN_INFO("Loaded %zu embeddings from %s",
+                   promptProcessor.getEmbeddingCount(),
+                   embeddingsPath.string().c_str());
+        } catch (const std::exception &e) {
+          QNN_WARN("Failed to load embeddings: %s", e.what());
+        }
       } else {
-        auto input = clipInterpreter->getSessionInput(clipSession, "input_ids");
-        clipInterpreter->resizeTensor(input, {1, 77});
+        QNN_INFO("Embeddings directory not found: %s",
+                 embeddingsPath.string().c_str());
       }
-      clipInterpreter->resizeSession(clipSession);
-      clipInterpreter->releaseModel();
     }
-  }
 
-  if (safetyCheckerInterpreter) {
-    safetyCheckerSession = safetyCheckerInterpreter->createSession(cfg_common);
-    if (!safetyCheckerSession)
-      QNN_ERROR("Failed create persistent MNN Safety session!");
-    else {
-      QNN_INFO("Persistent MNN Safety session created.");
-      auto input = safetyCheckerInterpreter->getSessionInput(
-          safetyCheckerSession, nullptr);
-      safetyCheckerInterpreter->resizeTensor(input, {1, 224, 224, 3});
-      safetyCheckerInterpreter->resizeSession(safetyCheckerSession);
-      safetyCheckerInterpreter->releaseModel();
-    }
-  }
+    MNN::ScheduleConfig cfg_common;
+    cfg_common.type = MNN_FORWARD_CPU;
+    cfg_common.numThread = 1;
+    MNN::BackendConfig bkCfg_common;
+    bkCfg_common.memory = MNN::BackendConfig::Memory_Low;
+    bkCfg_common.power = MNN::BackendConfig::Power_High;
+    cfg_common.backendConfig = &bkCfg_common;
+    MNN::ScheduleConfig cfg_mnn_clip = cfg_common;
+    cfg_mnn_clip.numThread = 4;
 
-  // --- Initialize QNN Models ---
-  if (!use_mnn) {
-    int status = EXIT_SUCCESS;
-    if (!use_mnn_clip && clipApp) {
-      status = sample_app::initializeQnnApp("CLIP", clipApp);
-      if (status != EXIT_SUCCESS) return status;
+    if (use_mnn_clip && clipInterpreter) {
+      clipSession = clipInterpreter->createSession(cfg_mnn_clip);
+      if (!clipSession)
+        QNN_ERROR("Failed create persistent MNN CLIP session (hybrid)!");
+      else {
+        QNN_INFO("Persistent MNN CLIP session (hybrid) created.");
+        if (use_clip_v2) {
+          auto input =
+              clipInterpreter->getSessionInput(clipSession, "input_embedding");
+          clipInterpreter->resizeTensor(input, {1, 77, 768});
+        } else {
+          auto input =
+              clipInterpreter->getSessionInput(clipSession, "input_ids");
+          clipInterpreter->resizeTensor(input, {1, 77});
+        }
+        clipInterpreter->resizeSession(clipSession);
+        clipInterpreter->releaseModel();
+      }
     }
-    if (unetApp) {
-      status = sample_app::initializeQnnApp("UNET", unetApp);
-      if (status != EXIT_SUCCESS) return status;
+
+    if (safetyCheckerInterpreter) {
+      safetyCheckerSession =
+          safetyCheckerInterpreter->createSession(cfg_common);
+      if (!safetyCheckerSession)
+        QNN_ERROR("Failed create persistent MNN Safety session!");
+      else {
+        QNN_INFO("Persistent MNN Safety session created.");
+        auto input = safetyCheckerInterpreter->getSessionInput(
+            safetyCheckerSession, nullptr);
+        safetyCheckerInterpreter->resizeTensor(input, {1, 224, 224, 3});
+        safetyCheckerInterpreter->resizeSession(safetyCheckerSession);
+        safetyCheckerInterpreter->releaseModel();
+      }
     }
-    if (vaeDecoderApp) {
-      status = sample_app::initializeQnnApp("VAEDecoder", vaeDecoderApp);
-      if (status != EXIT_SUCCESS) return status;
+
+    // --- Initialize QNN Models ---
+    if (!use_mnn) {
+      int status = EXIT_SUCCESS;
+      if (!use_mnn_clip && clipApp) {
+        status = sample_app::initializeQnnApp("CLIP", clipApp);
+        if (status != EXIT_SUCCESS) return status;
+      }
+      if (unetApp) {
+        status = sample_app::initializeQnnApp("UNET", unetApp);
+        if (status != EXIT_SUCCESS) return status;
+      }
+      if (vaeDecoderApp) {
+        status = sample_app::initializeQnnApp("VAEDecoder", vaeDecoderApp);
+        if (status != EXIT_SUCCESS) return status;
+      }
+      if (vaeEncoderApp) {
+        status = sample_app::initializeQnnApp("VAEEncoder", vaeEncoderApp);
+        if (status != EXIT_SUCCESS) return status;
+      }
+      if (upscalerApp) {
+        status = sample_app::initializeQnnApp("Upscaler", upscalerApp);
+        if (status != EXIT_SUCCESS) return status;
+      }
     }
-    if (vaeEncoderApp) {
-      status = sample_app::initializeQnnApp("VAEEncoder", vaeEncoderApp);
-      if (status != EXIT_SUCCESS) return status;
-    }
-    if (upscalerApp) {
-      status = sample_app::initializeQnnApp("Upscaler", upscalerApp);
-      if (status != EXIT_SUCCESS) return status;
-    }
+  } else {
+    QNN_INFO("Upscaler mode - skipping MNN and QNN model initialization");
   }
 
   // --- HTTP Server ---
@@ -2093,74 +2271,131 @@ int main(int argc, char **argv) {
         throw std::invalid_argument("Missing 'X-Upscaler-Path' header");
       }
 
-      int width = std::stoi(req.get_header_value("X-Image-Width"));
-      int height = std::stoi(req.get_header_value("X-Image-Height"));
+      int original_width = std::stoi(req.get_header_value("X-Image-Width"));
+      int original_height = std::stoi(req.get_header_value("X-Image-Height"));
       std::string upscaler_path = req.get_header_value("X-Upscaler-Path");
 
-      QNN_INFO("Binary upscale request: %dx%d, upscaler: %s", width, height,
-               upscaler_path.c_str());
+      // Check if use_opencl header is present (for MNN models)
+      bool use_opencl = false;
+      if (req.has_header("X-Use-OpenCL")) {
+        std::string opencl_str = req.get_header_value("X-Use-OpenCL");
+        use_opencl = (opencl_str == "true" || opencl_str == "1");
+      }
+
+      // Determine model type based on file extension
+      bool is_mnn_model = false;
+      if (upscaler_path.size() >= 4) {
+        std::string ext = upscaler_path.substr(upscaler_path.size() - 4);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        is_mnn_model = (ext == ".mnn");
+      }
+
+      QNN_INFO("Binary upscale request: %dx%d, upscaler: %s, type: %s%s",
+               original_width, original_height, upscaler_path.c_str(),
+               is_mnn_model ? "MNN" : "QNN",
+               is_mnn_model && use_opencl ? " (OpenCL)" : "");
 
       std::vector<uint8_t> image_data(req.body.begin(), req.body.end());
 
-      if (image_data.size() != width * height * 3) {
+      if (image_data.size() != original_width * original_height * 3) {
         throw std::invalid_argument(
             "Image data size mismatch. Expected " +
-            std::to_string(width * height * 3) + " bytes, got " +
-            std::to_string(image_data.size()) + " bytes");
+            std::to_string(original_width * original_height * 3) +
+            " bytes, got " + std::to_string(image_data.size()) + " bytes");
       }
 
-      tempUpscalerApp = createQnnModel(upscaler_path, "upscaler");
-      if (!tempUpscalerApp) {
-        throw std::runtime_error("Failed to create upscaler model from: " +
-                                 upscaler_path);
-      }
+      // Pre-process: resize if shortest edge < 192
+      const int min_size = 192;
+      int process_width = original_width;
+      int process_height = original_height;
+      std::vector<uint8_t> process_image = image_data;
 
-      auto status = sample_app::initializeQnnApp("Upscaler", tempUpscalerApp);
-      if (status != EXIT_SUCCESS) {
-        throw std::runtime_error("Failed to initialize upscaler model");
+      if (std::min(original_width, original_height) < min_size) {
+        QNN_INFO("Image too small (%dx%d), resizing to min edge %d",
+                 original_width, original_height, min_size);
+        process_image =
+            resizeImageToMinSize(image_data, original_width, original_height,
+                                 min_size, process_width, process_height);
+        QNN_INFO("Resized to %dx%d for processing", process_width,
+                 process_height);
       }
 
       auto start_time = std::chrono::high_resolution_clock::now();
 
-      xt::xarray<uint8_t> upscaled =
-          upscaleImageWithModel(image_data, width, height, tempUpscalerApp);
+      xt::xarray<uint8_t> upscaled;
+
+      if (is_mnn_model) {
+        // Use MNN model
+        upscaled =
+            upscaleImageWithMNN(process_image, process_width, process_height,
+                                upscaler_path, use_opencl);
+      } else {
+        // Use QNN model
+        tempUpscalerApp = createQnnModel(upscaler_path, "upscaler");
+        if (!tempUpscalerApp) {
+          throw std::runtime_error("Failed to create upscaler model from: " +
+                                   upscaler_path);
+        }
+
+        auto status = sample_app::initializeQnnApp("Upscaler", tempUpscalerApp);
+        if (status != EXIT_SUCCESS) {
+          throw std::runtime_error("Failed to initialize upscaler model");
+        }
+
+        upscaled = upscaleImageWithModel(process_image, process_width,
+                                         process_height, tempUpscalerApp);
+      }
 
       auto end_time = std::chrono::high_resolution_clock::now();
       int duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                          end_time - start_time)
                          .count();
 
-      int output_width = width * 4;
-      int output_height = height * 4;
+      int upscaled_width = process_width * 4;
+      int upscaled_height = process_height * 4;
+
+      // Post-process: resize back to target dimensions if needed
+      int final_width = original_width * 4;
+      int final_height = original_height * 4;
+      std::vector<uint8_t> final_rgb(upscaled.begin(), upscaled.end());
+
+      if (upscaled_width != final_width || upscaled_height != final_height) {
+        QNN_INFO("Resizing output from %dx%d to %dx%d", upscaled_width,
+                 upscaled_height, final_width, final_height);
+        final_rgb =
+            resizeImageToTarget(final_rgb, upscaled_width, upscaled_height,
+                                final_width, final_height);
+      }
 
       auto encode_start = std::chrono::high_resolution_clock::now();
-      std::vector<uint8_t> output_rgb(upscaled.begin(), upscaled.end());
       std::vector<uint8_t> output_jpeg =
-          encodeJPEG(output_rgb, output_width, output_height, 95);
+          encodeJPEG(final_rgb, final_width, final_height, 95);
       auto encode_end = std::chrono::high_resolution_clock::now();
       int encode_duration =
           std::chrono::duration_cast<std::chrono::milliseconds>(encode_end -
                                                                 encode_start)
               .count();
 
-      QNN_INFO("Upscaling completed in %d ms: %dx%d -> %dx%d", duration, width,
-               height, output_width, output_height);
+      QNN_INFO("Upscaling completed in %d ms: %dx%d -> %dx%d", duration,
+               original_width, original_height, final_width, final_height);
       QNN_INFO("JPEG encoding time: %d ms, size: %zu KB", encode_duration,
                output_jpeg.size() / 1024);
 
       res.status = 200;
       res.set_content(std::string(output_jpeg.begin(), output_jpeg.end()),
                       "image/jpeg");
-      res.set_header("X-Output-Width", std::to_string(output_width));
-      res.set_header("X-Output-Height", std::to_string(output_height));
+      res.set_header("X-Output-Width", std::to_string(final_width));
+      res.set_header("X-Output-Height", std::to_string(final_height));
       res.set_header("X-Duration-Ms", std::to_string(duration));
       res.set_header("Access-Control-Allow-Origin", "*");
       res.set_header("Access-Control-Expose-Headers",
                      "X-Output-Width,X-Output-Height,X-Duration-Ms");
 
       // Release the temporary upscaler model
-      tempUpscalerApp.reset();
-      QNN_INFO("Upscaler model released");
+      if (tempUpscalerApp) {
+        tempUpscalerApp.reset();
+        QNN_INFO("Upscaler model released");
+      }
 
     } catch (const std::invalid_argument &e) {
       if (tempUpscalerApp) tempUpscalerApp.reset();
