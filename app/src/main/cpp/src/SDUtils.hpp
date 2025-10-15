@@ -373,7 +373,8 @@ inline std::vector<uint8_t> encodePNG(const std::vector<uint8_t> &rgb_data,
 
 // Encodes an RGB byte array into JPEG format (quality adjustable)
 inline std::vector<uint8_t> encodeJPEG(const std::vector<uint8_t> &rgb_data,
-                                       int width, int height, int quality = 95) {
+                                       int width, int height,
+                                       int quality = 95) {
   std::vector<uint8_t> jpeg_buffer;
 
   stbi_write_jpg_to_func(
@@ -409,6 +410,50 @@ inline std::vector<uint8_t> decodePNG(const std::vector<uint8_t> &png_data,
 // Reads an RGB byte array directly (no decoding needed)
 inline std::vector<uint8_t> readRGBFromBinary(const std::string &binary_data) {
   return std::vector<uint8_t>(binary_data.begin(), binary_data.end());
+}
+
+// Resize image to ensure shortest edge is at least target_size
+// Returns resized image data and new dimensions
+inline std::vector<uint8_t> resizeImageToMinSize(
+    const std::vector<uint8_t> &input_image, int width, int height,
+    int target_size, int &new_width, int &new_height) {
+  int min_dim = std::min(width, height);
+
+  if (min_dim >= target_size) {
+    // No resize needed
+    new_width = width;
+    new_height = height;
+    return input_image;
+  }
+
+  float scale = static_cast<float>(target_size) / min_dim;
+  new_width = static_cast<int>(width * scale);
+  new_height = static_cast<int>(height * scale);
+
+  std::vector<uint8_t> resized_image(new_width * new_height * 3);
+
+  stbir_resize_uint8_linear(input_image.data(), width, height, 0,
+                            resized_image.data(), new_width, new_height, 0,
+                            STBIR_RGB);
+
+  return resized_image;
+}
+
+// Resize image back to target dimensions
+inline std::vector<uint8_t> resizeImageToTarget(
+    const std::vector<uint8_t> &input_image, int width, int height,
+    int target_width, int target_height) {
+  if (width == target_width && height == target_height) {
+    return input_image;
+  }
+
+  std::vector<uint8_t> resized_image(target_width * target_height * 3);
+
+  stbir_resize_uint8_linear(input_image.data(), width, height, 0,
+                            resized_image.data(), target_width, target_height,
+                            0, STBIR_RGB);
+
+  return resized_image;
 }
 
 #endif
