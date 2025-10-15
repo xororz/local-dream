@@ -198,4 +198,14 @@
     <string name="upscaler_anime_desc">Optimized for anime and cartoon images</string>
     <string name="upscaler_realistic">Realistic</string>
     <string name="upscaler_realistic_desc">Optimized for realistic photos</string>
+    <string name="image_upscale">Image Upscale</string>
+    <string name="upscale">Upscale</string>
+    <string name="add_image">Add Image</string>
+    <string name="clear_image">Clear Image</string>
+    <string name="save_image">Save Image</string>
+    <string name="selected_image">Selected Image</string>
+    <string name="upscaled_image">Upscaled Image</string>
+    <string name="click_to_add_image">Tap to add image for upscaling</string>
+    <string name="image_resolution_too_large">Image resolution too large (%1$d×%2$d), please select an image smaller than 2048x2048</string>
+    <string name="failed_to_load_image">Failed to load image: %s</string>
 </resources>

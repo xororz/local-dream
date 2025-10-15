@@ -621,6 +621,11 @@ fun ModelListScreen(
                     IconButton(onClick = { showHelpDialog = true }) {
                         Icon(Icons.AutoMirrored.Filled.Help, stringResource(R.string.help))
                     }
+                    if (Model.isQualcommDevice()) {
+                        IconButton(onClick = { navController.navigate(Screen.Upscale.route) }) {
+                            Icon(Icons.Default.AutoFixHigh, stringResource(R.string.image_upscale))
+                        }
+                    }
                     IconButton(onClick = { showSettingsDialog = true }) {
                         Icon(Icons.Default.Settings, stringResource(R.string.settings))
                     }

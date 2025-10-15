@@ -192,12 +192,22 @@
     <string name="only_safetensors_supported">仅支持 .safetensors 文件</string>
 
     <!-- Upscaler -->
-    <string name="select_upscaler_model">选择超分模型</string>
+    <string name="select_upscaler_model">选择超分辨率模型</string>
     <string name="upscaling_image">正在超分辨率处理…</string>
-    <string name="upscale_failed">超分失败: %s</string>
+    <string name="upscale_failed">超分辨率失败: %s</string>
     <string name="download_model_first">请先下载模型</string>
     <string name="upscaler_anime">动漫</string>
     <string name="upscaler_anime_desc">针对动漫和卡通图像优化</string>
     <string name="upscaler_realistic">真实</string>
     <string name="upscaler_realistic_desc">针对真实照片优化</string>
+    <string name="image_upscale">图像超分辨率</string>
+    <string name="upscale">超分辨率</string>
+    <string name="add_image">添加图像</string>
+    <string name="clear_image">清除图像</string>
+    <string name="save_image">保存图像</string>
+    <string name="selected_image">选中的图像</string>
+    <string name="upscaled_image">超分辨率后的图像</string>
+    <string name="click_to_add_image">点击添加需要超分辨率的图像</string>
+    <string name="image_resolution_too_large">图像分辨率过大 (%1$d×%2$d)，请选择小于 2048x2048 的图像</string>
+    <string name="failed_to_load_image">加载图像失败: %s</string>
 </resources>
