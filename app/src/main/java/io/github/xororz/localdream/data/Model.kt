@@ -643,7 +643,7 @@ class ModelRepository(private val context: Context) {
             approximateSize = "Custom",
             isDownloaded = true,
             isPartiallyDownloaded = false,
-            defaultPrompt = "masterpiece, best quality, flowers,",
+            defaultPrompt = "masterpiece, best quality, a cat sat on a mat,",
             defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = !isNpu,
             useCpuClip = true,
