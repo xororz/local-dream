@@ -34,11 +34,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.ui.res.stringResource
+import coil.request.ImageRequest
+import coil.size.Size
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -83,6 +89,10 @@ fun UpscaleScreen(
     var backendLogs by remember { mutableStateOf<List<String>>(emptyList()) }
     var currentLog by remember { mutableStateOf("") }
 
+    var sharedScale by remember { mutableFloatStateOf(1f) }
+    var sharedOffsetX by remember { mutableFloatStateOf(0f) }
+    var sharedOffsetY by remember { mutableFloatStateOf(0f) }
+
     var showUpscalerDialog by remember { mutableStateOf(false) }
     val upscalerRepository = remember { UpscalerRepository(context) }
     val upscalerPreferences =
@@ -116,6 +126,11 @@ fun UpscaleScreen(
                         } else {
                             selectedImageUri = it
                             selectedBitmap = bitmap
+                            withContext(Dispatchers.Main) {
+                                sharedScale = 1f
+                                sharedOffsetX = 0f
+                                sharedOffsetY = 0f
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -356,13 +371,21 @@ fun UpscaleScreen(
                                 )
                             }
                         } else {
-                            AsyncImage(
-                                model = selectedImageUri,
+                            ZoomableImage(
+                                imageUri = selectedImageUri,
                                 contentDescription = stringResource(R.string.selected_image),
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(8.dp),
-                                contentScale = ContentScale.Fit
+                                scale = sharedScale,
+                                offsetX = sharedOffsetX,
+                                offsetY = sharedOffsetY,
+                                onTransform = { newScale, newOffsetX, newOffsetY ->
+                                    sharedScale = newScale
+                                    sharedOffsetX = newOffsetX
+                                    sharedOffsetY = newOffsetY
+                                },
+                                useOriginalSize = true
                             )
                         }
 
@@ -371,6 +394,9 @@ fun UpscaleScreen(
                                 onClick = {
                                     selectedImageUri = null
                                     selectedBitmap = null
+                                    sharedScale = 1f
+                                    sharedOffsetX = 0f
+                                    sharedOffsetY = 0f
                                 },
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
@@ -439,13 +465,21 @@ fun UpscaleScreen(
                                     shape = RoundedCornerShape(12.dp)
                                 )
                         ) {
-                            AsyncImage(
-                                model = upscaledImageUri,
+                            ZoomableImage(
+                                imageUri = upscaledImageUri,
                                 contentDescription = stringResource(R.string.upscaled_image),
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(8.dp),
-                                contentScale = ContentScale.Fit
+                                scale = sharedScale,
+                                offsetX = sharedOffsetX,
+                                offsetY = sharedOffsetY,
+                                onTransform = { newScale, newOffsetX, newOffsetY ->
+                                    sharedScale = newScale
+                                    sharedOffsetX = newOffsetX
+                                    sharedOffsetY = newOffsetY
+                                },
+                                useOriginalSize = true
                             )
 
                             FilledTonalIconButton(
@@ -693,4 +727,72 @@ fun prepareRuntimeDir(context: Context): File {
     runtimeDir.setExecutable(true, true)
 
     return runtimeDir
+}
+
+@Composable
+fun ZoomableImage(
+    imageUri: Uri?,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    scale: Float,
+    offsetX: Float,
+    offsetY: Float,
+    onTransform: (scale: Float, offsetX: Float, offsetY: Float) -> Unit,
+    useOriginalSize: Boolean = false
+) {
+    val context = LocalContext.current
+
+    var currentScale by remember { mutableFloatStateOf(scale) }
+    var currentOffsetX by remember { mutableFloatStateOf(offsetX) }
+    var currentOffsetY by remember { mutableFloatStateOf(offsetY) }
+
+    LaunchedEffect(scale, offsetX, offsetY) {
+        currentScale = scale
+        currentOffsetX = offsetX
+        currentOffsetY = offsetY
+    }
+
+    val imageRequest = remember(imageUri, useOriginalSize) {
+        ImageRequest.Builder(context)
+            .data(imageUri)
+            .apply {
+                if (useOriginalSize) {
+                    size(Size.ORIGINAL)
+                    memoryCacheKey(imageUri.toString() + "_original")
+                }
+            }
+            .build()
+    }
+
+    Box(
+        modifier = modifier
+            .pointerInput(Unit) {
+                detectTransformGestures { centroid, pan, zoom, rotation ->
+                    val newScale = (currentScale * zoom).coerceIn(1f, 5f)
+
+                    val newOffsetX = currentOffsetX + pan.x
+                    val newOffsetY = currentOffsetY + pan.y
+
+                    currentScale = newScale
+                    currentOffsetX = newOffsetX
+                    currentOffsetY = newOffsetY
+
+                    onTransform(newScale, newOffsetX, newOffsetY)
+                }
+            }
+    ) {
+        AsyncImage(
+            model = imageRequest,
+            contentDescription = contentDescription,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer(
+                    scaleX = currentScale,
+                    scaleY = currentScale,
+                    translationX = currentOffsetX,
+                    translationY = currentOffsetY
+                ),
+            contentScale = ContentScale.Fit
+        )
+    }
 }

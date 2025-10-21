@@ -1408,25 +1408,26 @@ fun ModelRunScreen(
                                                 shape = RoundedCornerShape(8.dp),
                                             ) {
                                                 Box {
-                                                    if (croppedBitmap != null) {
-                                                        Image(
-                                                            bitmap = croppedBitmap!!.asImageBitmap(),
+                                                    croppedBitmap?.let { bitmap ->
+                                                        AsyncImage(
+                                                            model = ImageRequest.Builder(LocalContext.current)
+                                                                .data(bitmap)
+                                                                .crossfade(true)
+                                                                .build(),
                                                             contentDescription = "Cropped Image",
                                                             modifier = Modifier.fillMaxSize()
                                                         )
-                                                    } else {
-                                                        selectedImageUri?.let { uri ->
-                                                            AsyncImage(
-                                                                model = ImageRequest.Builder(
-                                                                    LocalContext.current
-                                                                )
-                                                                    .data(uri)
-                                                                    .crossfade(true)
-                                                                    .build(),
-                                                                contentDescription = "Selected Image",
-                                                                modifier = Modifier.fillMaxSize()
+                                                    } ?: selectedImageUri?.let { uri ->
+                                                        AsyncImage(
+                                                            model = ImageRequest.Builder(
+                                                                LocalContext.current
                                                             )
-                                                        }
+                                                                .data(uri)
+                                                                .crossfade(true)
+                                                                .build(),
+                                                            contentDescription = "Selected Image",
+                                                            modifier = Modifier.fillMaxSize()
+                                                        )
                                                     }
                                                     IconButton(
                                                         onClick = {
@@ -1505,8 +1506,11 @@ fun ModelRunScreen(
                                                     ) {
                                                         Box {
                                                             maskBitmap?.let { mb ->
-                                                                Image(
-                                                                    bitmap = mb.asImageBitmap(),
+                                                                AsyncImage(
+                                                                    model = ImageRequest.Builder(LocalContext.current)
+                                                                        .data(mb)
+                                                                        .crossfade(true)
+                                                                        .build(),
                                                                     contentDescription = "Mask Image",
                                                                     modifier = Modifier.fillMaxSize()
                                                                 )
@@ -1702,8 +1706,12 @@ fun ModelRunScreen(
                                                     shadowElevation = 4.dp
                                                 ) {
                                                     currentBitmap?.let { bitmap ->
-                                                        Image(
-                                                            bitmap = bitmap.asImageBitmap(),
+                                                        AsyncImage(
+                                                            model = ImageRequest.Builder(LocalContext.current)
+                                                                .data(bitmap)
+                                                                .size(coil.size.Size.ORIGINAL)
+                                                                .crossfade(true)
+                                                                .build(),
                                                             contentDescription = "generated image",
                                                             modifier = Modifier.fillMaxSize()
                                                         )
@@ -2013,8 +2021,12 @@ fun ModelRunScreen(
                     )
                 }
         ) {
-            Image(
-                bitmap = currentBitmap!!.asImageBitmap(),
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(currentBitmap!!)
+                    .size(coil.size.Size.ORIGINAL)
+                    .crossfade(true)
+                    .build(),
                 contentDescription = "preview image",
                 modifier = Modifier
                     .fillMaxWidth()
