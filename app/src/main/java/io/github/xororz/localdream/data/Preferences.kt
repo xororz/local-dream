@@ -25,7 +25,10 @@ class GenerationPreferences(private val context: Context) {
 
     private fun getUseOpenCLKey(modelId: String) = booleanPreferencesKey("${modelId}_use_opencl")
 
+    private fun getBatchCountsKey(modelId: String) = intPreferencesKey("${modelId}_batch_counts")
+
     private val BASE_URL_KEY = stringPreferencesKey("base_url")
+    private val SELECTED_SOURCE_KEY = stringPreferencesKey("selected_source")
 
     suspend fun saveBaseUrl(url: String) {
         context.dataStore.edit { preferences ->
@@ -40,6 +43,19 @@ class GenerationPreferences(private val context: Context) {
             }
     }
 
+    suspend fun saveSelectedSource(source: String) {
+        context.dataStore.edit { preferences ->
+            preferences[SELECTED_SOURCE_KEY] = source
+        }
+    }
+
+    fun getSelectedSource(): Flow<String> {
+        return context.dataStore.data
+            .map { preferences ->
+                preferences[SELECTED_SOURCE_KEY] ?: "huggingface"
+            }
+    }
+
     suspend fun saveAllFields(
         modelId: String,
         prompt: String,
@@ -49,7 +65,8 @@ class GenerationPreferences(private val context: Context) {
         seed: String,
         size: Int,
         denoiseStrength: Float,
-        useOpenCL: Boolean
+        useOpenCL: Boolean,
+        batchCounts: Int
     ) {
         context.dataStore.edit { preferences ->
             preferences[getPromptKey(modelId)] = prompt
@@ -60,6 +77,7 @@ class GenerationPreferences(private val context: Context) {
             preferences[getSizeKey(modelId)] = size
             preferences[getDenoiseStrengthKey(modelId)] = denoiseStrength
             preferences[getUseOpenCLKey(modelId)] = useOpenCL
+            preferences[getBatchCountsKey(modelId)] = batchCounts
         }
     }
 
@@ -111,6 +129,12 @@ class GenerationPreferences(private val context: Context) {
         }
     }
 
+    suspend fun saveBatchCounts(modelId: String, batchCounts: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[getBatchCountsKey(modelId)] = batchCounts
+        }
+    }
+
     fun getPreferences(modelId: String): Flow<GenerationPrefs> {
         return context.dataStore.data
             .catch { exception ->
@@ -129,7 +153,8 @@ class GenerationPreferences(private val context: Context) {
                     seed = preferences[getSeedKey(modelId)] ?: "",
                     size = preferences[getSizeKey(modelId)] ?: 256,
                     denoiseStrength = preferences[getDenoiseStrengthKey(modelId)] ?: 0.6f,
-                    useOpenCL = preferences[getUseOpenCLKey(modelId)] ?: false
+                    useOpenCL = preferences[getUseOpenCLKey(modelId)] ?: false,
+                    batchCounts = preferences[getBatchCountsKey(modelId)] ?: 1
                 )
             }
     }
@@ -143,5 +168,6 @@ data class GenerationPrefs(
     val seed: String = "",
     val size: Int = 512,
     val denoiseStrength: Float = 0.6f,
-    val useOpenCL: Boolean = false
+    val useOpenCL: Boolean = false,
+    val batchCounts: Int = 1
 )

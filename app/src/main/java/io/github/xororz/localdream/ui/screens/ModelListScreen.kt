@@ -9,7 +9,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.runtime.*
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -31,6 +36,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -141,6 +151,7 @@ fun ModelListScreen(
     var isConverting by remember { mutableStateOf(false) }
     var conversionProgress by remember { mutableStateOf("") }
     var tempBaseUrl by remember { mutableStateOf("") }
+    var selectedSource by remember { mutableStateOf("huggingface") }
     val generationPreferences = remember { GenerationPreferences(context) }
     val currentBaseUrl by generationPreferences.getBaseUrl()
         .collectAsState(initial = "https://huggingface.co/")
@@ -820,7 +831,11 @@ fun ModelListScreen(
         }
     }
 
-    if (showSettingsDialog) {
+    AnimatedVisibility(
+        visible = showSettingsDialog,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -875,17 +890,75 @@ fun ModelListScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(bottom = 12.dp)
                             )
-                            OutlinedTextField(
-                                value = tempBaseUrl,
-                                onValueChange = { tempBaseUrl = it },
-                                label = { Text(stringResource(R.string.download_from)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("https://your-mirror-site.com/") },
-                                singleLine = true
-                            )
+                           
+                            var expanded by remember { mutableStateOf(false) }
+                            val focusRequester = remember { FocusRequester() }
+                            
+                            ExposedDropdownMenuBox(
+                                expanded = expanded,
+                                onExpandedChange = { expanded = !expanded }
+                            ) {
+                                OutlinedTextField(
+                                    value = when(selectedSource) {
+                                        "huggingface" -> "https://huggingface.co/"
+                                        "hf-mirror" -> "https://hf-mirror.com/"
+                                        else -> tempBaseUrl
+                                    },
+                                    onValueChange = { if (selectedSource == "custom") tempBaseUrl = it },
+                                    label = { Text(stringResource(R.string.download_from)) },
+                                    readOnly = selectedSource != "custom",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .menuAnchor()
+                                        .focusRequester(focusRequester),
+                                    trailingIcon = {
+                                        IconButton(onClick = {}) {
+                                            ExposedDropdownMenuDefaults.TrailingIcon(
+                                                expanded = expanded
+                                            )
+                                        }
+                                    },
+                                    singleLine = true
+                                )
+                                
+                                LaunchedEffect(selectedSource) {
+                                    if (selectedSource == "custom") {
+                                        focusRequester.requestFocus()
+                                    }
+                                }
+                                ExposedDropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Hugging Face") },
+                                        onClick = { 
+                                            selectedSource = "huggingface"
+                                            tempBaseUrl = "https://huggingface.co/"
+                                            expanded = false
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("hf-mirror (For Chinese users)") },
+                                        onClick = { 
+                                            selectedSource = "hf-mirror"
+                                            tempBaseUrl = "https://hf-mirror.com/"
+                                            expanded = false
+                                        }
+                                    )
+                                    //custom
+                                    DropdownMenuItem(
+                                        text = { Text("Custom") },
+                                        onClick = { 
+                                            selectedSource = "custom"
+                                            tempBaseUrl = "https://"
+                                            expanded = false
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
-
                     // Feature settings section
                     item {
                         Column {

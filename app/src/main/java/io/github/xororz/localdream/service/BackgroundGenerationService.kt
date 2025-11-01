@@ -91,6 +91,7 @@ class BackgroundGenerationService : Service() {
         val size = intent.getIntExtra("size", 512)
         val denoiseStrength = intent.getFloatExtra("denoise_strength", 0.6f)
         val useOpenCL = intent.getBooleanExtra("use_opencl", false)
+        val batchCounts = intent.getIntExtra("batch_counts", 1)
 
         val image = if (intent.getBooleanExtra("has_image", false)) {
             try {
@@ -147,7 +148,8 @@ class BackgroundGenerationService : Service() {
                 image,
                 mask,
                 denoiseStrength,
-                useOpenCL
+                useOpenCL,
+                batchCounts
             )
         }
 
@@ -164,7 +166,8 @@ class BackgroundGenerationService : Service() {
         image: String?,
         mask: String?,
         denoiseStrength: Float,
-        useOpenCL: Boolean
+        useOpenCL: Boolean,
+        batchCounts: Int
     ) = withContext(Dispatchers.IO) {
         try {
             updateState(GenerationState.Progress(0f))
@@ -178,6 +181,7 @@ class BackgroundGenerationService : Service() {
                 put("size", size)
                 put("denoise_strength", denoiseStrength)
                 put("use_opencl", useOpenCL)
+                put("batch_counts", batchCounts)
                 seed?.let { put("seed", it) }
                 image?.let { put("image", it) }
                 mask?.let { put("mask", it) }
@@ -212,6 +216,8 @@ class BackgroundGenerationService : Service() {
 
                     val reader = BufferedReader(InputStreamReader(responseBody.byteStream()))
                     var messageCount = 0
+                    var completedBatches = 0
+                    val expectedBatches = batchCounts.coerceAtLeast(1)
 
                     // Read line by line for efficiency
                     while (isActive) {
@@ -310,9 +316,16 @@ class BackgroundGenerationService : Service() {
                                         )
                                     )
 
-                                    // Delay to allow UI to update before stopping service
-                                    delay(500)
-                                    stopSelf()
+                                    completedBatches += 1
+                                    android.util.Log.d(
+                                        "BgGenService",
+                                        "Completed batch ${'$'}completedBatches/${'$'}expectedBatches"
+                                    )
+                                    if (completedBatches >= expectedBatches) {
+                                        // Delay to allow UI to update before stopping service
+                                        delay(500)
+                                        stopSelf()
+                                    }
                                 }
 
                                 "error" -> {

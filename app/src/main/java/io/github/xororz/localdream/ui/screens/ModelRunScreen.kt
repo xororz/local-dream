@@ -1,125 +1,160 @@
 package io.github.xororz.localdream.ui.screens
 
-import android.graphics.Bitmap
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.animation.*
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
-import androidx.activity.compose.BackHandler
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.navigation.NavController
-import io.github.xororz.localdream.data.ModelRepository
-import io.github.xororz.localdream.data.Model
-import io.github.xororz.localdream.data.UpscalerRepository
-import io.github.xororz.localdream.data.UpscalerModel
-import io.github.xororz.localdream.data.DownloadResult
-import io.github.xororz.localdream.service.BackendService
-import java.net.URL
-import java.net.HttpURLConnection
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
-import java.io.IOException
-import java.util.Base64
-import java.util.Scanner
-import java.util.concurrent.TimeUnit
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalFocusManager
-
 import android.Manifest
 import android.annotation.SuppressLint
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.MediaScannerConnection
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
-import android.widget.Toast
-import androidx.compose.ui.res.stringResource
-import androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale
-import io.github.xororz.localdream.R
-import io.github.xororz.localdream.data.GenerationPreferences
-import io.github.xororz.localdream.service.BackgroundGenerationService
-import io.github.xororz.localdream.service.BackgroundGenerationService.GenerationState
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.isActive
-import java.io.BufferedReader
-import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.FileOutputStream
-import java.io.InputStreamReader
-import java.nio.ByteBuffer
-import kotlin.math.roundToInt
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.shape.CircleShape
-
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.ui.geometry.Offset
-import io.github.xororz.localdream.BuildConfig
-
-import android.net.Uri
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Rect as AndroidRect
 import android.graphics.Canvas
-
+import android.net.Uri
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ClearAll
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Report
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberTopAppBarState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.navigation.NavController
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import io.github.xororz.localdream.BuildConfig
+import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.DownloadProgress
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-
+import io.github.xororz.localdream.data.DownloadResult
+import io.github.xororz.localdream.data.GenerationPreferences
+import io.github.xororz.localdream.data.ModelRepository
+import io.github.xororz.localdream.data.UpscalerModel
+import io.github.xororz.localdream.data.UpscalerRepository
+import io.github.xororz.localdream.service.BackendService
+import io.github.xororz.localdream.service.BackgroundGenerationService
+import io.github.xororz.localdream.service.BackgroundGenerationService.GenerationState
 import io.github.xororz.localdream.utils.performUpscale
-import io.github.xororz.localdream.utils.saveImage
 import io.github.xororz.localdream.utils.reportImage
+import io.github.xororz.localdream.utils.saveImage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
+import android.graphics.Rect as AndroidRect
 
 
 private fun checkStoragePermission(context: Context): Boolean {
@@ -199,7 +234,8 @@ data class GenerationParameters(
     val runOnCpu: Boolean,
     val denoiseStrength: Float = 0.6f,
     val inputImage: String? = null,
-    val useOpenCL: Boolean = false
+    val useOpenCL: Boolean = false,
+    val batchCounts: Int = 1
 )
 
 @SuppressLint("DefaultLocale")
@@ -229,6 +265,7 @@ fun ModelRunScreen(
     var showOpenCLWarningDialog by remember { mutableStateOf(false) }
 
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val resultBitmaps = remember { mutableStateListOf<Bitmap>() }
     var imageVersion by remember { mutableStateOf(0) }
     var generationParams by remember { mutableStateOf<GenerationParameters?>(null) }
     var generationParamsTmp by remember {
@@ -253,6 +290,8 @@ fun ModelRunScreen(
     var size by remember { mutableStateOf(if (model?.runOnCpu == true) 256 else 512) }
     var denoiseStrength by remember { mutableStateOf(0.6f) }
     var useOpenCL by remember { mutableStateOf(false) }
+    var batchCounts by remember { mutableStateOf(1) }
+    var currentBatchIndex by remember { mutableStateOf(0) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var base64EncodeDone by remember { mutableStateOf(false) }
     var returnedSeed by remember { mutableStateOf<Long?>(null) }
@@ -315,7 +354,8 @@ fun ModelRunScreen(
                 seed = seed,
                 size = size,
                 denoiseStrength = denoiseStrength,
-                useOpenCL = useOpenCL
+                useOpenCL = useOpenCL,
+                batchCounts = batchCounts
             )
         }
     }
@@ -335,6 +375,12 @@ fun ModelRunScreen(
     val onPromptChange = remember { { value: String -> prompt = value; saveAllFields() } }
     val onNegativePromptChange =
         remember { { value: String -> negativePrompt = value; saveAllFields() } }
+    val onBatchCountsChange = remember {
+        { value: Float ->
+            batchCounts = value.roundToInt().coerceIn(1, 10)
+            saveAllFields()
+        }
+    }
 
     fun processSelectedImage(uri: Uri) {
         imageUriForCrop = uri
@@ -584,6 +630,7 @@ fun ModelRunScreen(
             size = if (model?.runOnCpu == true) prefs.size else resolution
             denoiseStrength = prefs.denoiseStrength
             useOpenCL = prefs.useOpenCL
+            batchCounts = prefs.batchCounts
 
             hasInitialized = true
         }
@@ -638,6 +685,7 @@ fun ModelRunScreen(
                     android.util.Log.d("ModelRunScreen", "update bitmap")
 
                     currentBitmap = state.bitmap
+                    resultBitmaps.add(state.bitmap)
                     imageVersion += 1
 
                     snapshotIsInpaintMode = isInpaintMode
@@ -672,7 +720,8 @@ fun ModelRunScreen(
                         size = if (model?.runOnCpu == true) generationParamsTmp.size else resolution
                             ?: 512,
                         runOnCpu = model?.runOnCpu ?: false,
-                        useOpenCL = generationParamsTmp.useOpenCL
+                        useOpenCL = generationParamsTmp.useOpenCL,
+                        batchCounts = generationParamsTmp.batchCounts
                     )
 
                     android.util.Log.d(
@@ -766,10 +815,10 @@ fun ModelRunScreen(
                         steps = 20f
                         cfg = 7f
                         seed = ""
+                        batchCounts = 1
                         prompt = model?.defaultPrompt ?: ""
                         negativePrompt = model?.defaultNegativePrompt ?: ""
                         denoiseStrength = 0.6f
-
                         scope.launch(Dispatchers.IO) {
                             generationPreferences.saveAllFields(
                                 modelId = modelId,
@@ -780,7 +829,8 @@ fun ModelRunScreen(
                                 seed = "",
                                 size = 256,
                                 denoiseStrength = 0.6f,
-                                useOpenCL = useOpenCL
+                                useOpenCL = useOpenCL,
+                                batchCounts = 1
                             )
                         }
                         showResetConfirmDialog = false
@@ -1074,6 +1124,19 @@ fun ModelRunScreen(
                                                                     )
                                                                 }
                                                             }
+                                                            Column {
+                                                                Text(
+                                                                    "Batch Count: $batchCounts",
+                                                                    style = MaterialTheme.typography.bodyMedium
+                                                                )
+                                                                Slider(
+                                                                    value = batchCounts.toFloat(),
+                                                                    onValueChange = onBatchCountsChange,
+                                                                    valueRange = 1f..10f,
+                                                                    steps = 8,
+                                                                    modifier = Modifier.fillMaxWidth()
+                                                                )
+                                                            }
                                                             if (useImg2img) {
                                                                 Column {
                                                                     Text(
@@ -1273,7 +1336,8 @@ fun ModelRunScreen(
                                                     runOnCpu = model.runOnCpu,
                                                     denoiseStrength = denoiseStrength,
                                                     inputImage = null,
-                                                    useOpenCL = useOpenCL
+                                                    useOpenCL = useOpenCL,
+                                                    batchCounts = batchCounts
                                                 )
 
                                                 val intent = Intent(
@@ -1289,6 +1353,7 @@ fun ModelRunScreen(
                                                     putExtra("size", size)
                                                     putExtra("denoise_strength", denoiseStrength)
                                                     putExtra("use_opencl", useOpenCL)
+                                                    putExtra("batch_counts", batchCounts)
 
                                                     if (selectedImageUri != null && base64EncodeDone) {
                                                         putExtra("has_image", true)
@@ -1299,13 +1364,71 @@ fun ModelRunScreen(
                                                 }
                                                 android.util.Log.d(
                                                     "ModelRunScreen",
-                                                    "start service"
+                                                    "start generation batch: $batchCounts times"
                                                 )
-                                                context.startForegroundService(intent)
-                                                android.util.Log.d(
-                                                    "ModelRunScreen",
-                                                    "start service sent"
-                                                )
+
+                                                CoroutineScope(Dispatchers.Main).launch {
+                                                    for (i in 0 until batchCounts) {
+                                                        currentBatchIndex = i + 1
+                                                        android.util.Log.d(
+                                                            "ModelRunScreen",
+                                                            "preparing batch $i"
+                                                        )
+
+                                                        val batchIntent = Intent(
+                                                            context,
+                                                            BackgroundGenerationService::class.java
+                                                        ).apply {
+                                                            putExtra("prompt", prompt)
+                                                            putExtra("negative_prompt", negativePrompt)
+                                                            putExtra("steps", steps.roundToInt())
+                                                            putExtra("cfg", cfg)
+                                                            seed.toLongOrNull()
+                                                                ?.let { putExtra("seed", it) }
+                                                            putExtra("size", size)
+                                                            putExtra("denoise_strength", denoiseStrength)
+                                                            putExtra("use_opencl", useOpenCL)
+                                                            putExtra("batch_index", i)
+                                                            if (selectedImageUri != null && base64EncodeDone) {
+                                                                putExtra("has_image", true)
+                                                                if (isInpaintMode && maskBitmap != null) {
+                                                                    putExtra("has_mask", true)
+                                                                }
+                                                            }
+                                                        }
+
+                                                        android.util.Log.d(
+                                                            "ModelRunScreen",
+                                                            "start service - batch $i"
+                                                        )
+
+                                                        context.startForegroundService(batchIntent)
+                                                        android.util.Log.d(
+                                                            "ModelRunScreen",
+                                                            "start service sent - batch $i"
+                                                        )
+
+                                                        BackgroundGenerationService.generationState
+                                                            .first { state ->
+                                                                state is BackgroundGenerationService.GenerationState.Complete ||
+                                                                        state is BackgroundGenerationService.GenerationState.Error
+                                                            }
+
+                                                        android.util.Log.d(
+                                                            "ModelRunScreen",
+                                                            "batch $i completed, preparing next batch"
+                                                        )
+
+                                                        delay(500)
+
+                                                        BackgroundGenerationService.resetState()
+                                                        android.util.Log.d(
+                                                            "ModelRunScreen",
+                                                            "service state reset, ready for next batch"
+                                                        )
+                                                    }
+                                                    currentBatchIndex = 0
+                                                }
                                             },
                                             enabled = serviceState !is GenerationState.Progress && !isUpscaling,
                                             modifier = Modifier.fillMaxWidth(),
@@ -1318,6 +1441,7 @@ fun ModelRunScreen(
                                                 )
                                             } else {
                                                 Text(stringResource(R.string.generate_image))
+
                                             }
                                         }
                                     }
@@ -1369,7 +1493,7 @@ fun ModelRunScreen(
                                             verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             Text(
-                                                stringResource(R.string.generating),
+                                                text = if (currentBatchIndex > 0) "${stringResource(R.string.generating)} ($currentBatchIndex/$batchCounts)…" else stringResource(R.string.generating),
                                                 style = MaterialTheme.typography.titleMedium
                                             )
                                             LinearProgressIndicator(
@@ -1685,6 +1809,23 @@ fun ModelRunScreen(
                                                                 contentDescription = "save image"
                                                             )
                                                         }
+
+                                        if (resultBitmaps.size > 1) {
+                                            FilledTonalIconButton(
+                                                onClick = {
+                                                    // Clear to free memory
+                                                    resultBitmaps.clear()
+                                                    currentBitmap = bitmap
+                                                    imageVersion++
+                                                },
+                                                enabled = !isRunning && !isUpscaling
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ClearAll,
+                                                    contentDescription = "clear results"
+                                                )
+                                            }
+                                        }
                                                     }
                                                 }
                                             }
@@ -1715,6 +1856,37 @@ fun ModelRunScreen(
                                                             contentDescription = "generated image",
                                                             modifier = Modifier.fillMaxSize()
                                                         )
+                                                    }
+                                                }
+                                            }
+
+                                            if (resultBitmaps.size > 1) {
+                                                LazyRow(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(top = 8.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    items(resultBitmaps.size) { idx ->
+                                                        val thumb = resultBitmaps[idx]
+                                                        Card(
+                                                            modifier = Modifier
+                                                                .size(72.dp)
+                                                                .clickable {
+                                                                    currentBitmap = thumb
+                                                                    imageVersion++
+                                                                },
+                                                            shape = RoundedCornerShape(8.dp)
+                                                        ) {
+                                                            AsyncImage(
+                                                                model = ImageRequest.Builder(LocalContext.current)
+                                                                    .data(thumb)
+                                                                    .size(72)
+                                                                    .build(),
+                                                                contentDescription = "thumb",
+                                                                modifier = Modifier.fillMaxSize()
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
