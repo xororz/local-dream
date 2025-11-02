@@ -27,6 +27,8 @@
     <string name="delete_model">Delete Model</string>
     <string name="delete_confirm">Delete selected %s models? This action cannot be undone.</string>
     <string name="got_it">Got It!</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
     <string name="about_app">Note</string>
     <string name="must_read">This APP supports running stable diffusion image generation on CPU/GPU and some Qualcomm NPUs.\n\nIf your chip is not one of the following, you can only run it on CPU/GPU. Supported NPU list:\n\n- Snapdragon 8 Gen 1\n- Snapdragon 8 Gen 2\n- Snapdragon 8 Gen 3\n- Snapdragon 8 Elite\n- Snapdragon 8 Elite Gen 5\n\nFor Qualcomm chips released in 2020 and later, experimental support is provided, but NPU execution is not guaranteed.\n\nThis project is open source at https://github.com/xororz/local-dream where you can view the source code or submit issues</string>
     <string name="help">help</string>
@@ -38,6 +40,9 @@
     <string name="download">Download</string>
     <string name="download_from">Download From</string>
     <string name="download_settings_hint">Download from huggingface or other mirror url</string>
+    <string name="source_huggingface">Hugging Face</string>
+    <string name="source_hf_mirror">hf-mirror</string>
+    <string name="source_custom">Custom</string>
     <string name="model_size">Total Size: ~%s</string>
     <string name="downloaded">Downloaded</string>
     <string name="partially_downloaded">Partially Downloaded</string>
@@ -88,6 +93,22 @@
     <string name="go_to_generate">Create</string>
     <string name="prompt_tab">Prompt</string>
     <string name="result_tab">Result</string>
+    <string name="history_tab">History</string>
+    <string name="no_history">No generation history</string>
+    <string name="no_history_hint">History will be saved after generation</string>
+    <string name="recent_100_items">Only showing recent 100 items</string>
+    <string name="selected_items_count">Selected %d items</string>
+    <string name="generation_params_title">Generation Parameters</string>
+    <string name="use_same_seed_title">Use same seed?</string>
+    <string name="use_same_seed_message">Use the same seed value (%s) to reproduce the image?\n\nSelect \"Yes\" to use the same seed, select \"No\" to only reuse parameters.</string>
+    <string name="delete_image">Delete Image</string>
+    <string name="delete_image_confirm">Are you sure you want to delete this image? This action cannot be undone.</string>
+    <string name="deleted">Deleted</string>
+    <string name="delete_failed_message">Delete failed</string>
+    <string name="batch_delete">Batch Delete</string>
+    <string name="batch_delete_confirm">Are you sure you want to delete %d selected images? This action cannot be undone.</string>
+    <string name="deleted_count">Deleted %d items</string>
+    <string name="deleted_count_with_failed">Successfully deleted %1$d items, failed %2$d items</string>
     <string name="confirm_exit">Confirm to Exit</string>
     <string name="confirm_exit_hint">Generation in progress, Are you sure to Exit?</string>
     <string name="reset">Reset</string>
@@ -96,12 +117,14 @@
     <string name="backend_failed">Backend start failed. Maybe your device is not supported.</string>
 
     <!-- Parameter Settings -->
-    <string name="generation_params">Generation Params (Lastest image)</string>
+    <string name="generation_params">Generation Params</string>
     <string name="steps">Steps: %d</string>
     <string name="cfg_scale">CFG Scale: %.1f</string>
     <string name="image_size">Image Size: %1$dx%2$d</string>
     <string name="random_seed">Random Seed (Optional)</string>
     <string name="use_last_seed">Use Last Seed (%s)</string>
+    <string name="batch_count">Batch Count: %d</string>
+    <string name="reproduce">Reproduce</string>
     <string name="result_params">steps: %s / CFG: %.1f / seed: %s"</string>
     <string name="result_params_2">size: %s / time: %s / %s"</string>
     <string name="params_detail">Details</string>

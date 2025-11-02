@@ -5,7 +5,6 @@ import android.os.Build
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import io.github.xororz.localdream.BuildConfig
 import io.github.xororz.localdream.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -254,9 +253,13 @@ data class Model(
         return try {
             val modelDir = File(getModelsDir(context), id)
             val fileVerification = FileVerification(context)
+            val historyManager = HistoryManager(context)
+            val generationPreferences = GenerationPreferences(context)
 
             runBlocking {
                 fileVerification.clearVerification(id)
+                historyManager.clearHistoryForModel(id)
+                generationPreferences.clearPreferencesForModel(id)
             }
 
             if (modelDir.exists() && modelDir.isDirectory) {
@@ -377,16 +380,9 @@ class UpscalerRepository(private val context: Context) {
 
     init {
         CoroutineScope(Dispatchers.Main).launch {
-            generationPreferences.getBaseUrl().collect { url ->
-                baseUrl = url
-                upscalers = initializeUpscalers()
-            }
+            baseUrl = generationPreferences.getBaseUrl()
+            upscalers = initializeUpscalers()
         }
-    }
-
-    fun updateBaseUrl(newUrl: String) {
-        baseUrl = newUrl
-        upscalers = initializeUpscalers()
     }
 
     private fun initializeUpscalers(): List<UpscalerModel> {
@@ -525,16 +521,9 @@ class ModelRepository(private val context: Context) {
 
     init {
         CoroutineScope(Dispatchers.Main).launch {
-            generationPreferences.getBaseUrl().collect { url ->
-                baseUrl = url
-                models = initializeModels()
-            }
+            baseUrl = generationPreferences.getBaseUrl()
+            models = initializeModels()
         }
-    }
-
-    fun updateBaseUrl(newUrl: String) {
-        baseUrl = newUrl
-        models = initializeModels()
     }
 
     private fun checkHighresPatchExists(modelId: String, resolution: Int): Boolean {

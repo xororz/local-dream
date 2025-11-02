@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
@@ -36,11 +37,11 @@ class GenerationPreferences(private val context: Context) {
         }
     }
 
-    fun getBaseUrl(): Flow<String> {
+    suspend fun getBaseUrl(): String {
         return context.dataStore.data
             .map { preferences ->
                 preferences[BASE_URL_KEY] ?: "https://huggingface.co/"
-            }
+            }.first()
     }
 
     suspend fun saveSelectedSource(source: String) {
@@ -49,11 +50,11 @@ class GenerationPreferences(private val context: Context) {
         }
     }
 
-    fun getSelectedSource(): Flow<String> {
+    suspend fun getSelectedSource(): String {
         return context.dataStore.data
             .map { preferences ->
                 preferences[SELECTED_SOURCE_KEY] ?: "huggingface"
-            }
+            }.first()
     }
 
     suspend fun saveAllFields(
@@ -157,6 +158,20 @@ class GenerationPreferences(private val context: Context) {
                     batchCounts = preferences[getBatchCountsKey(modelId)] ?: 1
                 )
             }
+    }
+
+    suspend fun clearPreferencesForModel(modelId: String) {
+        context.dataStore.edit { preferences ->
+            preferences.remove(getPromptKey(modelId))
+            preferences.remove(getNegativePromptKey(modelId))
+            preferences.remove(getStepsKey(modelId))
+            preferences.remove(getCfgKey(modelId))
+            preferences.remove(getSeedKey(modelId))
+            preferences.remove(getSizeKey(modelId))
+            preferences.remove(getDenoiseStrengthKey(modelId))
+            preferences.remove(getUseOpenCLKey(modelId))
+            preferences.remove(getBatchCountsKey(modelId))
+        }
     }
 }
 

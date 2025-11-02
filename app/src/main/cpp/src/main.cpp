@@ -2393,12 +2393,18 @@ int main(int argc, char **argv) {
 
       // Release the temporary upscaler model
       if (tempUpscalerApp) {
+        tempUpscalerApp->freeContext();
+        tempUpscalerApp->freeDevice();
         tempUpscalerApp.reset();
         QNN_INFO("Upscaler model released");
       }
 
     } catch (const std::invalid_argument &e) {
-      if (tempUpscalerApp) tempUpscalerApp.reset();
+      if (tempUpscalerApp) {
+        tempUpscalerApp->freeContext();
+        tempUpscalerApp->freeDevice();
+        tempUpscalerApp.reset();
+      }
       nlohmann::json err = {
           {"error",
            {{"message", "Invalid Arg: " + std::string(e.what())},
@@ -2407,7 +2413,11 @@ int main(int argc, char **argv) {
       res.set_content(err.dump(), "application/json");
       res.set_header("Access-Control-Allow-Origin", "*");
     } catch (const std::exception &e) {
-      if (tempUpscalerApp) tempUpscalerApp.reset();
+      if (tempUpscalerApp) {
+        tempUpscalerApp->freeContext();
+        tempUpscalerApp->freeDevice();
+        tempUpscalerApp.reset();
+      }
       nlohmann::json err = {
           {"error",
            {{"message", "Server Err: " + std::string(e.what())},
