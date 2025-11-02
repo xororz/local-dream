@@ -15,6 +15,9 @@ This project is **now open sourced and completely free**. Hope you enjoy it!
 
 If you like it, please consider [sponsor](https://github.com/xororz/local-dream?tab=readme-ov-file#-support-this-project) this project.
 
+> [!NOTE]
+> Most users don't get how to properly use highres mode. Please check [here](#npu-high-resolution-support).
+>
 > Non-flagship chips are now experimentally supported. It should work on NPUs that are Hexagon V68 or above.
 >
 > Try our [NPU Model Conversion Guide](https://github.com/xororz/local-dream/tree/master/convert) if you want to run your own models on npu.
@@ -135,7 +138,10 @@ Open this project in Android Studio and navigate to:
 
 ## NPU High Resolution Support
 
-After downloading a 512 resolution model, you can download patches to enable 768×768 and 1024×1024 image generation. Please note that quantized high-resolution models may produce images with poor layout. We recommend first generating at 512 resolution, then using the high-resolution model for img2img (which is essentially Highres.fix). The suggested img2img denoise_strength is around 0.8.
+After downloading a 512 resolution model, you can download patches to enable 768×768 and 1024×1024 image generation.
+
+> [!IMPORTANT]
+> Please note that quantized high-resolution models may produce images with poor layout. We recommend first generating at 512 resolution (optionally you can upscale it to 2048), then using the high-resolution model for img2img (which is essentially Highres.fix). The suggested img2img denoise_strength is around 0.8. After that, you can get images with better layout and details.
 
 ## Device Compatibility
 
@@ -200,6 +206,7 @@ Custom seed support for reproducible image generation:
 
 ### Android Libraries
 
+- **[square/okhttp](https://github.com/square/okhttp)** - HTTP client
 - **[coil-kt/coil](https://github.com/coil-kt/coil)** - Image loading & processing
 - **[MoyuruAizawa/Cropify](https://github.com/MoyuruAizawa/Cropify)** - Image cropping
 - **AOSP, Material Design, Jetpack Compose** - UI framework
@@ -231,5 +238,3 @@ If you find Local Dream useful, please consider supporting its development:
 </a>
 
 Your sponsorship helps maintain and improve Local Dream for everyone!
-
-</div>
