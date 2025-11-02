@@ -83,7 +83,7 @@
     <string name="image_prompt">图像生成提示</string>
     <string name="negative_prompt">负面提示</string>
     <string name="generate_image">生成图像</string>
-    <string name="generating">正在生成图像…</string>
+    <string name="generating">正在生成图像</string>
     <string name="generation_progress">%d%%</string>
     <string name="no_results">还没有结果哦</string>
     <string name="no_results_hint">请先在提示词页面生成图像</string>
@@ -98,7 +98,7 @@
     <string name="backend_failed">后端启动失败，您的设备可能不受支持</string>
 
     <!-- Parameter Settings -->
-    <string name="generation_params">生成参数</string>
+    <string name="generation_params">生成参数（最新图像）</string>
     <string name="steps">生成步数: %d</string>
     <string name="cfg_scale">CFG Scale: %.1f</string>
     <string name="image_size">图像尺寸: %1$dx%2$d</string>

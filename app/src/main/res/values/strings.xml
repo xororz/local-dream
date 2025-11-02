@@ -81,7 +81,7 @@
     <string name="image_prompt">Image Generation Prompt</string>
     <string name="negative_prompt">Negative Prompt</string>
     <string name="generate_image">Generate</string>
-    <string name="generating">Generating image…</string>
+    <string name="generating">Generating image</string>
     <string name="generation_progress">%d%%</string>
     <string name="no_results">No results yet</string>
     <string name="no_results_hint">Create an image first~</string>
@@ -96,7 +96,7 @@
     <string name="backend_failed">Backend start failed. Maybe your device is not supported.</string>
 
     <!-- Parameter Settings -->
-    <string name="generation_params">Generation Params</string>
+    <string name="generation_params">Generation Params (Lastest image)</string>
     <string name="steps">Steps: %d</string>
     <string name="cfg_scale">CFG Scale: %.1f</string>
     <string name="image_size">Image Size: %1$dx%2$d</string>
