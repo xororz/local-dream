@@ -2963,7 +2963,7 @@ private fun getFileNameFromUri(context: Context, uri: Uri): String? {
             }
         }
     } catch (e: Exception) {
-        e.printStackTrace()
+        android.util.Log.e("GetFileName", "Get file name from uri failed", e)
         null
     }
 }
