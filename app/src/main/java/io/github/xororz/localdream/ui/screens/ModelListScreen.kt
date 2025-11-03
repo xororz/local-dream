@@ -60,12 +60,14 @@ import java.io.File
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Folder
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.documentfile.provider.DocumentFile
 import java.util.zip.ZipInputStream
 import java.io.BufferedOutputStream
 import androidx.compose.ui.focus.onFocusChanged
@@ -330,6 +332,7 @@ fun ModelListScreen(
 
     if (showCustomModelDialog) {
         CustomModelDialog(
+            context,
             onDismiss = { showCustomModelDialog = false },
             onModelAdded = { modelName, fileUri, clipSkip, loraFiles ->
                 showCustomModelDialog = false
@@ -372,6 +375,7 @@ fun ModelListScreen(
 
     if (showCustomNpuModelDialog) {
         CustomNpuModelDialog(
+            context,
             onDismiss = { showCustomNpuModelDialog = false },
             onModelAdded = { modelName, zipUri ->
                 showCustomNpuModelDialog = false
@@ -2010,6 +2014,7 @@ fun AddCustomNpuModelButton(
 
 @Composable
 fun CustomNpuModelDialog(
+    context: Context,
     onDismiss: () -> Unit,
     onModelAdded: (String, Uri) -> Unit
 ) {
@@ -2021,6 +2026,11 @@ fun CustomNpuModelDialog(
     ) { uri ->
         uri?.let {
             selectedZipUri = it
+            if (modelName.isBlank()){
+                getFileNameFromUri(context, it)?.let { fileName ->
+                    modelName = fileName.substringBeforeLast(".")
+                }
+            }
         }
     }
 
@@ -2101,6 +2111,7 @@ fun CustomNpuModelDialog(
 
 @Composable
 fun CustomModelDialog(
+    context: Context,
     onDismiss: () -> Unit,
     onModelAdded: (String, Uri, Int, List<LoRAFile>) -> Unit
 ) {
@@ -2114,6 +2125,11 @@ fun CustomModelDialog(
     ) { uri ->
         uri?.let {
             selectedFileUri = it
+            if (modelName.isBlank()){
+                getFileNameFromUri(context, it)?.let { fileName ->
+                    modelName = fileName.substringBeforeLast(".")
+                }
+            }
         }
     }
 
@@ -2922,5 +2938,32 @@ suspend fun convertCustomModel(
         withContext(Dispatchers.Main) {
             onError("Conversion failed: ${e.message}")
         }
+    }
+}
+
+private fun getFileNameFromUri(context: Context, uri: Uri): String? {
+    return try {
+        when (uri.scheme) {
+            "content" -> {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (cursor.moveToFirst() && nameIndex != -1) {
+                        cursor.getString(nameIndex)
+                    } else {
+                        null
+                    }
+                }
+            }
+            "file" -> {
+                uri.lastPathSegment
+            }
+            else -> {
+                // 对于其他 scheme，尝试使用 DocumentFile
+                DocumentFile.fromSingleUri(context, uri)?.name
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
     }
 }
