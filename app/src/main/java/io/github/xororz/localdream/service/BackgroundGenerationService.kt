@@ -37,14 +37,24 @@ class BackgroundGenerationService : Service() {
         private val _generationState = MutableStateFlow<GenerationState>(GenerationState.Idle)
         val generationState: StateFlow<GenerationState> = _generationState
 
+        private val _bitmapConsumed = MutableStateFlow(false)
+
+        private val _isServiceRunning = MutableStateFlow(false)
+        val isServiceRunning: StateFlow<Boolean> = _isServiceRunning
+
         fun resetState() {
             _generationState.value = GenerationState.Idle
+            _bitmapConsumed.value = false
         }
 
         fun clearCompleteState() {
             if (_generationState.value is GenerationState.Complete) {
                 _generationState.value = GenerationState.Idle
             }
+        }
+
+        fun markBitmapConsumed() {
+            _bitmapConsumed.value = true
         }
     }
 
@@ -62,6 +72,7 @@ class BackgroundGenerationService : Service() {
     override fun onCreate() {
         super.onCreate()
         android.util.Log.d("GenerationService", "service created")
+        _isServiceRunning.value = true
         createNotificationChannel()
     }
 
@@ -134,6 +145,7 @@ class BackgroundGenerationService : Service() {
         if (_generationState.value is GenerationState.Complete) {
             updateState(GenerationState.Idle)
         }
+        _bitmapConsumed.value = false
 
         serviceScope.launch {
             android.util.Log.d("GenerationService", "start generation")
@@ -310,8 +322,29 @@ class BackgroundGenerationService : Service() {
                                         )
                                     )
 
-                                    // Delay to allow UI to update before stopping service
-                                    delay(500)
+                                    android.util.Log.d(
+                                        "BgGenService",
+                                        "Generation completed, waiting for UI to consume bitmap"
+                                    )
+
+                                    // Wait for UI to consume the bitmap with timeout
+                                    val waitStartTime = System.currentTimeMillis()
+                                    val timeoutMs = 5000L // 5 seconds timeout
+                                    while (!_bitmapConsumed.value && isActive) {
+                                        if (System.currentTimeMillis() - waitStartTime > timeoutMs) {
+                                            android.util.Log.w(
+                                                "BgGenService",
+                                                "Timeout waiting for bitmap consumption"
+                                            )
+                                            break
+                                        }
+                                        delay(100)
+                                    }
+
+                                    android.util.Log.d(
+                                        "BgGenService",
+                                        "Bitmap consumed, stopping service. Wait time: ${System.currentTimeMillis() - waitStartTime}ms"
+                                    )
                                     stopSelf()
                                 }
 
@@ -394,5 +427,8 @@ class BackgroundGenerationService : Service() {
         if (_generationState.value is GenerationState.Error) {
             resetState()
         }
+
+        _isServiceRunning.value = false
+        android.util.Log.d("GenerationService", "service destroyed, isServiceRunning set to false")
     }
 }

@@ -9,7 +9,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.runtime.*
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -31,19 +36,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.text.ClickableText
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDecoration
 import io.github.xororz.localdream.R
-import kotlinx.coroutines.withTimeout
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material3.TabRowDefaults.SecondaryIndicator
@@ -63,6 +68,7 @@ import kotlinx.coroutines.Dispatchers
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import java.util.zip.ZipInputStream
 import java.io.BufferedOutputStream
+import androidx.compose.ui.focus.onFocusChanged
 
 data class LoRAFile(
     val uri: Uri,
@@ -141,9 +147,9 @@ fun ModelListScreen(
     var isConverting by remember { mutableStateOf(false) }
     var conversionProgress by remember { mutableStateOf("") }
     var tempBaseUrl by remember { mutableStateOf("") }
+    var selectedSource by remember { mutableStateOf("huggingface") }
     val generationPreferences = remember { GenerationPreferences(context) }
-    val currentBaseUrl by generationPreferences.getBaseUrl()
-        .collectAsState(initial = "https://huggingface.co/")
+    var currentBaseUrl by remember { mutableStateOf("https://huggingface.co/") }
 
     var version by remember { mutableStateOf(0) }
     val modelRepository = remember(version) { ModelRepository(context) }
@@ -162,6 +168,10 @@ fun ModelListScreen(
     LaunchedEffect(Unit) {
         if (isFirstLaunch) {
             showHelpDialog = true
+        }
+        scope.launch {
+            currentBaseUrl = generationPreferences.getBaseUrl()
+            selectedSource = generationPreferences.getSelectedSource()
         }
     }
 
@@ -820,7 +830,11 @@ fun ModelListScreen(
         }
     }
 
-    if (showSettingsDialog) {
+    AnimatedVisibility(
+        visible = showSettingsDialog,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -875,17 +889,111 @@ fun ModelListScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(bottom = 12.dp)
                             )
-                            OutlinedTextField(
-                                value = tempBaseUrl,
-                                onValueChange = { tempBaseUrl = it },
-                                label = { Text(stringResource(R.string.download_from)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("https://your-mirror-site.com/") },
-                                singleLine = true
-                            )
+
+                            var expanded by remember { mutableStateOf(false) }
+                            val focusRequester = remember { FocusRequester() }
+
+                            ExposedDropdownMenuBox(
+                                expanded = expanded,
+                                onExpandedChange = { expanded = !expanded }
+                            ) {
+                                OutlinedTextField(
+                                    value = when (selectedSource) {
+                                        "huggingface" -> "https://huggingface.co/"
+                                        "hf-mirror" -> "https://hf-mirror.com/"
+                                        else -> tempBaseUrl
+                                    },
+                                    onValueChange = {
+                                        if (selectedSource == "custom") tempBaseUrl = it
+                                    },
+                                    label = { Text(stringResource(R.string.download_from)) },
+                                    readOnly = selectedSource != "custom",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .menuAnchor()
+                                        .focusRequester(focusRequester)
+                                        .onFocusChanged { focusState ->
+                                            if (!focusState.isFocused && selectedSource == "custom") {
+                                                scope.launch {
+                                                    if (tempBaseUrl.isNotEmpty() && tempBaseUrl != currentBaseUrl) {
+                                                        generationPreferences.saveBaseUrl(
+                                                            tempBaseUrl
+                                                        )
+                                                        currentBaseUrl = tempBaseUrl
+                                                        version += 1
+                                                    }
+                                                }
+                                            }
+                                        },
+                                    trailingIcon = {
+                                        IconButton(onClick = {}) {
+                                            ExposedDropdownMenuDefaults.TrailingIcon(
+                                                expanded = expanded
+                                            )
+                                        }
+                                    },
+                                    singleLine = true
+                                )
+
+
+                                LaunchedEffect(selectedSource) {
+                                    if (selectedSource == "custom") {
+                                        focusRequester.requestFocus()
+                                    }
+                                }
+                                ExposedDropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.source_huggingface)) },
+                                        onClick = {
+                                            selectedSource = "huggingface"
+                                            val newUrl = "https://huggingface.co/"
+                                            tempBaseUrl = newUrl
+                                            expanded = false
+                                            scope.launch {
+                                                generationPreferences.saveSelectedSource("huggingface")
+                                                generationPreferences.saveBaseUrl(newUrl)
+                                                if (currentBaseUrl != newUrl) {
+                                                    currentBaseUrl = newUrl
+                                                    version += 1
+                                                }
+                                            }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.source_hf_mirror)) },
+                                        onClick = {
+                                            selectedSource = "hf-mirror"
+                                            val newUrl = "https://hf-mirror.com/"
+                                            tempBaseUrl = newUrl
+                                            expanded = false
+                                            scope.launch {
+                                                generationPreferences.saveSelectedSource("hf-mirror")
+                                                generationPreferences.saveBaseUrl(newUrl)
+                                                if (currentBaseUrl != newUrl) {
+                                                    currentBaseUrl = newUrl
+                                                    version += 1
+                                                }
+                                            }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.source_custom)) },
+                                        onClick = {
+                                            selectedSource = "custom"
+                                            tempBaseUrl = "https://"
+                                            expanded = false
+                                            scope.launch {
+                                                generationPreferences.saveSelectedSource("custom")
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
-
                     // Feature settings section
                     item {
                         Column {
@@ -964,7 +1072,6 @@ fun ModelListScreen(
                             }
                         }
                     }
-
                     // Embedding management section
                     item {
                         Column {
@@ -1033,29 +1140,11 @@ fun ModelListScreen(
                                     modifier = Modifier.padding(end = 8.dp)
                                 )
                                 Text(stringResource(R.string.file_manager))
-                            }
-                        }
-                    }
 
-                    // Save button at the bottom
-                    item {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    if (tempBaseUrl.isNotEmpty()) {
-                                        generationPreferences.saveBaseUrl(tempBaseUrl)
-                                        modelRepository.updateBaseUrl(tempBaseUrl)
-                                        version += 1
-                                    }
-                                    showSettingsDialog = false
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp)
-                        ) {
-                            Text(stringResource(R.string.save))
+                            }
+
                         }
+
                     }
                 }
             }

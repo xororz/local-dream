@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
@@ -25,7 +26,10 @@ class GenerationPreferences(private val context: Context) {
 
     private fun getUseOpenCLKey(modelId: String) = booleanPreferencesKey("${modelId}_use_opencl")
 
+    private fun getBatchCountsKey(modelId: String) = intPreferencesKey("${modelId}_batch_counts")
+
     private val BASE_URL_KEY = stringPreferencesKey("base_url")
+    private val SELECTED_SOURCE_KEY = stringPreferencesKey("selected_source")
 
     suspend fun saveBaseUrl(url: String) {
         context.dataStore.edit { preferences ->
@@ -33,11 +37,24 @@ class GenerationPreferences(private val context: Context) {
         }
     }
 
-    fun getBaseUrl(): Flow<String> {
+    suspend fun getBaseUrl(): String {
         return context.dataStore.data
             .map { preferences ->
                 preferences[BASE_URL_KEY] ?: "https://huggingface.co/"
-            }
+            }.first()
+    }
+
+    suspend fun saveSelectedSource(source: String) {
+        context.dataStore.edit { preferences ->
+            preferences[SELECTED_SOURCE_KEY] = source
+        }
+    }
+
+    suspend fun getSelectedSource(): String {
+        return context.dataStore.data
+            .map { preferences ->
+                preferences[SELECTED_SOURCE_KEY] ?: "huggingface"
+            }.first()
     }
 
     suspend fun saveAllFields(
@@ -49,7 +66,8 @@ class GenerationPreferences(private val context: Context) {
         seed: String,
         size: Int,
         denoiseStrength: Float,
-        useOpenCL: Boolean
+        useOpenCL: Boolean,
+        batchCounts: Int
     ) {
         context.dataStore.edit { preferences ->
             preferences[getPromptKey(modelId)] = prompt
@@ -60,6 +78,7 @@ class GenerationPreferences(private val context: Context) {
             preferences[getSizeKey(modelId)] = size
             preferences[getDenoiseStrengthKey(modelId)] = denoiseStrength
             preferences[getUseOpenCLKey(modelId)] = useOpenCL
+            preferences[getBatchCountsKey(modelId)] = batchCounts
         }
     }
 
@@ -111,6 +130,12 @@ class GenerationPreferences(private val context: Context) {
         }
     }
 
+    suspend fun saveBatchCounts(modelId: String, batchCounts: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[getBatchCountsKey(modelId)] = batchCounts
+        }
+    }
+
     fun getPreferences(modelId: String): Flow<GenerationPrefs> {
         return context.dataStore.data
             .catch { exception ->
@@ -129,9 +154,24 @@ class GenerationPreferences(private val context: Context) {
                     seed = preferences[getSeedKey(modelId)] ?: "",
                     size = preferences[getSizeKey(modelId)] ?: 256,
                     denoiseStrength = preferences[getDenoiseStrengthKey(modelId)] ?: 0.6f,
-                    useOpenCL = preferences[getUseOpenCLKey(modelId)] ?: false
+                    useOpenCL = preferences[getUseOpenCLKey(modelId)] ?: false,
+                    batchCounts = preferences[getBatchCountsKey(modelId)] ?: 1
                 )
             }
+    }
+
+    suspend fun clearPreferencesForModel(modelId: String) {
+        context.dataStore.edit { preferences ->
+            preferences.remove(getPromptKey(modelId))
+            preferences.remove(getNegativePromptKey(modelId))
+            preferences.remove(getStepsKey(modelId))
+            preferences.remove(getCfgKey(modelId))
+            preferences.remove(getSeedKey(modelId))
+            preferences.remove(getSizeKey(modelId))
+            preferences.remove(getDenoiseStrengthKey(modelId))
+            preferences.remove(getUseOpenCLKey(modelId))
+            preferences.remove(getBatchCountsKey(modelId))
+        }
     }
 }
 
@@ -143,5 +183,6 @@ data class GenerationPrefs(
     val seed: String = "",
     val size: Int = 512,
     val denoiseStrength: Float = 0.6f,
-    val useOpenCL: Boolean = false
+    val useOpenCL: Boolean = false,
+    val batchCounts: Int = 1
 )

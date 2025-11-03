@@ -1,4 +1,4 @@
-# Model Conversion Guide
+# Model Conversion Guide (SD1.5 Only)
 
 ## Overview
 
