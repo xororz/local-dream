@@ -17,6 +17,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -40,6 +41,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -764,11 +766,14 @@ fun ModelRunScreen(
                     generationStartTime = null
 
                     if (pagerState.currentPage == 0) {
-                        pagerState.animateScrollToPage(1)
+                        try {
+                            pagerState.animateScrollToPage(1)
+                        } finally {
+                            BackgroundGenerationService.markBitmapConsumed()
+                        }
+                    } else {
+                        BackgroundGenerationService.markBitmapConsumed()
                     }
-
-                    // Mark bitmap consumed after animation completes
-                    BackgroundGenerationService.markBitmapConsumed()
                 }
             }
 
@@ -914,13 +919,16 @@ fun ModelRunScreen(
             topBar = {
                 LargeTopAppBar(
                     title = {
-                        Column {
-                            Text(model?.name ?: "Running Model")
-                            Text(
-                                model?.description ?: "",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                            )
+                        // Hide title when collapsed
+                        if (scrollBehavior.state.collapsedFraction < 0.5f) {
+                            Column {
+                                Text(model?.name ?: "Running Model")
+                                Text(
+                                    model?.description ?: "",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                )
+                            }
                         }
                     },
                     navigationIcon = {
@@ -1766,59 +1774,54 @@ fun ModelRunScreen(
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
                                     .padding(horizontal = 16.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                AnimatedVisibility(
-                                    visible = currentBitmap == null,
-                                    enter = fadeIn(),
-                                    exit = fadeOut()
-                                ) {
-                                    ElevatedCard(
-                                        modifier = Modifier.padding(16.dp)
-                                    ) {
-                                        Column(
-                                            modifier = Modifier
-                                                .padding(24.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                                Crossfade(
+                                    targetState = currentBitmap != null,
+                                    label = "result_crossfade"
+                                ) { hasResult ->
+                                    if (!hasResult) {
+                                        ElevatedCard(
+                                            modifier = Modifier.padding(16.dp)
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Image,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(48.dp),
-                                                tint = MaterialTheme.colorScheme.primary
-                                            )
-                                            Text(
-                                                stringResource(R.string.no_results),
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                stringResource(R.string.no_results_hint),
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Button(
-                                                onClick = {
-                                                    coroutineScope.launch {
-                                                        pagerState.animateScrollToPage(0)
-                                                    }
-                                                },
-                                                modifier = Modifier.padding(top = 8.dp)
+                                            Column(
+                                                modifier = Modifier
+                                                    .padding(24.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(12.dp)
                                             ) {
-                                                Text(stringResource(R.string.go_to_generate))
+                                                Icon(
+                                                    imageVector = Icons.Default.Image,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(48.dp),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                                Text(
+                                                    stringResource(R.string.no_results),
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Text(
+                                                    stringResource(R.string.no_results_hint),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Button(
+                                                    onClick = {
+                                                        coroutineScope.launch {
+                                                            pagerState.animateScrollToPage(0)
+                                                        }
+                                                    },
+                                                    modifier = Modifier.padding(top = 8.dp)
+                                                ) {
+                                                    Text(stringResource(R.string.go_to_generate))
+                                                }
                                             }
                                         }
-                                    }
-                                }
-
-                                AnimatedVisibility(
-                                    visible = currentBitmap != null,
-                                    enter = expandVertically() + fadeIn(),
-                                    exit = shrinkVertically() + fadeOut()
-                                ) {
+                                    } else {
                                     ElevatedCard(
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = MaterialTheme.shapes.large
@@ -2038,6 +2041,7 @@ fun ModelRunScreen(
                                                 }
                                             }
                                         }
+                                    }
                                     }
                                 }
                                 if (showReportDialog && currentBitmap != null && generationParams != null) {
