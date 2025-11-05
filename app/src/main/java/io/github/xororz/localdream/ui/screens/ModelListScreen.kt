@@ -2958,7 +2958,6 @@ private fun getFileNameFromUri(context: Context, uri: Uri): String? {
                 uri.lastPathSegment
             }
             else -> {
-                // 对于其他 scheme，尝试使用 DocumentFile
                 DocumentFile.fromSingleUri(context, uri)?.name
             }
         }
