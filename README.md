@@ -54,7 +54,8 @@ The following tools are required for building:
 
 - **Rust** - Install [rustup](https://rustup.rs/), then run:
   ```bash
-  rustup default stable
+  # rustup default stable
+  rustup default 1.84.0 # Please use 1.84.0 for compatibility. Newer versions may cause build failures.
   rustup target add aarch64-linux-android
   ```
 - **Ninja** - Build system
