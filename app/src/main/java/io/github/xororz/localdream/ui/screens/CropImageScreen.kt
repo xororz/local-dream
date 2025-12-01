@@ -31,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -51,6 +52,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun CropImageScreen(
     imageUri: Uri,
+    width: Int,
+    height: Int,
     onCropComplete: (String, Bitmap, AndroidRect) -> Unit,
     onCancel: () -> Unit
 ) {
@@ -60,6 +63,12 @@ fun CropImageScreen(
 
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val aspectRatio = if (width > 0 && height > 0) {
+        height.toFloat() / width.toFloat()
+    } else {
+        1f
+    }
 
     val handleCroppedImage: (ImageBitmap) -> Unit = { bitmap ->
         coroutineScope.launch {
@@ -118,6 +127,7 @@ fun CropImageScreen(
     }
 
     Scaffold(
+        containerColor = Color.Black,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.crop_image)) },
@@ -153,11 +163,13 @@ fun CropImageScreen(
                     errorMessage = "Error: ${error.message}"
                 },
                 option = CropifyOption(
-                    frameSize = CropifySize.FixedAspectRatio(1f, 1f),
+                    frameSize = CropifySize.FixedAspectRatio(aspectRatio),
                     frameColor = MaterialTheme.colorScheme.primary,
                     gridColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
                 ),
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp)
             )
 
             Box(

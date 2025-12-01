@@ -2,6 +2,7 @@ package io.github.xororz.localdream.data
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.Log
 import io.github.xororz.localdream.ui.screens.GenerationParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -11,7 +12,7 @@ import java.io.FileOutputStream
 
 data class HistoryItem(
     val imageFile: File,
-    val params: GenerationParameters,
+    val params: GenerationParameters?,
     val timestamp: Long
 )
 
@@ -47,7 +48,7 @@ class HistoryManager(private val context: Context) {
                 put("prompt", params.prompt)
                 put("negativePrompt", params.negativePrompt)
                 put("generationTime", params.generationTime)
-                put("size", params.size)
+                put("size", "${params.width}x${params.height}")
                 put("runOnCpu", params.runOnCpu)
                 put("denoiseStrength", params.denoiseStrength)
                 put("useOpenCL", params.useOpenCL)
@@ -61,7 +62,7 @@ class HistoryManager(private val context: Context) {
                 timestamp = timestamp
             )
         } catch (e: Exception) {
-            android.util.Log.e("HistoryManager", "Failed to save image", e)
+            Log.e("HistoryManager", "Failed to save image", e)
             null
         }
     }
@@ -70,57 +71,77 @@ class HistoryManager(private val context: Context) {
         withContext(Dispatchers.IO) {
             try {
                 val historyDir = getHistoryDir(modelId)
-                val jsonFiles = historyDir.listFiles { file ->
-                    file.extension == "json"
+                val imageFiles = historyDir.listFiles { file ->
+                    file.extension == "png" || file.extension == "jpg"
                 } ?: return@withContext emptyList()
 
-                jsonFiles.mapNotNull { jsonFile ->
-                    try {
-                        val jsonString = jsonFile.readText()
-                        val json = JSONObject(jsonString)
+                imageFiles.mapNotNull { imageFile ->
+                    val timestamp =
+                        imageFile.nameWithoutExtension.toLongOrNull() ?: return@mapNotNull null
+                    HistoryItem(
+                        imageFile = imageFile,
+                        params = null,
+                        timestamp = timestamp
+                    )
+                }.sortedByDescending { it.timestamp }
+                    .distinctBy { it.timestamp }
+            } catch (e: Exception) {
+                Log.e("HistoryManager", "Failed to load history", e)
+                emptyList()
+            }
+        }
 
-                        val timestamp = json.getLong("timestamp")
+    suspend fun loadHistoryItemParams(item: HistoryItem): GenerationParameters? =
+        withContext(Dispatchers.IO) {
+            try {
+                val historyDir = item.imageFile.parentFile ?: return@withContext null
+                val timestamp = item.timestamp
+                val jsonFile = File(historyDir, "$timestamp.json")
 
-                        val jpgFile = File(historyDir, "$timestamp.jpg")
-                        val pngFile = File(historyDir, "$timestamp.png")
-                        val imageFile = when {
-                            jpgFile.exists() -> jpgFile
-                            pngFile.exists() -> pngFile
-                            else -> {
-                                android.util.Log.w(
-                                    "HistoryManager",
-                                    "Image file missing for $timestamp"
-                                )
-                                return@mapNotNull null
+                if (!jsonFile.exists()) {
+                    return@withContext null
+                }
+
+                val jsonString = jsonFile.readText()
+                val json = JSONObject(jsonString)
+
+                val (width, height) = try {
+                    when (val sizeValue = json.get("size")) {
+                        is String -> {
+                            val parts = sizeValue.split("x")
+                            if (parts.size == 2) {
+                                Pair(parts[0].toInt(), parts[1].toInt())
+                            } else {
+                                Pair(512, 512)
                             }
                         }
 
-                        val params = GenerationParameters(
-                            steps = json.getInt("steps"),
-                            cfg = json.getDouble("cfg").toFloat(),
-                            seed = if (json.isNull("seed")) null else json.getLong("seed"),
-                            prompt = json.getString("prompt"),
-                            negativePrompt = json.getString("negativePrompt"),
-                            generationTime = json.optString("generationTime", null),
-                            size = json.getInt("size"),
-                            runOnCpu = json.getBoolean("runOnCpu"),
-                            denoiseStrength = json.optDouble("denoiseStrength", 0.6).toFloat(),
-                            useOpenCL = json.optBoolean("useOpenCL", false),
-                        )
+                        is Int -> {
+                            Pair(sizeValue, sizeValue)
+                        }
 
-                        HistoryItem(
-                            imageFile = imageFile,
-                            params = params,
-                            timestamp = timestamp
-                        )
-                    } catch (e: Exception) {
-                        android.util.Log.e("HistoryManager", "Failed to load history item", e)
-                        null
+                        else -> Pair(512, 512)
                     }
-                }.sortedByDescending { it.timestamp }
+                } catch (_: Exception) {
+                    Pair(512, 512)
+                }
+
+                GenerationParameters(
+                    steps = json.getInt("steps"),
+                    cfg = json.getDouble("cfg").toFloat(),
+                    seed = if (json.isNull("seed")) null else json.getLong("seed"),
+                    prompt = json.getString("prompt"),
+                    negativePrompt = json.getString("negativePrompt"),
+                    generationTime = json.optString("generationTime", ""),
+                    width = width,
+                    height = height,
+                    runOnCpu = json.getBoolean("runOnCpu"),
+                    denoiseStrength = json.optDouble("denoiseStrength", 0.6).toFloat(),
+                    useOpenCL = json.optBoolean("useOpenCL", false),
+                )
             } catch (e: Exception) {
-                android.util.Log.e("HistoryManager", "Failed to load history", e)
-                emptyList()
+                Log.e("HistoryManager", "Failed to load history item params", e)
+                null
             }
         }
 
@@ -149,7 +170,7 @@ class HistoryManager(private val context: Context) {
 
             success
         } catch (e: Exception) {
-            android.util.Log.e("HistoryManager", "Failed to delete history item", e)
+            Log.e("HistoryManager", "Failed to delete history item", e)
             false
         }
     }
@@ -160,7 +181,7 @@ class HistoryManager(private val context: Context) {
             historyDir.deleteRecursively()
             true
         } catch (e: Exception) {
-            android.util.Log.e("HistoryManager", "Failed to clear history", e)
+            Log.e("HistoryManager", "Failed to clear history", e)
             false
         }
     }

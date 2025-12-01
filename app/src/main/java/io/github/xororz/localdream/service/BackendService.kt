@@ -1,17 +1,12 @@
 package io.github.xororz.localdream.service
 
 import android.app.*
-import android.content.Context
 import android.content.Intent
-import android.os.Binder
-import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import androidx.compose.runtime.remember
 import androidx.core.app.NotificationCompat
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.Model
-import io.github.xororz.localdream.data.ModelFile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
@@ -19,13 +14,10 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import io.github.xororz.localdream.data.ModelRepository
 import io.github.xororz.localdream.BuildConfig
-import java.nio.file.Files
-import java.nio.file.Paths
 
 class BackendService : Service() {
     private var process: Process? = null
     private lateinit var runtimeDir: File
-    private val binder = LocalBinder()
 
     companion object {
         private const val TAG = "BackendService"
@@ -35,6 +27,7 @@ class BackendService : Service() {
         private const val CHANNEL_ID = "backend_service_channel"
 
         const val ACTION_STOP = "io.github.xororz.localdream.STOP_GENERATION"
+        const val ACTION_RESTART = "io.github.xororz.localdream.RESTART_BACKEND"
 
         private object StateHolder {
             val _backendState = MutableStateFlow<BackendState>(BackendState.Idle)
@@ -54,42 +47,43 @@ class BackendService : Service() {
         data class Error(val message: String) : BackendState()
     }
 
-    inner class LocalBinder : Binder() {
-        fun getService(): BackendService = this@BackendService
-    }
-
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         prepareRuntimeDir()
     }
 
-    override fun onBind(intent: Intent): IBinder {
-        return binder
-    }
+    override fun onBind(intent: Intent): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.i(TAG, "service started command: ${intent?.action}")
+        startForeground(
+            NOTIFICATION_ID,
+            createNotification(this.getString(R.string.backend_notify))
+        )
+
         when (intent?.action) {
             ACTION_STOP -> {
                 Log.d("GenerationService", "stop")
                 stopSelf()
                 return START_NOT_STICKY
             }
+
+            ACTION_RESTART -> {
+                Log.i(TAG, "restarting backend service")
+                stopBackend()
+            }
         }
-        Log.i(TAG, "service started")
-        startForeground(
-            NOTIFICATION_ID,
-            createNotification(this.getString(R.string.backend_notify))
-        )
 
         val modelId = intent?.getStringExtra("modelId")
-        val resolution = intent?.getIntExtra("resolution", 512) ?: 512
+        val width = intent?.getIntExtra("width", 512) ?: 512
+        val height = intent?.getIntExtra("height", 512) ?: 512
         if (modelId != null) {
             val modelRepository = ModelRepository(this)
             val model = modelRepository.models.find { it.id == modelId }
 
             if (model != null) {
-                if (startBackend(model, resolution)) {
+                if (startBackend(model, width, height)) {
                     updateState(BackendState.Running)
                 } else {
                     updateState(BackendState.Error("Backend start failed"))
@@ -103,17 +97,23 @@ class BackendService : Service() {
         return START_NOT_STICKY
     }
 
+    override fun onTimeout(startId: Int) {
+        super.onTimeout(startId)
+        Log.e(TAG, "Foreground service timeout")
+        updateState(BackendState.Error("Service timeout"))
+        stopBackend()
+        stopSelf()
+    }
+
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "Backend Service"
-            val descriptionText = "Backend service for image generation"
-            val importance = NotificationManager.IMPORTANCE_LOW
-            val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
-                description = descriptionText
-            }
-            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
+        val name = "Backend Service"
+        val descriptionText = "Backend service for image generation"
+        val importance = NotificationManager.IMPORTANCE_LOW
+        val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
+            description = descriptionText
         }
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
     }
 
     private fun createNotification(contentText: String): Notification {
@@ -209,8 +209,8 @@ class BackendService : Service() {
         }
     }
 
-    private fun startBackend(model: Model, resolution: Int): Boolean {
-        Log.i(TAG, "backend start, model: ${model.name}")
+    private fun startBackend(model: Model, width: Int, height: Int): Boolean {
+        Log.i(TAG, "backend start, model: ${model.name}, resolution: ${width}×${height}")
         updateState(BackendState.Starting)
 
         try {
@@ -224,7 +224,7 @@ class BackendService : Service() {
                 return false
             }
 
-            val preferences = this.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+            val preferences = this.getSharedPreferences("app_prefs", MODE_PRIVATE)
             val useImg2img = preferences.getBoolean("use_img2img", true)
 
             var clipfilename = "clip.bin"
@@ -242,10 +242,29 @@ class BackendService : Service() {
                 "--port", "8081",
                 "--text_embedding_size", model.textEmbeddingSize.toString()
             )
-            if (resolution > 512) {
-                command = command + listOf(
-                    "--patch", File(modelsDir, "$resolution.patch").absolutePath,
-                )
+            if (width != 512 || height != 512) {
+                val patchFile = if (width == height) {
+                    val squarePatch = File(modelsDir, "${width}.patch")
+                    if (squarePatch.exists()) {
+                        squarePatch
+                    } else {
+                        File(modelsDir, "${width}x${height}.patch")
+                    }
+                } else {
+                    File(modelsDir, "${width}x${height}.patch")
+                }
+
+                if (patchFile.exists()) {
+                    command = command + listOf(
+                        "--patch", patchFile.absolutePath,
+                    )
+                    Log.i(TAG, "Using patch file: ${patchFile.name}")
+                } else {
+                    Log.w(
+                        TAG,
+                        "Patch file not found: ${patchFile.absolutePath}, falling back to 512×512"
+                    )
+                }
             }
             if (useImg2img) {
                 command = command + listOf(
@@ -390,9 +409,5 @@ class BackendService : Service() {
                 process = null
             }
         }
-    }
-
-    fun isRunning(): Boolean {
-        return process?.isAlive ?: false
     }
 }

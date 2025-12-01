@@ -16,7 +16,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -28,17 +27,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -53,6 +48,8 @@ import kotlin.math.max
 import android.content.Context
 import androidx.compose.ui.graphics.Color as ComposeColor
 import io.github.xororz.localdream.R
+import androidx.core.content.edit
+import androidx.core.graphics.createBitmap
 
 enum class ToolMode {
     BRUSH,
@@ -81,7 +78,7 @@ fun InpaintScreen(
 
     val sharedPrefs =
         remember { context.getSharedPreferences("inpaint_prefs", Context.MODE_PRIVATE) }
-    val defaultColor = android.graphics.Color.WHITE
+    val defaultColor = Color.WHITE
     val savedColor = remember { sharedPrefs.getInt("brush_color", defaultColor) }
     val savedToolMode =
         remember { sharedPrefs.getString("tool_mode", ToolMode.BRUSH.name) ?: ToolMode.BRUSH.name }
@@ -91,19 +88,19 @@ fun InpaintScreen(
     var currentToolMode by remember { mutableStateOf(ToolMode.valueOf(savedToolMode)) }
 
     LaunchedEffect(currentToolMode) {
-        sharedPrefs.edit().putString("tool_mode", currentToolMode.name).apply()
+        sharedPrefs.edit { putString("tool_mode", currentToolMode.name) }
     }
 
     val colorOptions = remember {
         arrayOf(
-            android.graphics.Color.WHITE,
-            android.graphics.Color.RED,
-            android.graphics.Color.GREEN,
-            android.graphics.Color.BLUE,
-            android.graphics.Color.YELLOW,
-            android.graphics.Color.CYAN,
-            android.graphics.Color.MAGENTA,
-            android.graphics.Color.BLACK
+            Color.WHITE,
+            Color.RED,
+            Color.GREEN,
+            Color.BLUE,
+            Color.YELLOW,
+            Color.CYAN,
+            Color.MAGENTA,
+            Color.BLACK
         )
     }
 
@@ -111,11 +108,7 @@ fun InpaintScreen(
         if (existingMaskBitmap != null) {
             existingMaskBitmap.copy(existingMaskBitmap.config ?: Bitmap.Config.ARGB_8888, true)
         } else {
-            Bitmap.createBitmap(
-                originalBitmap.width,
-                originalBitmap.height,
-                Bitmap.Config.ARGB_8888
-            ).apply {
+            createBitmap(originalBitmap.width, originalBitmap.height).apply {
                 val canvas = Canvas(this)
                 canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
             }
@@ -123,11 +116,7 @@ fun InpaintScreen(
     }
 
     val tempBitmap = remember {
-        Bitmap.createBitmap(
-            originalBitmap.width,
-            originalBitmap.height,
-            Bitmap.Config.ARGB_8888
-        ).apply {
+        createBitmap(originalBitmap.width, originalBitmap.height).apply {
             val canvas = Canvas(this)
             canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
         }
@@ -182,8 +171,6 @@ fun InpaintScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     var imageRect by remember { mutableStateOf<Rect?>(null) }
-    var canvasWidth by remember { mutableStateOf(0f) }
-    var canvasHeight by remember { mutableStateOf(0f) }
 
     var displayUpdateTrigger by remember { mutableStateOf(0) }
 
@@ -198,7 +185,7 @@ fun InpaintScreen(
     LaunchedEffect(brushColor) {
         brushPaint.color = brushColor
         updateAllBrushPaths(brushColor)
-        sharedPrefs.edit().putInt("brush_color", brushColor).apply()
+        sharedPrefs.edit { putInt("brush_color", brushColor) }
         displayUpdateTrigger++
     }
 
@@ -452,8 +439,6 @@ fun InpaintScreen(
                         .fillMaxWidth()
                         .padding(16.dp)
                         .onGloballyPositioned { coordinates ->
-                            canvasWidth = coordinates.size.width.toFloat()
-                            canvasHeight = coordinates.size.height.toFloat()
                             val size = coordinates.size
                             val imageWidth = size.width.toFloat()
                             val imageHeight = size.height.toFloat()

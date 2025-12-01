@@ -20,7 +20,8 @@ class GenerationPreferences(private val context: Context) {
     private fun getStepsKey(modelId: String) = floatPreferencesKey("${modelId}_steps")
     private fun getCfgKey(modelId: String) = floatPreferencesKey("${modelId}_cfg")
     private fun getSeedKey(modelId: String) = stringPreferencesKey("${modelId}_seed")
-    private fun getSizeKey(modelId: String) = intPreferencesKey("${modelId}_size")
+    private fun getWidthKey(modelId: String) = intPreferencesKey("${modelId}_width")
+    private fun getHeightKey(modelId: String) = intPreferencesKey("${modelId}_height")
     private fun getDenoiseStrengthKey(modelId: String) =
         floatPreferencesKey("${modelId}_denoise_strength")
 
@@ -64,7 +65,8 @@ class GenerationPreferences(private val context: Context) {
         steps: Float,
         cfg: Float,
         seed: String,
-        size: Int,
+        width: Int,
+        height: Int,
         denoiseStrength: Float,
         useOpenCL: Boolean,
         batchCounts: Int
@@ -75,64 +77,18 @@ class GenerationPreferences(private val context: Context) {
             preferences[getStepsKey(modelId)] = steps
             preferences[getCfgKey(modelId)] = cfg
             preferences[getSeedKey(modelId)] = seed
-            preferences[getSizeKey(modelId)] = size
+            preferences[getWidthKey(modelId)] = width
+            preferences[getHeightKey(modelId)] = height
             preferences[getDenoiseStrengthKey(modelId)] = denoiseStrength
             preferences[getUseOpenCLKey(modelId)] = useOpenCL
             preferences[getBatchCountsKey(modelId)] = batchCounts
         }
     }
 
-    suspend fun savePrompt(modelId: String, prompt: String) {
+    suspend fun saveResolution(modelId: String, width: Int, height: Int) {
         context.dataStore.edit { preferences ->
-            preferences[getPromptKey(modelId)] = prompt
-        }
-    }
-
-    suspend fun saveNegativePrompt(modelId: String, negativePrompt: String) {
-        context.dataStore.edit { preferences ->
-            preferences[getNegativePromptKey(modelId)] = negativePrompt
-        }
-    }
-
-    suspend fun saveSteps(modelId: String, steps: Float) {
-        context.dataStore.edit { preferences ->
-            preferences[getStepsKey(modelId)] = steps
-        }
-    }
-
-    suspend fun saveCfg(modelId: String, cfg: Float) {
-        context.dataStore.edit { preferences ->
-            preferences[getCfgKey(modelId)] = cfg
-        }
-    }
-
-    suspend fun saveSeed(modelId: String, seed: String) {
-        context.dataStore.edit { preferences ->
-            preferences[getSeedKey(modelId)] = seed
-        }
-    }
-
-    suspend fun saveSize(modelId: String, size: Int) {
-        context.dataStore.edit { preferences ->
-            preferences[getSizeKey(modelId)] = size
-        }
-    }
-
-    suspend fun saveDenoiseStrength(modelId: String, denoiseStrength: Float) {
-        context.dataStore.edit { preferences ->
-            preferences[getDenoiseStrengthKey(modelId)] = denoiseStrength
-        }
-    }
-
-    suspend fun saveUseOpenCL(modelId: String, useOpenCL: Boolean) {
-        context.dataStore.edit { preferences ->
-            preferences[getUseOpenCLKey(modelId)] = useOpenCL
-        }
-    }
-
-    suspend fun saveBatchCounts(modelId: String, batchCounts: Int) {
-        context.dataStore.edit { preferences ->
-            preferences[getBatchCountsKey(modelId)] = batchCounts
+            preferences[getWidthKey(modelId)] = width
+            preferences[getHeightKey(modelId)] = height
         }
     }
 
@@ -152,7 +108,8 @@ class GenerationPreferences(private val context: Context) {
                     steps = preferences[getStepsKey(modelId)] ?: 20f,
                     cfg = preferences[getCfgKey(modelId)] ?: 7f,
                     seed = preferences[getSeedKey(modelId)] ?: "",
-                    size = preferences[getSizeKey(modelId)] ?: 256,
+                    width = preferences[getWidthKey(modelId)] ?: -1,
+                    height = preferences[getHeightKey(modelId)] ?: -1,
                     denoiseStrength = preferences[getDenoiseStrengthKey(modelId)] ?: 0.6f,
                     useOpenCL = preferences[getUseOpenCLKey(modelId)] ?: false,
                     batchCounts = preferences[getBatchCountsKey(modelId)] ?: 1
@@ -167,7 +124,8 @@ class GenerationPreferences(private val context: Context) {
             preferences.remove(getStepsKey(modelId))
             preferences.remove(getCfgKey(modelId))
             preferences.remove(getSeedKey(modelId))
-            preferences.remove(getSizeKey(modelId))
+            preferences.remove(getWidthKey(modelId))
+            preferences.remove(getHeightKey(modelId))
             preferences.remove(getDenoiseStrengthKey(modelId))
             preferences.remove(getUseOpenCLKey(modelId))
             preferences.remove(getBatchCountsKey(modelId))
@@ -181,7 +139,8 @@ data class GenerationPrefs(
     val steps: Float = 20f,
     val cfg: Float = 7f,
     val seed: String = "",
-    val size: Int = 512,
+    val width: Int = -1,
+    val height: Int = -1,
     val denoiseStrength: Float = 0.6f,
     val useOpenCL: Boolean = false,
     val batchCounts: Int = 1

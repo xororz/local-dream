@@ -130,20 +130,13 @@ class MainActivity : ComponentActivity() {
                             arguments = listOf(
                                 navArgument("modelId") {
                                     type = NavType.StringType
-                                },
-                                navArgument("resolution") {
-                                    type = NavType.IntType
-                                    defaultValue = 512
-                                    nullable = false
                                 }
                             )
                         ) { backStackEntry ->
                             val modelId = backStackEntry.arguments?.getString("modelId") ?: ""
-                            val resolution = backStackEntry.arguments?.getInt("resolution") ?: 512
 
                             ModelRunScreen(
                                 modelId = modelId,
-                                resolution = resolution,
                                 navController = navController
                             )
                         }

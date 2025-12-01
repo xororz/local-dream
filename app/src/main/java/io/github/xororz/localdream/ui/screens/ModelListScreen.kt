@@ -23,17 +23,16 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import io.github.xororz.localdream.data.*
 import io.github.xororz.localdream.navigation.Screen
+import io.github.xororz.localdream.service.ModelDownloadService
 import kotlinx.coroutines.launch
 import java.text.DecimalFormat
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.AnimatedVisibility
@@ -61,6 +60,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Folder
@@ -71,6 +71,7 @@ import androidx.documentfile.provider.DocumentFile
 import java.util.zip.ZipInputStream
 import java.io.BufferedOutputStream
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.core.net.toUri
 
 data class LoRAFile(
     val uri: Uri,
@@ -128,11 +129,7 @@ fun ModelListScreen(
     var downloadError by remember { mutableStateOf<String?>(null) }
     var showDownloadConfirm by remember { mutableStateOf<Model?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-
-    var showHighresDownloadConfirm by remember { mutableStateOf<Pair<Model, Int>?>(null) }
-    var downloadingHighres by remember { mutableStateOf<Pair<String, Int>?>(null) }
-    var highresProgress by remember { mutableStateOf<DownloadProgress?>(null) }
-    var showHighres404Dialog by remember { mutableStateOf<String?>(null) }
+    var showUpgradeConfirm by remember { mutableStateOf<Model?>(null) }
 
     var isSelectionMode by remember { mutableStateOf(false) }
     var selectedModels by remember { mutableStateOf(setOf<Model>()) }
@@ -165,6 +162,52 @@ fun ModelListScreen(
             preferences.edit() { putBoolean("is_first_launch", false) }
         }
         isFirst
+    }
+
+    val downloadState by ModelDownloadService.downloadState.collectAsState()
+
+    LaunchedEffect(downloadState) {
+        when (val state = downloadState) {
+            is ModelDownloadService.DownloadState.Downloading -> {
+                val model = modelRepository.models.find { it.id == state.modelId }
+                if (model != null) {
+                    downloadingModel = model
+                    currentProgress = DownloadProgress(
+                        progress = state.progress,
+                        downloadedBytes = state.downloadedBytes,
+                        totalBytes = state.totalBytes
+                    )
+                }
+            }
+
+            is ModelDownloadService.DownloadState.Extracting -> {
+                val model = modelRepository.models.find { it.id == state.modelId }
+                if (model != null) {
+                    downloadingModel = model
+                    currentProgress = null
+                }
+            }
+
+            is ModelDownloadService.DownloadState.Success -> {
+                modelRepository.refreshModelState(state.modelId)
+                downloadingModel = null
+                currentProgress = null
+                snackbarHostState.showSnackbar(context.getString(R.string.download_done))
+            }
+
+            is ModelDownloadService.DownloadState.Error -> {
+                downloadingModel = null
+                currentProgress = null
+                downloadError = state.message
+            }
+
+            is ModelDownloadService.DownloadState.Idle -> {
+                if (downloadingModel != null) {
+                    downloadingModel = null
+                    currentProgress = null
+                }
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -279,7 +322,7 @@ fun ModelListScreen(
                                 start = offset,
                                 end = offset
                             ).firstOrNull()?.let { annotation ->
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(annotation.item))
+                                val intent = Intent(Intent.ACTION_VIEW, annotation.item.toUri())
                                 context.startActivity(intent)
                             }
                         }
@@ -462,39 +505,15 @@ fun ModelListScreen(
                 onDismissRequest = { showDownloadConfirm = null },
                 title = { Text(stringResource(R.string.download_model)) },
                 text = {
-                    if (model.isPartiallyDownloaded) {
-                        Text(stringResource(R.string.continue_download_hint, model.name))
-                    } else {
-                        Text(stringResource(R.string.download_model_hint, model.name))
-                    }
+                    Text(stringResource(R.string.download_model_hint, model.name))
                 },
                 confirmButton = {
                     TextButton(
                         onClick = {
                             showDownloadConfirm = null
-                            scope.launch {
-                                downloadingModel = model
-                                currentProgress = null
-
-                                model.download(context).collect { result ->
-                                    when (result) {
-                                        is DownloadResult.Progress -> {
-                                            currentProgress = result.progress
-                                        }
-
-                                        is DownloadResult.Success -> {
-                                            modelRepository.refreshModelState(model.id)
-                                            downloadingModel = null
-                                            snackbarHostState.showSnackbar(context.getString(R.string.download_done))
-                                        }
-
-                                        is DownloadResult.Error -> {
-                                            downloadingModel = null
-                                            downloadError = result.message
-                                        }
-                                    }
-                                }
-                            }
+                            downloadingModel = model
+                            currentProgress = null
+                            model.startDownload(context)
                         }
                     ) {
                         Text(stringResource(R.string.confirm))
@@ -508,98 +527,34 @@ fun ModelListScreen(
             )
         }
     }
-    showHighres404Dialog?.let { errorMessage ->
+
+    showUpgradeConfirm?.let { model ->
         AlertDialog(
-            onDismissRequest = { showHighres404Dialog = null },
-            title = {
-                Text(
-                    text = "High Resolution Patch Not Found",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            },
+            onDismissRequest = { showUpgradeConfirm = null },
+            title = { Text(stringResource(R.string.upgrade_model)) },
             text = {
-                Text(
-                    text = errorMessage,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showHighres404Dialog = null }) {
-                    Text("Got it")
-                }
-            },
-            icon = {
-                Icon(
-                    imageVector = Icons.Default.Error,
-                    contentDescription = "Error",
-                    tint = MaterialTheme.colorScheme.error
-                )
-            }
-        )
-    }
-    showHighresDownloadConfirm?.let { (model, resolution) ->
-        AlertDialog(
-            onDismissRequest = { showHighresDownloadConfirm = null },
-            title = {
-                Text(stringResource(R.string.download_patch))
-            },
-            text = {
-                Text(
-                    stringResource(
-                        R.string.download_patch_hint,
-                        resolution,
-                        model.name,
-                    )
-                )
+                Text(stringResource(R.string.upgrade_model_hint, model.name))
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showHighresDownloadConfirm = null
-                        scope.launch {
-                            downloadingHighres = Pair(model.id, resolution)
-                            highresProgress = null
-
-                            model.downloadHighresPatch(context, resolution).collect { result ->
-                                when (result) {
-                                    is DownloadResult.Progress -> {
-                                        highresProgress = result.progress
-                                    }
-
-                                    is DownloadResult.Success -> {
-                                        modelRepository.refreshModelState(model.id)
-                                        downloadingHighres = null
-                                        highresProgress = null
-                                        snackbarHostState.showSnackbar("${resolution}px patch downloaded successfully")
-                                    }
-
-                                    is DownloadResult.Error -> {
-                                        downloadingHighres = null
-                                        highresProgress = null
-
-                                        if (result.message.startsWith("PATCH_NOT_FOUND|")) {
-                                            showHighres404Dialog =
-                                                result.message.substringAfter("PATCH_NOT_FOUND|")
-                                        } else {
-                                            downloadError = result.message
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        showUpgradeConfirm = null
+                        downloadingModel = model
+                        currentProgress = null
+                        model.startDownload(context)
                     }
                 ) {
-                    Text("Confirm")
+                    Text(stringResource(R.string.confirm))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showHighresDownloadConfirm = null }) {
-                    Text("Cancel")
+                TextButton(onClick = { showUpgradeConfirm = null }) {
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )
     }
+
     Scaffold(
         topBar = {
             LargeTopAppBar(
@@ -724,14 +679,8 @@ fun ModelListScreen(
                     ) { model ->
                         ModelCard(
                             model = model,
-                            isDownloading = model == downloadingModel,
-                            downloadProgress = if (model == downloadingModel) currentProgress else null,
                             isSelected = selectedModels.contains(model),
                             isSelectionMode = isSelectionMode,
-                            downloadingHighres = downloadingHighres?.let { (modelId, resolution) ->
-                                if (modelId == model.id) resolution else null
-                            },
-                            highresProgress = if (downloadingHighres?.first == model.id) highresProgress else null,
                             onClick = {
                                 if (!Model.isDeviceSupported() && !model.runOnCpu) {
                                     scope.launch {
@@ -740,7 +689,7 @@ fun ModelListScreen(
                                     return@ModelCard
                                 }
                                 if (isSelectionMode) {
-                                    if (model.isDownloaded || model.isPartiallyDownloaded) {
+                                    if (model.isDownloaded) {
                                         selectedModels = if (selectedModels.contains(model)) {
                                             selectedModels - model
                                         } else {
@@ -752,46 +701,21 @@ fun ModelListScreen(
                                         }
                                     }
                                 } else {
-                                    if (downloadingModel != null || downloadingHighres != null) {
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar(context.getString(R.string.cannot_download_hint))
-                                        }
-                                        return@ModelCard
-                                    }
-
-                                    val isModelDownloaded = model.isDownloaded
-                                    val isModelPartiallyDownloaded = model.isPartiallyDownloaded
-
-                                    if (!isModelDownloaded) {
-                                        if (isModelPartiallyDownloaded) {
-                                            showDownloadConfirm = model
-                                        } else {
-                                            showDownloadConfirm = model
-                                        }
+                                    if (!model.isDownloaded) {
+                                        showDownloadConfirm = model
                                     } else {
                                         navController.navigate(Screen.ModelRun.createRoute(model.id))
                                     }
                                 }
                             },
                             onLongClick = {
-                                if ((model.isDownloaded || model.isPartiallyDownloaded) && !isSelectionMode) {
+                                if (model.isDownloaded && !isSelectionMode) {
                                     isSelectionMode = true
                                     selectedModels = setOf(model)
                                 }
                             },
-                            onHighresDownload = { resolution ->
-                                if (downloadingModel == null && downloadingHighres == null) {
-                                    showHighresDownloadConfirm = Pair(model, resolution)
-                                }
-                            },
-                            onHighresClick = { resolution ->
-                                if (downloadingModel != null || downloadingHighres != null) {
-                                    scope.launch {
-                                        snackbarHostState.showSnackbar(context.getString(R.string.cannot_download_hint))
-                                    }
-                                    return@ModelCard
-                                }
-                                navController.navigate(Screen.ModelRun.createRoute("${model.id}?resolution=$resolution"))
+                            onUpdateClick = {
+                                showUpgradeConfirm = model
                             }
                         )
                     }
@@ -1181,6 +1105,90 @@ fun ModelListScreen(
             }
         }
     }
+
+    // Compact floating download progress card
+    if (downloadingModel != null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(24.dp),
+                modifier = Modifier.padding(32.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.downloading_model, downloadingModel!!.name),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium
+                )
+
+                currentProgress?.let { progress ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth(0.8f)
+                    ) {
+                        LinearProgressIndicator(
+                            progress = progress.progress,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+
+                        Text(
+                            text = "${(progress.progress * 100).toInt()}% - ${formatBytes(progress.downloadedBytes)} / ${
+                                formatBytes(
+                                    progress.totalBytes
+                                )
+                            }",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
+                } ?: Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text(
+                        text = stringResource(R.string.extracting),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = stringResource(R.string.download_background_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    return when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+        bytes < 1024 * 1024 * 1024 -> "${bytes / (1024 * 1024)} MB"
+        else -> String.format("%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+    }
 }
 
 @Composable
@@ -1213,19 +1221,13 @@ fun TabPageIndicator(
 @Composable
 fun ModelCard(
     model: Model,
-    isDownloading: Boolean,
-    downloadProgress: DownloadProgress?,
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    onHighresDownload: (Int) -> Unit,
-    onHighresClick: (Int) -> Unit,
-    downloadingHighres: Int? = null,
-    highresProgress: DownloadProgress? = null,
+    onUpdateClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val elevation by animateFloatAsState(
         targetValue = if (isSelected) 8f else 1f,
         animationSpec = spring(
@@ -1237,14 +1239,13 @@ fun ModelCard(
 
     val containerColor = when {
         isSelected -> MaterialTheme.colorScheme.secondaryContainer
-        isDownloading -> MaterialTheme.colorScheme.surfaceContainerLow
-        !model.isDownloaded && !model.isPartiallyDownloaded && isSelectionMode -> MaterialTheme.colorScheme.surfaceContainerLow
+        !model.isDownloaded && isSelectionMode -> MaterialTheme.colorScheme.surfaceContainerLow
         else -> MaterialTheme.colorScheme.surfaceContainerLowest
     }
 
     val contentColor = when {
         isSelected -> MaterialTheme.colorScheme.onSecondaryContainer
-        !model.isDownloaded && !model.isPartiallyDownloaded && isSelectionMode -> MaterialTheme.colorScheme.onSurface.copy(
+        !model.isDownloaded && isSelectionMode -> MaterialTheme.colorScheme.onSurface.copy(
             alpha = 0.5f
         )
 
@@ -1260,13 +1261,13 @@ fun ModelCard(
     ElevatedCard(
         modifier = modifier
             .fillMaxWidth()
-            .pointerInput(isDownloading, isSelectionMode) {
+            .pointerInput(isSelectionMode, model.isDownloaded) {
                 detectTapGestures(
                     onLongPress = {
-                        if ((model.isDownloaded || model.isPartiallyDownloaded) && !isDownloading && !isSelectionMode) onLongClick()
+                        if (model.isDownloaded && !isSelectionMode) onLongClick()
                     },
                     onTap = {
-                        if (!isSelectionMode || (isSelectionMode && (model.isDownloaded || model.isPartiallyDownloaded))) {
+                        if (!isSelectionMode || (model.isDownloaded)) {
                             onClick()
                         }
                     }
@@ -1373,40 +1374,54 @@ fun ModelCard(
                         model.isDownloaded -> {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "downloaded",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = stringResource(R.string.downloaded),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "downloaded",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    if (!model.needsUpgrade or isSelectionMode) {
+                                        Text(
+                                            text = stringResource(R.string.downloaded),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
 
-                        model.isPartiallyDownloaded -> {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Sync,
-                                    contentDescription = "partially downloaded",
-                                    tint = MaterialTheme.colorScheme.tertiary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = stringResource(R.string.partially_downloaded),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.tertiary,
-                                    fontWeight = FontWeight.Medium
-                                )
+                                if (model.needsUpgrade && !isSelectionMode) {
+                                    FilledTonalButton(
+                                        onClick = onUpdateClick,
+                                        modifier = Modifier.height(28.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                                        ),
+                                        contentPadding = PaddingValues(
+                                            horizontal = 12.dp,
+                                            vertical = 4.dp
+                                        )
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Update,
+                                            contentDescription = "update",
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = stringResource(R.string.update),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
                             }
                         }
 
@@ -1430,194 +1445,7 @@ fun ModelCard(
                         }
                     }
                 }
-
-                if (!model.runOnCpu && model.isDownloaded && model.supportedHighres.isNotEmpty() && (!Model.isMinimalDevice() || model.isCustom)) {
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = stringResource(R.string.highres_patch),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = contentColor.copy(alpha = 0.8f),
-                            fontWeight = FontWeight.Medium
-                        )
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            model.supportedHighres.forEach { resolution ->
-                                HighresButton(
-                                    resolution = resolution,
-                                    isDownloaded = model.isHighresDownloaded(context, resolution),
-                                    isDownloading = downloadingHighres == resolution,
-                                    isEnabled = !isDownloading && downloadingHighres == null,
-                                    onClick = {
-                                        if (model.isHighresDownloaded(context, resolution)) {
-                                            onHighresClick(resolution)
-                                        } else {
-                                            onHighresDownload(resolution)
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (isDownloading && downloadProgress != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    DownloadProgressIndicator(
-                        progress = downloadProgress,
-                        contentColor = contentColor,
-                        model = model
-                    )
-                }
-
-                if (downloadingHighres != null && highresProgress != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    DownloadProgressIndicator(
-                        progress = highresProgress,
-                        contentColor = contentColor,
-                        model = model,
-                        isHighres = true
-                    )
-                }
             }
-        }
-    }
-}
-
-@Composable
-private fun HighresButton(
-    resolution: Int,
-    isDownloaded: Boolean,
-    isDownloading: Boolean,
-    isEnabled: Boolean,
-    onClick: () -> Unit
-) {
-    val buttonColors = when {
-        isDownloaded -> ButtonDefaults.filledTonalButtonColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary
-        )
-
-        isDownloading -> ButtonDefaults.filledTonalButtonColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        else -> ButtonDefaults.outlinedButtonColors(
-            contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isEnabled) 1f else 0.5f)
-        )
-    }
-
-    if (isDownloaded) {
-        FilledTonalButton(
-            onClick = onClick,
-            enabled = isEnabled,
-            colors = buttonColors,
-            modifier = Modifier.height(28.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp)
-        ) {
-            Text(
-                text = "${resolution}px",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Medium
-            )
-        }
-    } else {
-        OutlinedButton(
-            onClick = onClick,
-            enabled = isEnabled && !isDownloading,
-            colors = buttonColors,
-            modifier = Modifier.height(28.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp),
-            border = BorderStroke(
-                width = 1.dp,
-                color = if (isEnabled && !isDownloading)
-                    MaterialTheme.colorScheme.outline
-                else
-                    MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-            )
-        ) {
-            if (isDownloading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(10.dp),
-                    strokeWidth = 1.dp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.width(3.dp))
-            }
-            Text(
-                text = "${resolution}px",
-                style = MaterialTheme.typography.labelSmall
-            )
-        }
-    }
-}
-
-@Composable
-private fun DownloadProgressIndicator(
-    progress: DownloadProgress,
-    contentColor: Color,
-    model: Model,
-    isHighres: Boolean = false
-) {
-    Column {
-        Text(
-            text = if (isHighres) {
-                stringResource(
-                    R.string.downloading_file,
-                    1,
-                    1,
-                    progress.displayName
-                )
-            } else {
-                stringResource(
-                    R.string.downloading_file,
-                    progress.currentFileIndex,
-                    progress.totalFiles,
-                    progress.displayName
-                )
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = contentColor.copy(alpha = 0.6f)
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(progress.progress)
-                    .fillMaxHeight()
-                    .background(
-                        if (model.runOnCpu)
-                            MaterialTheme.colorScheme.tertiary
-                        else
-                            MaterialTheme.colorScheme.primary
-                    )
-            )
-        }
-
-        if (progress.totalBytes > 0) {
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "${formatFileSize(progress.downloadedBytes)} / ${
-                    formatFileSize(progress.totalBytes)
-                }",
-                style = MaterialTheme.typography.labelSmall,
-                color = contentColor.copy(alpha = 0.6f)
-            )
         }
     }
 }
@@ -1643,8 +1471,6 @@ private fun FileManagerDialog(
     var folderFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     var showDeleteConfirm by remember { mutableStateOf<File?>(null) }
     var isLoading by remember { mutableStateOf(true) }
-    val fileVerification = remember { FileVerification(context) }
-    val scope = rememberCoroutineScope()
 
     fun loadFolders() {
         val modelsDir = Model.getModelsDir(context)
@@ -1684,14 +1510,6 @@ private fun FileManagerDialog(
                     onClick = {
                         val fileToDelete = showDeleteConfirm!!
                         if (fileToDelete.delete()) {
-                            selectedFolder?.let { modelId ->
-                                scope.launch {
-                                    fileVerification.clearFileVerification(
-                                        modelId,
-                                        fileToDelete.name
-                                    )
-                                }
-                            }
                             onFileDeleted()
                             selectedFolder?.let { loadFilesForFolder(it) }
                             loadFolders()
@@ -2026,7 +1844,7 @@ fun CustomNpuModelDialog(
     ) { uri ->
         uri?.let {
             selectedZipUri = it
-            if (modelName.isBlank()){
+            if (modelName.isBlank()) {
                 getFileNameFromUri(context, it)?.let { fileName ->
                     modelName = fileName.substringBeforeLast(".")
                 }
@@ -2125,7 +1943,7 @@ fun CustomModelDialog(
     ) { uri ->
         uri?.let {
             selectedFileUri = it
-            if (modelName.isBlank()){
+            if (modelName.isBlank()) {
                 getFileNameFromUri(context, it)?.let { fileName ->
                     modelName = fileName.substringBeforeLast(".")
                 }
@@ -2432,7 +2250,7 @@ suspend fun extractNpuModel(
         }
 
     } catch (e: Exception) {
-        android.util.Log.e("NpuModelExtract", "Extraction failed", e)
+        Log.e("NpuModelExtract", "Extraction failed", e)
 
         val modelId = modelName.replace(" ", "")
         val modelDir = File(File(context.filesDir, "models"), modelId)
@@ -2689,7 +2507,7 @@ suspend fun importEmbedding(
 
         val fileName =
             context.contentResolver.query(fileUri, null, null, null, null)?.use { cursor ->
-                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 cursor.moveToFirst()
                 cursor.getString(nameIndex)
             } ?: "embedding_${System.currentTimeMillis()}.safetensors"
@@ -2803,7 +2621,7 @@ suspend fun convertCustomModel(
                         }
                     }
                 } catch (e: Exception) {
-                    android.util.Log.w("ModelConvert", "Could not copy asset: $assetPath", e)
+                    Log.w("ModelConvert", "Could not copy asset: $assetPath", e)
                 }
             } else {
                 for (asset in assets) {
@@ -2821,7 +2639,7 @@ suspend fun convertCustomModel(
                                 }
                             }
                         } catch (e: Exception) {
-                            android.util.Log.w(
+                            Log.w(
                                 "ModelConvert",
                                 "Could not copy file: $subAssetPath",
                                 e
@@ -2883,7 +2701,7 @@ suspend fun convertCustomModel(
         process.inputStream.bufferedReader().use { reader ->
             var line: String?
             while (reader.readLine().also { line = it } != null) {
-                android.util.Log.i("ModelConvert", "Convert: $line")
+                Log.i("ModelConvert", "Convert: $line")
                 withContext(Dispatchers.Main) {
                     onProgress("Converting: $line")
                 }
@@ -2891,7 +2709,7 @@ suspend fun convertCustomModel(
         }
 
         val exitCode = process.waitFor()
-        android.util.Log.i("ModelConvert", "Conversion process exited with code: $exitCode")
+        Log.i("ModelConvert", "Conversion process exited with code: $exitCode")
 
         val finishedFile = File(modelDir, "finished")
         if (finishedFile.exists()) {
@@ -2927,7 +2745,7 @@ suspend fun convertCustomModel(
         }
 
     } catch (e: Exception) {
-        android.util.Log.e("ModelConvert", "Conversion failed", e)
+        Log.e("ModelConvert", "Conversion failed", e)
 
         val modelId = modelName.replace(" ", "")
         val modelDir = File(File(context.filesDir, "models"), modelId)
@@ -2954,15 +2772,17 @@ private fun getFileNameFromUri(context: Context, uri: Uri): String? {
                     }
                 }
             }
+
             "file" -> {
                 uri.lastPathSegment
             }
+
             else -> {
                 DocumentFile.fromSingleUri(context, uri)?.name
             }
         }
     } catch (e: Exception) {
-        android.util.Log.e("GetFileName", "Get file name from uri failed", e)
+        Log.e("GetFileName", "Get file name from uri failed", e)
         null
     }
 }

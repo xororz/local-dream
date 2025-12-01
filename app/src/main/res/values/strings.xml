@@ -30,7 +30,7 @@
     <string name="yes">Yes</string>
     <string name="no">No</string>
     <string name="about_app">Note</string>
-    <string name="must_read">This APP supports running stable diffusion image generation on CPU/GPU and some Qualcomm NPUs.\n\nIf your chip is not one of the following, you can only run it on CPU/GPU. Supported NPU list:\n\n- Snapdragon 8 Gen 1\n- Snapdragon 8 Gen 2\n- Snapdragon 8 Gen 3\n- Snapdragon 8 Elite\n- Snapdragon 8 Elite Gen 5\n\nFor Qualcomm chips released in 2020 and later, experimental support is provided, but NPU execution is not guaranteed.\n\nThis project is open source at https://github.com/xororz/local-dream where you can view the source code or submit issues</string>
+    <string name="must_read">This APP supports running stable diffusion image generation on CPU/GPU and some Qualcomm NPUs.\n\nIf your chip is not one of the following, you can only run it on CPU/GPU. Supported NPU list:\n\n- Snapdragon 8 Gen 1\n- Snapdragon 8 Gen 2\n- Snapdragon 8 Gen 3\n- Snapdragon 8 Elite\n- Snapdragon 8 Elite Gen 5\n\nFor NPU with Hexagon V68 architecture or newer, experimental support is provided, but NPU execution is not guaranteed.\n\nThis project is open source at https://github.com/xororz/local-dream where you can view the source code or submit issues</string>
     <string name="help">help</string>
 
     <!-- Model List Screen -->
@@ -126,7 +126,7 @@
     <string name="batch_count">Batch Count: %d</string>
     <string name="reproduce">Reproduce</string>
     <string name="result_params">steps: %s / CFG: %.1f / seed: %s"</string>
-    <string name="result_params_2">size: %s / time: %s / %s"</string>
+    <string name="result_params_2">size: %sx%s / time: %s / %s"</string>
     <string name="params_detail">Details</string>
     <string name="basic_params">Basic</string>
     <string name="basic_step">Steps: %d</string>
@@ -179,23 +179,23 @@
     <string name="add_model">Add Model</string>
     <string name="custom_model_hint">Only supports SD1.5 architecture safetensors model files</string>
     <string name="custom_npu_model_hint">Select a ZIP file containing NPU model files. Only available on Qualcomm devices.</string>
-    <string name="converting">Converting...</string>
+    <string name="converting">Converting…</string>
     <string name="model_conversion_success">Model conversion successful!</string>
     <string name="model_conversion_failed">Conversion failed: %s</string>
     <string name="npu_model_added_success">NPU model added successfully!</string>
     <string name="npu_model_add_failed">NPU model add failed: %s</string>
-    <string name="preparing_model">Preparing model...</string>
-    <string name="preparing_npu_model">Preparing NPU model...</string>
-    <string name="extracting_zip_file">Extracting ZIP file...</string>
-    <string name="copying_model_file">Copying model file...</string>
-    <string name="copying_base_files">Copying base files...</string>
-    <string name="converting_model">Converting model...</string>
+    <string name="preparing_model">Preparing model…</string>
+    <string name="preparing_npu_model">Preparing NPU model…</string>
+    <string name="extracting_zip_file">Extracting ZIP file…</string>
+    <string name="copying_model_file">Copying model file…</string>
+    <string name="copying_base_files">Copying base files…</string>
+    <string name="converting_model">Converting model…</string>
     <string name="clip_skip">CLIP Skip</string>
     <string name="clip_skip_hint">Set CLIP skip layers (1 or 2)</string>
     <string name="lora_files_optional">LoRA Files (Optional)</string>
     <string name="add_lora_file">Add LoRA File</string>
     <string name="selected_lora_files">Selected LoRA files:</string>
-    <string name="copying_lora_files">Copying LoRA files...</string>
+    <string name="copying_lora_files">Copying LoRA files…</string>
     <string name="lora_weight">Weight:</string>
 
     <!-- Embedding Manager -->
@@ -231,4 +231,17 @@
     <string name="click_to_add_image">Tap to add image for upscaling</string>
     <string name="image_resolution_too_large">Image resolution too large (%1$d×%2$d), please select an image smaller than 2048x2048</string>
     <string name="failed_to_load_image">Failed to load image: %s</string>
+    <string name="model_download_channel">Model Downloads</string>
+    <string name="model_download_channel_desc">Notifications for model download progress</string>
+    <string name="downloading_model">Downloading %s</string>
+    <string name="download_complete">Download complete</string>
+    <string name="download_failed">Download failed</string>
+    <string name="update">Update</string>
+    <string name="upgrade_model">Upgrade Model</string>
+    <string name="upgrade_model_hint">A new version of %s is available. Do you want to upgrade?</string>
+    <string name="download_background_hint">Download continues in the background. You can switch to other apps.</string>
+    <string name="switch_resolution">Switch Resolution</string>
+    <string name="switch_resolution_hint">Switching resolution will restart the backend service and interrupt current generation. Continue?</string>
+    <string name="resolution">Resolution</string>
+    <string name="extracting">Extracting…</string>
 </resources>

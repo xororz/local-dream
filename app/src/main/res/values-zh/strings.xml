@@ -30,7 +30,7 @@
     <string name="yes">是</string>
     <string name="no">否</string>
     <string name="about_app">须知</string>
-    <string name="must_read">此APP支持在CPU/GPU和部分高通NPU上运行stable diffusion图像生成。\n\n如您的芯片不是下列之一，则只能用CPU/GPU运行，支持的NPU列表:\n\n- 骁龙 8 Gen 1\n- 骁龙 8 Gen 2\n- 骁龙 8 Gen 3\n- 骁龙 8 Elite\n- 骁龙 8 Elite Gen 5\n\n目前对于2020年及之后发布的高通芯片提供实验性支持，不保证能在NPU上运行。\n\n本项目在 https://github.com/xororz/local-dream 开源，可以在github上查看源代码或提交问题</string>
+    <string name="must_read">此APP支持在CPU/GPU和部分高通NPU上运行stable diffusion图像生成。\n\n如您的芯片不是下列之一，则只能用CPU/GPU运行，支持的NPU列表:\n\n- 骁龙 8 Gen 1\n- 骁龙 8 Gen 2\n- 骁龙 8 Gen 3\n- 骁龙 8 Elite\n- 骁龙 8 Elite Gen 5\n\n对于具有 Hexagon V68 架构或更新 NPU 的高通芯片，提供实验性支持，但不保证能在 NPU 上运行。\n\n本项目在 https://github.com/xororz/local-dream 开源，可以在github上查看源代码或提交问题</string>
     <string name="help">help</string>
 
     <!-- Model List Screen -->
@@ -66,7 +66,6 @@
     <string name="download_patch_hint">要为模型%2$s下载%1$dx%1$d分辨率补丁吗? 使模型能够生成%1$d分辨率图像</string>
     <string name="highres_patch">HighRes Patch</string>
 
-
     <!-- Crop Screen -->
     <string name="crop_image">裁剪图像</string>
     <string name="crop_hint">拖动调整裁剪区域</string>
@@ -79,7 +78,6 @@
     <string name="redo">重做</string>
     <string name="clear">清除</string>
     <string name="brush_color">笔刷颜色</string>
-
 
     <!-- Run Screen -->
     <string name="prompt_settings">提示词设置</string>
@@ -128,7 +126,7 @@
     <string name="batch_count">批次数量: %d</string>
     <string name="reproduce">复制</string>
     <string name="result_params">步数: %s / CFG: %.1f / 种子: %s"</string>
-    <string name="result_params_2">尺寸: %s / 耗时: %s / %s"</string>
+    <string name="result_params_2">尺寸: %sx%s / 耗时: %s / %s"</string>
     <string name="params_detail">生成参数详情</string>
     <string name="basic_params">基础参数</string>
     <string name="basic_step">步数: %d</string>
@@ -181,23 +179,23 @@
     <string name="add_model">添加模型</string>
     <string name="custom_model_hint">仅支持SD1.5架构的safetensors模型文件</string>
     <string name="custom_npu_model_hint">选择包含NPU模型文件的ZIP压缩包。仅支持高通芯片设备。</string>
-    <string name="converting">转换中...</string>
+    <string name="converting">转换中…</string>
     <string name="model_conversion_success">模型转换成功！</string>
     <string name="model_conversion_failed">转换失败: %s</string>
     <string name="npu_model_added_success">NPU模型添加成功！</string>
     <string name="npu_model_add_failed">NPU模型添加失败: %s</string>
-    <string name="preparing_model">准备模型中...</string>
-    <string name="preparing_npu_model">准备NPU模型中...</string>
-    <string name="extracting_zip_file">解压ZIP文件中...</string>
-    <string name="copying_model_file">复制模型文件中...</string>
-    <string name="copying_base_files">复制基础文件中...</string>
-    <string name="converting_model">转换模型中...</string>
+    <string name="preparing_model">准备模型中…</string>
+    <string name="preparing_npu_model">准备NPU模型中…</string>
+    <string name="extracting_zip_file">解压ZIP文件中…</string>
+    <string name="copying_model_file">复制模型文件中…</string>
+    <string name="copying_base_files">复制基础文件中…</string>
+    <string name="converting_model">转换模型中…</string>
     <string name="clip_skip">CLIP Skip</string>
     <string name="clip_skip_hint">设置CLIP跳跃层数 (1或2)</string>
     <string name="lora_files_optional">LoRA 文件 (可选)</string>
     <string name="add_lora_file">添加 LoRA 文件</string>
     <string name="selected_lora_files">已选择的 LoRA 文件:</string>
-    <string name="copying_lora_files">拷贝 LoRA 文件中...</string>
+    <string name="copying_lora_files">拷贝 LoRA 文件中…</string>
     <string name="lora_weight">权重:</string>
 
     <!-- Embedding Manager -->
@@ -233,4 +231,17 @@
     <string name="click_to_add_image">点击添加需要超分辨率的图像</string>
     <string name="image_resolution_too_large">图像分辨率过大 (%1$d×%2$d)，请选择小于 2048x2048 的图像</string>
     <string name="failed_to_load_image">加载图像失败: %s</string>
+    <string name="model_download_channel">模型下载</string>
+    <string name="model_download_channel_desc">模型下载进度通知</string>
+    <string name="downloading_model">正在下载 %s</string>
+    <string name="download_complete">下载完成</string>
+    <string name="download_failed">下载失败</string>
+    <string name="update">更新</string>
+    <string name="upgrade_model">升级模型</string>
+    <string name="upgrade_model_hint">%s 有新版本可用，是否要升级？</string>
+    <string name="download_background_hint">下载将在后台继续进行，您可以切换到其他应用</string>
+    <string name="switch_resolution">切换分辨率</string>
+    <string name="switch_resolution_hint">切换分辨率将重启后端服务，当前生成会被中断。是否继续？</string>
+    <string name="resolution">分辨率</string>
+    <string name="extracting">解压中…</string>
 </resources>

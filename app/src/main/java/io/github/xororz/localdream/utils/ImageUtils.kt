@@ -58,7 +58,7 @@ suspend fun performUpscale(
         rgbBytes[i * 3 + 1] = ((pixel shr 8) and 0xFF).toByte()
         rgbBytes[i * 3 + 2] = (pixel and 0xFF).toByte()
     }
-    android.util.Log.d(
+    Log.d(
         "UpscaleBinary",
         "Prepare RGB data took: ${System.currentTimeMillis() - prepareStartTime}ms"
     )
@@ -82,7 +82,7 @@ suspend fun performUpscale(
         connection.outputStream.use { os ->
             os.write(rgbBytes)
         }
-        android.util.Log.d(
+        Log.d(
             "UpscaleBinary",
             "Send data took: ${System.currentTimeMillis() - sendStartTime}ms"
         )
@@ -93,7 +93,7 @@ suspend fun performUpscale(
             // Read JPEG binary data
             val readStartTime = System.currentTimeMillis()
             val imageBytes = connection.inputStream.use { it.readBytes() }
-            android.util.Log.d(
+            Log.d(
                 "UpscaleBinary",
                 "Receive JPEG data took: ${System.currentTimeMillis() - readStartTime}ms, size: ${imageBytes.size / 1024}KB"
             )
@@ -101,7 +101,7 @@ suspend fun performUpscale(
             // Decode JPEG to Bitmap
             val decodeStartTime = System.currentTimeMillis()
             val resultBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-            android.util.Log.d(
+            Log.d(
                 "UpscaleBinary",
                 "Decode JPEG took: ${System.currentTimeMillis() - decodeStartTime}ms"
             )
@@ -117,13 +117,13 @@ suspend fun performUpscale(
                 connection.getHeaderField("X-Output-Height")?.toIntOrNull() ?: resultBitmap.height
             val durationMs = connection.getHeaderField("X-Duration-Ms")?.toIntOrNull() ?: 0
 
-            android.util.Log.d("UpscaleBinary", "=== Upscale complete ===")
-            android.util.Log.d("UpscaleBinary", "Server processing took: ${durationMs}ms")
-            android.util.Log.d(
+            Log.d("UpscaleBinary", "=== Upscale complete ===")
+            Log.d("UpscaleBinary", "Server processing took: ${durationMs}ms")
+            Log.d(
                 "UpscaleBinary",
                 "Client total time: ${System.currentTimeMillis() - totalStartTime}ms"
             )
-            android.util.Log.d("UpscaleBinary", "Output size: ${resultWidth}x${resultHeight}")
+            Log.d("UpscaleBinary", "Output size: ${resultWidth}x${resultHeight}")
 
             resultBitmap
         } else {
@@ -159,7 +159,7 @@ suspend fun reportImage(
                     put("steps", params.steps)
                     put("cfg", params.cfg)
                     put("seed", params.seed ?: JSONObject.NULL)
-                    put("size", params.size)
+                    put("size", "${params.width}x${params.height}")
                     put("run_on_cpu", params.runOnCpu)
                     put("generation_time", params.generationTime ?: JSONObject.NULL)
                 })
@@ -208,7 +208,7 @@ suspend fun saveImage(
     withContext(Dispatchers.IO) {
         try {
             val startTime = System.currentTimeMillis()
-            android.util.Log.d(
+            Log.d(
                 "SaveImage",
                 "Start saving image - size: ${bitmap.width}x${bitmap.height}"
             )
@@ -220,7 +220,7 @@ suspend fun saveImage(
             val mimeType = if (isLargeImage) "image/jpeg" else "image/png"
             val quality = if (isLargeImage) 95 else 100
 
-            android.util.Log.d("SaveImage", "Save format: ${if (isLargeImage) "JPEG" else "PNG"}")
+            Log.d("SaveImage", "Save format: ${if (isLargeImage) "JPEG" else "PNG"}")
 
             val timestamp = System.currentTimeMillis()
             val filename = "generated_image_$timestamp.$extension"
@@ -238,7 +238,7 @@ suspend fun saveImage(
                 val uri =
                     resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
                         ?: throw IOException("Failed to create MediaStore entry")
-                android.util.Log.d(
+                Log.d(
                     "SaveImage",
                     "Create URI took: ${System.currentTimeMillis() - createUriTime}ms"
                 )
@@ -247,7 +247,7 @@ suspend fun saveImage(
                 resolver.openOutputStream(uri)?.use { outputStream ->
                     bitmap.compress(format, quality, outputStream)
                 } ?: throw IOException("Failed to open output stream")
-                android.util.Log.d(
+                Log.d(
                     "SaveImage",
                     "Compression and writing took: ${System.currentTimeMillis() - compressStartTime}ms"
                 )
@@ -269,7 +269,7 @@ suspend fun saveImage(
                 FileOutputStream(file).use { out ->
                     bitmap.compress(format, quality, out)
                 }
-                android.util.Log.d(
+                Log.d(
                     "SaveImage",
                     "Compression and writing took: ${System.currentTimeMillis() - compressStartTime}ms"
                 )
@@ -283,7 +283,7 @@ suspend fun saveImage(
             }
 
             val totalTime = System.currentTimeMillis() - startTime
-            android.util.Log.d("SaveImage", "Save complete - total time: ${totalTime}ms")
+            Log.d("SaveImage", "Save complete - total time: ${totalTime}ms")
 
             withContext(Dispatchers.Main) {
                 onSuccess()

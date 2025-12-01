@@ -1,72 +1,60 @@
 package io.github.xororz.localdream.ui.screens
 
-import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.media.MediaScannerConnection
 import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.ui.res.stringResource
-import coil.request.ImageRequest
-import coil.size.Size
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.size.Size
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.DownloadProgress
-import io.github.xororz.localdream.data.DownloadResult
-import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.data.UpscalerRepository
+import io.github.xororz.localdream.service.ModelDownloadService
 import io.github.xororz.localdream.utils.performUpscale
 import io.github.xororz.localdream.utils.saveImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
+import androidx.core.content.edit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,7 +72,6 @@ fun UpscaleScreen(
     var upscaledBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isUpscaling by remember { mutableStateOf(false) }
     var backendProcess by remember { mutableStateOf<Process?>(null) }
-    var backendState by remember { mutableStateOf<BackendState>(BackendState.Idle) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var backendLogs by remember { mutableStateOf<List<String>>(emptyList()) }
     var currentLog by remember { mutableStateOf("") }
@@ -97,9 +84,6 @@ fun UpscaleScreen(
     val upscalerRepository = remember { UpscalerRepository(context) }
     val upscalerPreferences =
         remember { context.getSharedPreferences("upscaler_prefs", Context.MODE_PRIVATE) }
-    var selectedUpscalerId by remember {
-        mutableStateOf(upscalerPreferences.getString("selected_upscaler_standalone", null))
-    }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -150,7 +134,6 @@ fun UpscaleScreen(
             return
         }
 
-        backendState = BackendState.Starting
         scope.launch(Dispatchers.IO) {
             try {
                 val runtimeDir = prepareRuntimeDir(context)
@@ -159,7 +142,6 @@ fun UpscaleScreen(
 
                 if (!executableFile.exists()) {
                     withContext(Dispatchers.Main) {
-                        backendState = BackendState.Error("Executable file not found")
                         errorMessage = "Executable file not found: ${executableFile.absolutePath}"
                     }
                     return@launch
@@ -233,9 +215,6 @@ fun UpscaleScreen(
                         }
                         val exitCode = backendProcess?.waitFor()
                         Log.i("UpscaleBackend", "Backend process exited with code: $exitCode")
-                        scope.launch(Dispatchers.Main) {
-                            backendState = BackendState.Error("Backend process exited: $exitCode")
-                        }
                     } catch (e: Exception) {
                         Log.e("UpscaleBackend", "Monitor error", e)
                     }
@@ -244,14 +223,9 @@ fun UpscaleScreen(
                     start()
                 }
 
-                withContext(Dispatchers.Main) {
-                    backendState = BackendState.Running
-                }
-
             } catch (e: Exception) {
                 Log.e("UpscaleScreen", "Failed to start backend", e)
                 withContext(Dispatchers.Main) {
-                    backendState = BackendState.Error("Failed to start backend: ${e.message}")
                     errorMessage = "Failed to start backend: ${e.message}"
                 }
             }
@@ -266,7 +240,6 @@ fun UpscaleScreen(
                     proc.destroyForcibly()
                 }
                 Log.i("UpscaleScreen", "Backend stopped")
-                backendState = BackendState.Idle
             } catch (e: Exception) {
                 Log.e("UpscaleScreen", "Failed to stop backend", e)
             } finally {
@@ -301,47 +274,29 @@ fun UpscaleScreen(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
-        },
-        snackbarHost = {
-            errorMessage?.let { message ->
-                Snackbar(
-                    action = {
-                        TextButton(onClick = { errorMessage = null }) {
-                            Text(stringResource(R.string.close))
-                        }
-                    }
-                ) {
-                    Text(message)
-                }
-            }
         }
     ) { paddingValues ->
-        BoxWithConstraints(
-            modifier = modifier
+        Box(
+            modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp)
         ) {
-            val availableHeight = this.maxHeight
-            val imageBoxHeight = (availableHeight - 80.dp) / 2
-
             Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally
+                modifier = modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Box(
-                    modifier = Modifier.fillMaxWidth()
+                ElevatedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(imageBoxHeight)
-                            .clip(RoundedCornerShape(12.dp))
-                            .border(
-                                width = 2.dp,
-                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                                shape = RoundedCornerShape(12.dp)
-                            )
+                            .fillMaxSize()
                             .then(
                                 if (selectedImageUri == null) {
                                     Modifier.clickable { imagePickerLauncher.launch("image/*") }
@@ -408,27 +363,25 @@ fun UpscaleScreen(
                                 )
                             }
                         }
-                    }
 
-                    if (selectedBitmap != null) {
-                        Surface(
-                            modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .offset(y = 24.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = "${selectedBitmap!!.width} × ${selectedBitmap!!.height}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                            )
+                        if (selectedBitmap != null) {
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(12.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "${selectedBitmap!!.width} × ${selectedBitmap!!.height}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
 
                 FloatingActionButton(
                     onClick = {
@@ -448,23 +401,14 @@ fun UpscaleScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
                 if (upscaledImageUri != null) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth()
+                    ElevatedCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(imageBoxHeight)
-                                .clip(RoundedCornerShape(12.dp))
-                                .border(
-                                    width = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                        ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
                             ZoomableImage(
                                 imageUri = upscaledImageUri,
                                 contentDescription = stringResource(R.string.upscaled_image),
@@ -512,20 +456,59 @@ fun UpscaleScreen(
                                     contentDescription = stringResource(R.string.save_image)
                                 )
                             }
-                        }
 
-                        Surface(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .offset(y = (-24).dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            shape = RoundedCornerShape(4.dp)
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "${upscaledBitmap!!.width} × ${upscaledBitmap!!.height}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+
+            // Floating Error Message
+            AnimatedVisibility(
+                visible = errorMessage != null,
+                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                errorMessage?.let { msg ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        ),
+                        onClick = { errorMessage = null }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.Error,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
                             Text(
-                                text = "${upscaledBitmap!!.width} × ${upscaledBitmap!!.height}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                text = msg,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium
                             )
                         }
                     }
@@ -572,6 +555,59 @@ fun UpscaleScreen(
         var downloadingUpscalerId by remember { mutableStateOf<String?>(null) }
         var downloadProgress by remember { mutableStateOf<DownloadProgress?>(null) }
 
+        val downloadState by ModelDownloadService.downloadState.collectAsState()
+
+        LaunchedEffect(downloadState) {
+            when (val state = downloadState) {
+                is ModelDownloadService.DownloadState.Downloading -> {
+                    val upscaler = upscalerRepository.upscalers.find { it.id == state.modelId }
+                    if (upscaler != null) {
+                        downloadingUpscalerId = upscaler.id
+                        downloadProgress = DownloadProgress(
+                            progress = state.progress,
+                            downloadedBytes = state.downloadedBytes,
+                            totalBytes = state.totalBytes
+                        )
+                    }
+                }
+
+                is ModelDownloadService.DownloadState.Success -> {
+                    upscalerRepository.refreshUpscalerState(state.modelId)
+                    downloadingUpscalerId = null
+                    downloadProgress = null
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.download_done),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                is ModelDownloadService.DownloadState.Error -> {
+                    downloadingUpscalerId = null
+                    downloadProgress = null
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.error_download_failed, state.message),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                is ModelDownloadService.DownloadState.Extracting -> {
+                    val upscaler = upscalerRepository.upscalers.find { it.id == state.modelId }
+                    if (upscaler != null) {
+                        downloadingUpscalerId = upscaler.id
+                        downloadProgress = null // Indeterminate progress during extraction
+                    }
+                }
+
+                is ModelDownloadService.DownloadState.Idle -> {
+                    if (downloadingUpscalerId != null && downloadProgress == null) {
+                        downloadingUpscalerId = null
+                    }
+                }
+            }
+        }
+
         UpscalerSelectDialog(
             upscalers = upscalerRepository.upscalers,
             selectedUpscalerId = tempSelectedUpscalerId,
@@ -585,8 +621,9 @@ fun UpscaleScreen(
                 val selectedUpscaler =
                     upscalerRepository.upscalers.find { it.id == tempSelectedUpscalerId }
                 if (selectedUpscaler != null && selectedUpscaler.isDownloaded) {
-                    upscalerPreferences.edit()
-                        .putString("${modelId}_selected_upscaler", selectedUpscaler.id).apply()
+                    upscalerPreferences.edit {
+                        putString("${modelId}_selected_upscaler", selectedUpscaler.id)
+                    }
                     showUpscalerDialog = false
 
                     selectedBitmap?.let { bitmap ->
@@ -601,7 +638,7 @@ fun UpscaleScreen(
                                 )
                                 upscaledBitmap = resultBitmap
 
-                                resultBitmap?.let { bmp ->
+                                resultBitmap.let { bmp ->
                                     withContext(Dispatchers.IO) {
                                         try {
                                             val tempFile = File(
@@ -631,7 +668,7 @@ fun UpscaleScreen(
                             }
                         }
                     }
-                } else if (selectedUpscaler != null && !selectedUpscaler.isDownloaded) {
+                } else if (selectedUpscaler != null) {
                     Toast.makeText(
                         context,
                         context.getString(R.string.download_model_first),
@@ -642,39 +679,7 @@ fun UpscaleScreen(
             onDownload = { upscaler ->
                 downloadingUpscalerId = upscaler.id
                 downloadProgress = null
-                scope.launch {
-                    upscalerRepository.downloadUpscaler(upscaler).collect { result ->
-                        when (result) {
-                            is DownloadResult.Progress -> {
-                                downloadProgress = result.progress
-                            }
-
-                            is DownloadResult.Success -> {
-                                downloadingUpscalerId = null
-                                downloadProgress = null
-                                upscalerRepository.refreshUpscalerState(upscaler.id)
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.download_done),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-
-                            is DownloadResult.Error -> {
-                                downloadingUpscalerId = null
-                                downloadProgress = null
-                                Toast.makeText(
-                                    context,
-                                    context.getString(
-                                        R.string.error_download_failed,
-                                        result.message
-                                    ),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        }
-                    }
-                }
+                upscaler.startDownload(context)
             }
         )
     }
@@ -742,9 +747,9 @@ fun ZoomableImage(
 ) {
     val context = LocalContext.current
 
-    var currentScale by remember { mutableFloatStateOf(scale) }
-    var currentOffsetX by remember { mutableFloatStateOf(offsetX) }
-    var currentOffsetY by remember { mutableFloatStateOf(offsetY) }
+    var currentScale by remember { mutableFloatStateOf(1f) }
+    var currentOffsetX by remember { mutableFloatStateOf(0f) }
+    var currentOffsetY by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(scale, offsetX, offsetY) {
         currentScale = scale

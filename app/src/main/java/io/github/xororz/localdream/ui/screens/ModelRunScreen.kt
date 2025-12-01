@@ -10,6 +10,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -41,7 +42,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -55,6 +55,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -135,16 +136,18 @@ import coil.request.ImageRequest
 import io.github.xororz.localdream.BuildConfig
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.DownloadProgress
-import io.github.xororz.localdream.data.DownloadResult
 import io.github.xororz.localdream.data.GenerationPreferences
 import io.github.xororz.localdream.data.HistoryItem
 import io.github.xororz.localdream.data.HistoryManager
 import io.github.xororz.localdream.data.ModelRepository
+import io.github.xororz.localdream.data.PatchScanner
+import io.github.xororz.localdream.data.Resolution
 import io.github.xororz.localdream.data.UpscalerModel
 import io.github.xororz.localdream.data.UpscalerRepository
 import io.github.xororz.localdream.service.BackendService
 import io.github.xororz.localdream.service.BackgroundGenerationService
 import io.github.xororz.localdream.service.BackgroundGenerationService.GenerationState
+import io.github.xororz.localdream.service.ModelDownloadService
 import io.github.xororz.localdream.utils.performUpscale
 import io.github.xororz.localdream.utils.reportImage
 import io.github.xororz.localdream.utils.saveImage
@@ -163,6 +166,8 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 import android.graphics.Rect as AndroidRect
+import androidx.core.graphics.scale
+import androidx.core.content.edit
 
 
 private fun checkStoragePermission(context: Context): Boolean {
@@ -238,7 +243,8 @@ data class GenerationParameters(
     val prompt: String,
     val negativePrompt: String,
     val generationTime: String?,
-    val size: Int,
+    val width: Int,
+    val height: Int,
     val runOnCpu: Boolean,
     val denoiseStrength: Float = 0.6f,
     val useOpenCL: Boolean = false
@@ -249,7 +255,6 @@ data class GenerationParameters(
 @Composable
 fun ModelRunScreen(
     modelId: String,
-    resolution: Int,
     navController: NavController,
     modifier: Modifier = Modifier
 ) {
@@ -298,7 +303,8 @@ fun ModelRunScreen(
                 prompt = "",
                 negativePrompt = "",
                 generationTime = "",
-                size = if (model?.runOnCpu == true) 256 else resolution,
+                width = if (model?.runOnCpu == true) 256 else 512,
+                height = if (model?.runOnCpu == true) 256 else 512,
                 runOnCpu = model?.runOnCpu ?: false
             )
         )
@@ -308,7 +314,6 @@ fun ModelRunScreen(
     var cfg by remember { mutableStateOf(7f) }
     var steps by remember { mutableStateOf(20f) }
     var seed by remember { mutableStateOf("") }
-    var size by remember { mutableStateOf(if (model?.runOnCpu == true) 256 else 512) }
     var denoiseStrength by remember { mutableStateOf(0.6f) }
     var useOpenCL by remember { mutableStateOf(false) }
     var batchCounts by remember { mutableStateOf(1) }
@@ -319,15 +324,21 @@ fun ModelRunScreen(
     var isRunning by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf(0f) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var isBackendReady by remember { mutableStateOf(false) }
     var isCheckingBackend by remember { mutableStateOf(true) }
     var showExitDialog by remember { mutableStateOf(false) }
     var showParametersDialog by remember { mutableStateOf(false) }
     var pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
-    var generationTime by remember { mutableStateOf<String?>(null) }
     var generationStartTime by remember { mutableStateOf<Long?>(null) }
     var hasInitialized by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
+
+    var currentWidth by remember { mutableStateOf(if (model?.runOnCpu == true) 256 else 512) }
+    var currentHeight by remember { mutableStateOf(if (model?.runOnCpu == true) 256 else 512) }
+    var availableResolutions by remember { mutableStateOf<List<Resolution>>(emptyList()) }
+    var showResolutionChangeDialog by remember { mutableStateOf(false) }
+    var pendingResolution by remember { mutableStateOf<Resolution?>(null) }
+    var backendRestartTrigger by remember { mutableStateOf(0) }
+    var showAdvancedSettings by remember { mutableStateOf(false) }
 
     val isFirstPage by remember { derivedStateOf { pagerState.currentPage == 0 } }
     val isSecondPage by remember { derivedStateOf { pagerState.currentPage == 1 } }
@@ -374,7 +385,8 @@ fun ModelRunScreen(
                 steps = steps,
                 cfg = cfg,
                 seed = seed,
-                size = size,
+                width = currentWidth,
+                height = currentHeight,
                 denoiseStrength = denoiseStrength,
                 useOpenCL = useOpenCL,
                 batchCounts = batchCounts
@@ -387,7 +399,9 @@ fun ModelRunScreen(
     val onSizeChange = remember {
         { value: Float ->
             val rounded = (value / 64).roundToInt() * 64
-            size = rounded.coerceIn(128, 512)
+            val newSize = rounded.coerceIn(128, 512)
+            currentWidth = newSize
+            currentHeight = newSize
             saveAllFields()
         }
     }
@@ -435,7 +449,6 @@ fun ModelRunScreen(
 
     fun handleInpaintComplete(
         maskBase64: String,
-        originalBitmap: Bitmap,
         maskBmp: Bitmap,
         pathHistory: List<PathData>
     ) {
@@ -446,9 +459,6 @@ fun ModelRunScreen(
 
         scope.launch(Dispatchers.IO) {
             try {
-                val tmpFile = File(context.filesDir, "tmp.txt")
-                val originalBase64 = tmpFile.readText()
-
                 val maskFile = File(context.filesDir, "mask.txt")
                 maskFile.writeText(maskBase64)
 
@@ -467,7 +477,7 @@ fun ModelRunScreen(
     }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
+        PickVisualMedia()
     ) { uri ->
         uri?.let { processSelectedImage(it) }
     }
@@ -559,12 +569,8 @@ fun ModelRunScreen(
                         mutableOriginal = originalBitmap.copy(Bitmap.Config.ARGB_8888, true)
 
                         val patch = bitmap
-                        resizedPatch = Bitmap.createScaledBitmap(
-                            patch,
-                            snapshotCropRect!!.width(),
-                            snapshotCropRect!!.height(),
-                            true
-                        )
+                        resizedPatch =
+                            patch.scale(snapshotCropRect!!.width(), snapshotCropRect!!.height())
 
                         val canvas = Canvas(mutableOriginal)
                         canvas.drawBitmap(
@@ -615,7 +621,7 @@ fun ModelRunScreen(
             saveAllJob?.cancel()
             batchGenerationJob?.cancel()
         } catch (e: Exception) {
-            android.util.Log.e("ModelRunScreen", "error", e)
+            Log.e("ModelRunScreen", "error", e)
         }
     }
 
@@ -623,6 +629,17 @@ fun ModelRunScreen(
         cleanup()
         BackgroundGenerationService.clearCompleteState()
         navController.navigateUp()
+    }
+
+    LaunchedEffect(modelId, model?.runOnCpu) {
+        if (model?.runOnCpu == false) {
+            val baseResolution = Resolution(512, 512)
+            val patchResolutions = PatchScanner.scanAvailableResolutions(context, modelId)
+
+            val allResolutions =
+                (listOf(baseResolution) + patchResolutions).distinctBy { "${it.width}x${it.height}" }
+            availableResolutions = allResolutions
+        }
     }
 
     LaunchedEffect(modelId) {
@@ -647,14 +664,51 @@ fun ModelRunScreen(
             steps = prefs.steps
             cfg = prefs.cfg
             seed = prefs.seed
-            size = if (model?.runOnCpu == true) prefs.size else resolution
             denoiseStrength = prefs.denoiseStrength
             useOpenCL = prefs.useOpenCL
             batchCounts = prefs.batchCounts
 
+            currentWidth =
+                if (prefs.width == -1) (if (model?.runOnCpu == true) 256 else 512) else prefs.width
+            currentHeight =
+                if (prefs.height == -1) (if (model?.runOnCpu == true) 256 else 512) else prefs.height
+
             hasInitialized = true
         }
     }
+
+    LaunchedEffect(hasInitialized) {
+        if (hasInitialized && backendState !is BackendService.BackendState.Running) {
+            val intent = Intent(context, BackendService::class.java).apply {
+                putExtra("modelId", model?.id)
+                putExtra("width", currentWidth)
+                putExtra("height", currentHeight)
+                putExtra("use_opencl", useOpenCL)
+            }
+            context.startForegroundService(intent)
+        }
+    }
+
+    // Load history when entering the screen
+    LaunchedEffect(modelId) {
+        if (historyItems.isEmpty() && !isLoadingHistory) {
+            isLoadingHistory = true
+            try {
+                val items = historyManager.loadHistoryForModel(modelId)
+                historyItems.clear()
+                historyItems.addAll(items)
+            } catch (e: Exception) {
+                Log.e(
+                    "ModelRunScreen",
+                    "Failed to load history",
+                    e
+                )
+            } finally {
+                isLoadingHistory = false
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             cleanup()
@@ -664,17 +718,6 @@ fun ModelRunScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> {
-                    if (backendState !is BackendService.BackendState.Running) {
-                        val intent = Intent(context, BackendService::class.java).apply {
-                            putExtra("modelId", model?.id)
-                            putExtra("resolution", resolution)
-                            putExtra("use_opencl", useOpenCL)
-                        }
-                        context.startForegroundService(intent)
-                    }
-                }
-
                 Lifecycle.Event.ON_DESTROY -> {
                     cleanup()
                 }
@@ -702,7 +745,7 @@ fun ModelRunScreen(
 
             is GenerationState.Complete -> {
                 withContext(Dispatchers.Main) {
-                    android.util.Log.d("ModelRunScreen", "update bitmap")
+                    Log.d("ModelRunScreen", "update bitmap")
 
                     state.seed?.let { returnedSeed = it }
                     progress = 0f
@@ -728,8 +771,8 @@ fun ModelRunScreen(
                         prompt = generationParamsTmp.prompt,
                         negativePrompt = generationParamsTmp.negativePrompt,
                         generationTime = genTime,
-                        size = if (model?.runOnCpu == true) generationParamsTmp.size else resolution
-                            ?: 512,
+                        width = if (model?.runOnCpu == true) generationParamsTmp.width else currentWidth,
+                        height = if (model?.runOnCpu == true) generationParamsTmp.height else currentHeight,
                         runOnCpu = model?.runOnCpu ?: false,
                         useOpenCL = generationParamsTmp.useOpenCL
                     )
@@ -757,15 +800,14 @@ fun ModelRunScreen(
                     snapshotSelectedImageUri = selectedImageUri
                     snapshotCropRect = cropRect
 
-                    android.util.Log.d(
+                    Log.d(
                         "ModelRunScreen",
                         "params update: ${generationParams?.steps}, ${generationParams?.cfg}"
                     )
 
-                    generationTime = genTime
                     generationStartTime = null
 
-                    if (pagerState.currentPage == 0) {
+                    if (pagerState.currentPage == 0 && !showAdvancedSettings) {
                         try {
                             pagerState.animateScrollToPage(1)
                         } finally {
@@ -843,6 +885,79 @@ fun ModelRunScreen(
             }
         )
     }
+
+    if (showResolutionChangeDialog && pendingResolution != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showResolutionChangeDialog = false
+                pendingResolution = null
+            },
+            title = { Text(stringResource(R.string.switch_resolution)) },
+            text = { Text(stringResource(R.string.switch_resolution_hint)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingResolution?.let { resolution ->
+                            // Check aspect ratio change
+                            val oldRatio =
+                                if (currentHeight > 0) currentWidth.toFloat() / currentHeight.toFloat() else 1f
+                            val newRatio =
+                                if (resolution.height > 0) resolution.width.toFloat() / resolution.height.toFloat() else 1f
+
+                            if (kotlin.math.abs(oldRatio - newRatio) > 0.01f) {
+                                // Clear img2img data
+                                selectedImageUri = null
+                                croppedBitmap = null
+                                maskBitmap = null
+                                isInpaintMode = false
+                                cropRect = null
+                                savedPathHistory = null
+                                base64EncodeDone = false
+                            }
+
+                            currentWidth = resolution.width
+                            currentHeight = resolution.height
+                            scope.launch {
+                                generationPreferences.saveResolution(
+                                    modelId,
+                                    resolution.width,
+                                    resolution.height
+                                )
+                            }
+                            model?.let { m ->
+                                val serviceIntent =
+                                    Intent(context, BackendService::class.java).apply {
+                                        action = BackendService.ACTION_RESTART
+                                        putExtra("modelId", modelId)
+                                        putExtra("width", resolution.width)
+                                        putExtra("height", resolution.height)
+                                    }
+                                context.startForegroundService(serviceIntent)
+                                isCheckingBackend = true
+                                backendRestartTrigger++
+                            }
+                        }
+                        showResolutionChangeDialog = false
+                        pendingResolution = null
+                        showAdvancedSettings = false
+                    }
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showResolutionChangeDialog = false
+                        pendingResolution = null
+                    }
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
     if (showResetConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showResetConfirmDialog = false },
@@ -866,7 +981,8 @@ fun ModelRunScreen(
                                 steps = 20f,
                                 cfg = 7f,
                                 seed = "",
-                                size = 256,
+                                width = if (model?.runOnCpu == true) 256 else 512,
+                                height = if (model?.runOnCpu == true) 256 else 512,
                                 denoiseStrength = 0.6f,
                                 useOpenCL = useOpenCL,
                                 batchCounts = 1
@@ -893,15 +1009,1551 @@ fun ModelRunScreen(
         checkBackendHealth(
             backendState = BackendService.backendState,
             onHealthy = {
-                isBackendReady = true
                 isCheckingBackend = false
             },
             onUnhealthy = {
-                isBackendReady = false
                 isCheckingBackend = false
                 errorMessage = context.getString(R.string.backend_failed)
             }
         )
+    }
+
+    LaunchedEffect(backendRestartTrigger) {
+        if (backendRestartTrigger > 0) {
+            delay(500)
+            checkBackendHealth(
+                backendState = BackendService.backendState,
+                onHealthy = {
+                    isCheckingBackend = false
+                },
+                onUnhealthy = {
+                    isCheckingBackend = false
+                    errorMessage = context.getString(R.string.backend_failed)
+                }
+            )
+        }
+    }
+
+
+    // === Page Composable Functions ===
+    @Composable
+    fun PromptPage() {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            stringResource(R.string.prompt_settings),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (useImg2img) {
+                                TextButton(
+                                    onClick = {
+                                        onSelectImageClick()
+                                    }
+                                ) {
+                                    Text(
+                                        "img2img",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.padding(end = 4.dp)
+                                    )
+                                    Icon(
+                                        Icons.Default.Image,
+                                        contentDescription = "select image",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            TextButton(
+                                onClick = { showAdvancedSettings = true }
+                            ) {
+                                Text(
+                                    stringResource(R.string.advanced_settings),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.padding(end = 4.dp)
+                                )
+                                Icon(
+                                    Icons.Default.Settings,
+                                    contentDescription = stringResource(R.string.settings),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        if (showAdvancedSettings) {
+                            AlertDialog(
+                                onDismissRequest = {
+                                    showAdvancedSettings = false
+                                },
+                                title = { Text(stringResource(R.string.advanced_settings_title)) },
+                                text = {
+                                    Column(
+                                        verticalArrangement = Arrangement.spacedBy(
+                                            8.dp
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .verticalScroll(rememberScrollState())
+                                            .padding(vertical = 8.dp)
+                                    ) {
+                                        if (model?.runOnCpu == false && availableResolutions.isNotEmpty()) {
+                                            Column(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalArrangement = Arrangement.spacedBy(
+                                                    8.dp
+                                                )
+                                            ) {
+                                                Text(
+                                                    stringResource(R.string.resolution),
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .horizontalScroll(
+                                                            rememberScrollState()
+                                                        ),
+                                                    horizontalArrangement = Arrangement.spacedBy(
+                                                        8.dp
+                                                    )
+                                                ) {
+                                                    availableResolutions.forEach { resolution ->
+                                                        FilterChip(
+                                                            selected = currentWidth == resolution.width && currentHeight == resolution.height,
+                                                            onClick = {
+                                                                if (!isRunning && (resolution.width != currentWidth || resolution.height != currentHeight)) {
+                                                                    pendingResolution =
+                                                                        resolution
+                                                                    showResolutionChangeDialog =
+                                                                        true
+                                                                }
+                                                            },
+                                                            label = {
+                                                                Text(
+                                                                    resolution.toString()
+                                                                )
+                                                            },
+                                                            enabled = !isRunning
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Column {
+                                            Text(
+                                                stringResource(
+                                                    R.string.steps,
+                                                    steps.roundToInt()
+                                                ),
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            Slider(
+                                                value = steps,
+                                                onValueChange = onStepsChange,
+                                                valueRange = 1f..50f,
+                                                steps = 48,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+
+                                        Column {
+                                            Text(
+                                                "CFG Scale: %.1f".format(cfg),
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            Slider(
+                                                value = cfg,
+                                                onValueChange = onCfgChange,
+                                                valueRange = 1f..30f,
+                                                steps = 57,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                        if (model?.runOnCpu ?: false) {
+                                            Column {
+                                                Text(
+                                                    stringResource(
+                                                        R.string.image_size,
+                                                        currentWidth,
+                                                        currentHeight
+                                                    ),
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                                Slider(
+                                                    value = currentWidth.toFloat(),
+                                                    onValueChange = onSizeChange,
+                                                    valueRange = 128f..512f,
+                                                    steps = 5,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                )
+                                            }
+                                        }
+                                        if (model?.runOnCpu ?: false) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(
+                                                    8.dp
+                                                )
+                                            ) {
+                                                Text(
+                                                    "Runtime",
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                                FilterChip(
+                                                    selected = !useOpenCL,
+                                                    onClick = {
+                                                        useOpenCL = false
+                                                        saveAllFields()
+                                                    },
+                                                    label = { Text("CPU") },
+                                                    modifier = Modifier.weight(
+                                                        1f
+                                                    )
+                                                )
+                                                FilterChip(
+                                                    selected = useOpenCL,
+                                                    onClick = {
+                                                        if (!useOpenCL) {
+                                                            showOpenCLWarningDialog =
+                                                                true
+                                                        } else {
+                                                            useOpenCL = false
+                                                            saveAllFields()
+                                                        }
+                                                    },
+                                                    label = { Text("GPU") },
+                                                    modifier = Modifier.weight(
+                                                        1f
+                                                    )
+                                                )
+                                            }
+                                        }
+                                        Column {
+                                            Text(
+                                                stringResource(
+                                                    R.string.batch_count,
+                                                    batchCounts
+                                                ),
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            Slider(
+                                                value = batchCounts.toFloat(),
+                                                onValueChange = onBatchCountsChange,
+                                                valueRange = 1f..10f,
+                                                steps = 8,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                        if (useImg2img) {
+                                            Column {
+                                                Text(
+                                                    "[img2img]Denoise Strength: %.2f".format(
+                                                        denoiseStrength
+                                                    ),
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                                Slider(
+                                                    value = denoiseStrength,
+                                                    onValueChange = onDenoiseStrengthChange,
+                                                    valueRange = 0f..1f,
+                                                    steps = 99,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                )
+                                            }
+                                        }
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalArrangement = Arrangement.spacedBy(
+                                                8.dp
+                                            )
+                                        ) {
+                                            OutlinedTextField(
+                                                value = seed,
+                                                onValueChange = onSeedChange,
+                                                label = { Text(stringResource(R.string.random_seed)) },
+                                                keyboardOptions = KeyboardOptions(
+                                                    keyboardType = KeyboardType.Number
+                                                ),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = MaterialTheme.shapes.medium,
+                                                trailingIcon = {
+                                                    if (seed.isNotEmpty()) {
+                                                        IconButton(onClick = {
+                                                            seed = ""
+                                                            saveAllFields()
+                                                        }) {
+                                                            Icon(
+                                                                Icons.Default.Clear,
+                                                                contentDescription = "clear"
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            )
+
+                                            if (returnedSeed != null) {
+                                                FilledTonalButton(
+                                                    onClick = {
+                                                        seed =
+                                                            returnedSeed.toString()
+                                                        saveAllFields()
+                                                    },
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Refresh,
+                                                        contentDescription = stringResource(
+                                                            R.string.use_last_seed
+                                                        ),
+                                                        modifier = Modifier
+                                                            .size(
+                                                                20.dp
+                                                            )
+                                                            .padding(end = 4.dp)
+                                                    )
+                                                    Text(
+                                                        stringResource(
+                                                            R.string.use_last_seed,
+                                                            returnedSeed.toString()
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                confirmButton = {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        TextButton(
+                                            onClick = {
+                                                showResetConfirmDialog = true
+                                            },
+                                            colors = ButtonDefaults.textButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.error
+                                            )
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Refresh,
+                                                contentDescription = stringResource(
+                                                    R.string.reset
+                                                ),
+                                                modifier = Modifier
+                                                    .size(20.dp)
+                                                    .padding(end = 4.dp)
+                                            )
+                                            Text(stringResource(R.string.reset))
+                                        }
+
+                                        TextButton(onClick = {
+                                            showAdvancedSettings = false
+                                        }) {
+                                            Text(stringResource(R.string.confirm))
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    var expandedPrompt by remember { mutableStateOf(false) }
+                    var expandedNegativePrompt by remember {
+                        mutableStateOf(
+                            false
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = prompt,
+                        onValueChange = onPromptChange,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = interactionSource,
+                                indication = null
+                            ) { },
+                        label = { Text(stringResource(R.string.image_prompt)) },
+                        maxLines = if (expandedPrompt) Int.MAX_VALUE else 2,
+                        minLines = if (expandedPrompt) 3 else 2,
+                        shape = MaterialTheme.shapes.medium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        ),
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                expandedPrompt = !expandedPrompt
+                            }) {
+                                Icon(
+                                    if (expandedPrompt) Icons.Default.KeyboardArrowUp
+                                    else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = if (expandedPrompt) "collapse" else "expand"
+                                )
+                            }
+                        }
+                    )
+
+                    OutlinedTextField(
+                        value = negativePrompt,
+                        onValueChange = onNegativePromptChange,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = interactionSource,
+                                indication = null
+                            ) { },
+                        label = { Text(stringResource(R.string.negative_prompt)) },
+                        maxLines = if (expandedNegativePrompt) Int.MAX_VALUE else 2,
+                        minLines = if (expandedNegativePrompt) 3 else 2,
+                        shape = MaterialTheme.shapes.medium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        ),
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                expandedNegativePrompt = !expandedNegativePrompt
+                            }) {
+                                Icon(
+                                    if (expandedNegativePrompt) Icons.Default.KeyboardArrowUp
+                                    else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = if (expandedNegativePrompt) "collapse" else "expand"
+                                )
+                            }
+                        }
+                    )
+
+                    Button(
+                        onClick = {
+                            focusManager.clearFocus()
+                            Log.d(
+                                "ModelRunScreen",
+                                "start generation"
+                            )
+                            generationParamsTmp = GenerationParameters(
+                                steps = steps.roundToInt(),
+                                cfg = cfg,
+                                seed = 0,
+                                prompt = prompt,
+                                negativePrompt = negativePrompt,
+                                generationTime = "",
+                                width = currentWidth,
+                                height = currentHeight,
+                                runOnCpu = model?.runOnCpu ?: false,
+                                denoiseStrength = denoiseStrength,
+                                useOpenCL = useOpenCL
+                            )
+
+                            Log.d(
+                                "ModelRunScreen",
+                                "start generation batch: $batchCounts times"
+                            )
+
+                            // If seed is set, only generate once regardless of batch count
+                            val actualBatchCount =
+                                if (seed.isNotBlank()) 1 else batchCounts
+
+                            batchGenerationJob = coroutineScope.launch {
+                                for (i in 0 until actualBatchCount) {
+                                    currentBatchIndex = i + 1
+                                    Log.d(
+                                        "ModelRunScreen",
+                                        "preparing batch $i"
+                                    )
+
+                                    val batchIntent = Intent(
+                                        context,
+                                        BackgroundGenerationService::class.java
+                                    ).apply {
+                                        putExtra("prompt", prompt)
+                                        putExtra(
+                                            "negative_prompt",
+                                            negativePrompt
+                                        )
+                                        putExtra("steps", steps.roundToInt())
+                                        putExtra("cfg", cfg)
+                                        seed.toLongOrNull()
+                                            ?.let { putExtra("seed", it) }
+                                        putExtra("width", currentWidth)
+                                        putExtra("height", currentHeight)
+                                        putExtra(
+                                            "denoise_strength",
+                                            denoiseStrength
+                                        )
+                                        putExtra("use_opencl", useOpenCL)
+                                        putExtra("batch_index", i)
+                                        if (selectedImageUri != null && base64EncodeDone) {
+                                            putExtra("has_image", true)
+                                            if (isInpaintMode && maskBitmap != null) {
+                                                putExtra("has_mask", true)
+                                            }
+                                        }
+                                    }
+
+                                    Log.d(
+                                        "ModelRunScreen",
+                                        "start service - batch $i"
+                                    )
+
+                                    context.startForegroundService(batchIntent)
+                                    Log.d(
+                                        "ModelRunScreen",
+                                        "start service sent - batch $i"
+                                    )
+
+                                    BackgroundGenerationService.generationState
+                                        .first { state ->
+                                            state is GenerationState.Complete ||
+                                                    state is GenerationState.Error
+                                        }
+
+                                    Log.d(
+                                        "ModelRunScreen",
+                                        "batch $i completed, waiting for service to stop"
+                                    )
+
+                                    // Wait for service to actually stop
+                                    val waitStartTime =
+                                        System.currentTimeMillis()
+                                    val timeoutMs = 5000L
+                                    while (BackgroundGenerationService.isServiceRunning.value) {
+                                        if (System.currentTimeMillis() - waitStartTime > timeoutMs) {
+                                            Log.w(
+                                                "ModelRunScreen",
+                                                "Timeout waiting for service to stop"
+                                            )
+                                            break
+                                        }
+                                        delay(100)
+                                    }
+
+                                    Log.d(
+                                        "ModelRunScreen",
+                                        "service stopped, wait time: ${System.currentTimeMillis() - waitStartTime}ms"
+                                    )
+
+                                    BackgroundGenerationService.resetState()
+                                    Log.d(
+                                        "ModelRunScreen",
+                                        "service state reset, ready for next batch"
+                                    )
+                                }
+                                currentBatchIndex = 0
+                                isRunning = false
+                                Log.d(
+                                    "ModelRunScreen",
+                                    "all batches completed, isRunning set to false"
+                                )
+                            }
+                        },
+                        enabled = serviceState !is GenerationState.Progress && !isRunning && !isUpscaling,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        if (serviceState is GenerationState.Progress || isUpscaling) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        } else {
+                            Text(stringResource(R.string.generate_image))
+
+                        }
+                    }
+                }
+            }
+
+
+            AnimatedVisibility(
+                visible = errorMessage != null,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                errorMessage?.let { msg ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { errorMessage = null },
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Error,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                msg,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            }
+            AnimatedVisibility(
+                visible = isRunning,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = if (currentBatchIndex > 0) "${
+                                stringResource(
+                                    R.string.generating
+                                )
+                            } ($currentBatchIndex/$batchCounts)…" else stringResource(
+                                R.string.generating
+                            ),
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            "${(progress * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(
+                                alpha = 0.7f
+                            )
+                        )
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = selectedImageUri != null && base64EncodeDone,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Start
+                    ) {
+                        Card(
+                            modifier = Modifier
+                                .size(100.dp),
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Box {
+                                croppedBitmap?.let { bitmap ->
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(
+                                            LocalContext.current
+                                        )
+                                            .data(bitmap)
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = "Cropped Image",
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } ?: selectedImageUri?.let { uri ->
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(
+                                            LocalContext.current
+                                        )
+                                            .data(uri)
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = "Selected Image",
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        selectedImageUri = null
+                                        croppedBitmap = null
+                                        maskBitmap = null
+                                        isInpaintMode = false
+                                        cropRect = null
+                                        savedPathHistory = null
+                                    },
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .background(
+                                            color = MaterialTheme.colorScheme.surface.copy(
+                                                alpha = 0.7f
+                                            ),
+                                            shape = CircleShape
+                                        )
+                                        .align(Alignment.TopEnd)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Clear,
+                                        contentDescription = "Remove Image",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        AnimatedVisibility(
+                            visible = croppedBitmap != null && !isInpaintMode,
+                            enter = fadeIn() + expandHorizontally(),
+                            exit = fadeOut() + shrinkHorizontally()
+                        ) {
+                            Row {
+                                Spacer(modifier = Modifier.width(12.dp))
+                                FilledTonalIconButton(
+                                    onClick = {
+                                        if (croppedBitmap != null) {
+                                            showInpaintScreen = true
+                                        } else {
+                                            Toast.makeText(
+                                                context,
+                                                "Please Crop First",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    },
+                                    shape = CircleShape,
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Brush,
+                                        contentDescription = "Set Mask",
+                                    )
+                                }
+                            }
+                        }
+
+                        AnimatedVisibility(
+                            visible = isInpaintMode && maskBitmap != null,
+                            enter = fadeIn() + expandHorizontally(),
+                            exit = fadeOut() + shrinkHorizontally()
+                        ) {
+                            Row {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Card(
+                                    modifier = Modifier
+                                        .size(100.dp)
+                                        .clickable {
+                                            if (croppedBitmap != null && maskBitmap != null) {
+                                                showInpaintScreen = true
+                                            }
+                                        },
+                                    shape = RoundedCornerShape(8.dp),
+                                ) {
+                                    Box {
+                                        maskBitmap?.let { mb ->
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(
+                                                    LocalContext.current
+                                                )
+                                                    .data(mb)
+                                                    .crossfade(true)
+                                                    .build(),
+                                                contentDescription = "Mask Image",
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                maskBitmap = null
+                                                isInpaintMode = false
+                                                savedPathHistory = null
+                                            },
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .background(
+                                                    color = MaterialTheme.colorScheme.surface.copy(
+                                                        alpha = 0.7f
+                                                    ),
+                                                    shape = CircleShape
+                                                )
+                                                .align(Alignment.TopEnd)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Clear,
+                                                contentDescription = "Clear Mask",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun ResultPage() {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Crossfade(
+                targetState = currentBitmap != null,
+                label = "result_crossfade"
+            ) { hasResult ->
+                if (!hasResult) {
+                    ElevatedCard(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Image,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                stringResource(R.string.no_results),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                stringResource(R.string.no_results_hint),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Button(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        pagerState.animateScrollToPage(0)
+                                    }
+                                },
+                                modifier = Modifier.padding(top = 8.dp)
+                            ) {
+                                Text(stringResource(R.string.go_to_generate))
+                            }
+                        }
+                    }
+                } else {
+                    ElevatedCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.large
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    stringResource(R.string.result_tab),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                currentBitmap?.let { bitmap ->
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(
+                                            8.dp
+                                        )
+                                    ) {
+                                        if (BuildConfig.FLAVOR == "filter") {
+                                            FilledTonalIconButton(
+                                                onClick = {
+                                                    showReportDialog = true
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Report,
+                                                    contentDescription = "report inappropriate content"
+                                                )
+                                            }
+                                        }
+
+                                        // Upscaler button - only show for NPU runtime and resolution <= 1024
+                                        if (!model?.runOnCpu!! && generationParams?.let {
+                                                maxOf(
+                                                    it.width,
+                                                    it.height
+                                                ) <= 1024
+                                            } == true
+                                        ) {
+                                            FilledTonalIconButton(
+                                                onClick = {
+                                                    showUpscalerDialog = true
+                                                },
+                                                enabled = !isRunning && !isUpscaling
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.AutoFixHigh,
+                                                    contentDescription = "upscale image"
+                                                )
+                                            }
+                                        }
+
+                                        FilledTonalIconButton(
+                                            onClick = {
+                                                handleSaveImage(
+                                                    context = context,
+                                                    bitmap = bitmap,
+                                                    onSuccess = {
+                                                        Toast.makeText(
+                                                            context,
+                                                            context.getString(R.string.image_saved),
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    },
+                                                    onError = { error ->
+                                                        Toast.makeText(
+                                                            context,
+                                                            error,
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    }
+                                                )
+                                            }
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Save,
+                                                contentDescription = "save image"
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            key(imageVersion) {
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(1f)
+                                        .clickable {
+                                            if (currentBitmap != null) {
+                                                isPreviewMode = true
+                                                scale = 1f
+                                                offsetX = 0f
+                                                offsetY = 0f
+                                            }
+                                        },
+                                    shape = MaterialTheme.shapes.medium,
+                                    shadowElevation = 4.dp
+                                ) {
+                                    currentBitmap?.let { bitmap ->
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(
+                                                LocalContext.current
+                                            )
+                                                .data(bitmap)
+                                                .size(coil.size.Size.ORIGINAL)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = "generated image",
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (historyItems.size > 1) {
+                                LazyRow(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(
+                                        8.dp
+                                    )
+                                ) {
+                                    items(historyItems.take(20).size) { idx ->
+                                        val item = historyItems[idx]
+                                        Card(
+                                            modifier = Modifier
+                                                .size(72.dp)
+                                                .clickable {
+                                                    // Load bitmap from file
+                                                    val bitmap =
+                                                        BitmapFactory.decodeFile(
+                                                            item.imageFile.absolutePath
+                                                        )
+                                                    if (bitmap != null) {
+                                                        currentBitmap = bitmap
+                                                        scope.launch {
+                                                            val params =
+                                                                item.params
+                                                                    ?: historyManager.loadHistoryItemParams(
+                                                                        item
+                                                                    )
+                                                            generationParams =
+                                                                params
+                                                            if (item.params == null && params != null) {
+                                                                val newItem =
+                                                                    item.copy(
+                                                                        params = params
+                                                                    )
+                                                                val index =
+                                                                    historyItems.indexOf(
+                                                                        item
+                                                                    )
+                                                                if (index != -1) {
+                                                                    historyItems[index] =
+                                                                        newItem
+                                                                }
+                                                            }
+                                                        }
+                                                        imageVersion++
+                                                    }
+                                                },
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(
+                                                    LocalContext.current
+                                                )
+                                                    .data(item.imageFile)
+                                                    .size(72)
+                                                    .build(),
+                                                contentDescription = "thumb",
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showParametersDialog = true },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            stringResource(R.string.generation_params),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Icon(
+                                            Icons.Default.Info,
+                                            contentDescription = "view details",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    generationParams?.let { params ->
+                                        Text(
+                                            stringResource(
+                                                R.string.result_params,
+                                                params.steps,
+                                                params.cfg,
+                                                params.seed.toString()
+                                            ),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                                alpha = 0.8f
+                                            )
+                                        )
+                                        Text(
+                                            stringResource(
+                                                R.string.result_params_2,
+                                                params.width,
+                                                params.height,
+                                                params.generationTime
+                                                    ?: "unknown",
+                                                if (params.runOnCpu) {
+                                                    if (params.useOpenCL) "GPU" else "CPU"
+                                                } else "NPU"
+                                            ),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                                alpha = 0.8f
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (showReportDialog && currentBitmap != null && generationParams != null) {
+                AlertDialog(
+                    onDismissRequest = { showReportDialog = false },
+                    title = { Text("Report") },
+                    text = {
+                        Column {
+//                                                Text("Report this image?")
+                            Text(
+                                "Report this image if you feel it is inappropriate. Params and image will be sent to the server for review.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showReportDialog = false
+                                coroutineScope.launch {
+                                    currentBitmap?.let { bitmap ->
+                                        reportImage(
+                                            context = context,
+                                            bitmap = bitmap,
+                                            modelName = model?.name ?: "",
+                                            params = generationParams!!,
+                                            onSuccess = {
+                                                Toast.makeText(
+                                                    context,
+                                                    "Thanks for your report.",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            },
+                                            onError = { error ->
+                                                Toast.makeText(
+                                                    context,
+                                                    "Error: $error",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        )
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Text("Report")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showReportDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+            if (showParametersDialog && generationParams != null) {
+                AlertDialog(
+                    onDismissRequest = { showParametersDialog = false },
+                    title = { Text(stringResource(R.string.params_detail)) },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .verticalScroll(rememberScrollState())
+                                .padding(vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    stringResource(R.string.basic_params),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    stringResource(
+                                        R.string.basic_step,
+                                        generationParams?.steps ?: 0
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    "CFG: %.1f".format(generationParams?.cfg),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    stringResource(
+                                        R.string.basic_size,
+                                        generationParams?.width ?: 0,
+                                        generationParams?.height ?: 0
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                generationParams?.seed?.let {
+                                    Text(
+                                        stringResource(R.string.basic_seed, it),
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                                Text(
+                                    stringResource(
+                                        R.string.basic_runtime,
+                                        if (generationParams?.runOnCpu == true) {
+                                            if (generationParams?.useOpenCL == true) "GPU" else "CPU"
+                                        } else "NPU"
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    stringResource(
+                                        R.string.basic_time,
+                                        generationParams?.generationTime
+                                            ?: "unknown"
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+
+                            Column {
+                                Text(
+                                    stringResource(R.string.image_prompt),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    generationParams?.prompt ?: "",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+
+                            Column {
+                                Text(
+                                    stringResource(R.string.negative_prompt),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    generationParams?.negativePrompt ?: "",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showParametersDialog = false }) {
+                            Text(stringResource(R.string.close))
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    @Composable
+    fun HistoryPage() {
+        // History page
+        // Handle back button in selection mode
+        BackHandler(enabled = isSelectionMode) {
+            isSelectionMode = false
+            selectedItems.clear()
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+        ) {
+            if (isLoadingHistory) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            } else if (historyItems.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.offset(y = (-60).dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Image,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            stringResource(R.string.no_history),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            stringResource(R.string.no_history_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                    columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(
+                        2
+                    ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        16.dp
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(historyItems.size) { index ->
+                        val item = historyItems[index]
+                        val isSelected = selectedItems.contains(item)
+                        Card(
+                            modifier = Modifier
+                                .aspectRatio(1f)
+                                .combinedClickable(
+                                    onClick = {
+                                        if (isSelectionMode) {
+                                            // Toggle selection
+                                            if (isSelected) {
+                                                selectedItems.remove(item)
+                                                if (selectedItems.isEmpty()) {
+                                                    isSelectionMode = false
+                                                }
+                                            } else {
+                                                selectedItems.add(item)
+                                            }
+                                        } else {
+                                            // Normal preview
+                                            selectedHistoryItem = item
+                                            showHistoryDetailDialog = true
+                                        }
+                                    },
+                                    onLongClick = {
+                                        if (!isSelectionMode) {
+                                            isSelectionMode = true
+                                            selectedItems.clear()
+                                            selectedItems.add(item)
+                                        }
+                                    }
+                                ),
+                            shape = RoundedCornerShape(12.dp),
+                            elevation = CardDefaults.cardElevation(
+                                defaultElevation = 2.dp
+                            )
+                        ) {
+                            Box {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(item.imageFile)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = "Generated image",
+                                    modifier = Modifier.fillMaxSize()
+                                )
+
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                MaterialTheme.colorScheme.primary.copy(
+                                                    alpha = 0.2f
+                                                )
+                                            )
+                                    )
+                                }
+
+                                // Timestamp overlay
+                                Surface(
+                                    modifier = Modifier.align(Alignment.BottomStart),
+                                    shape = RoundedCornerShape(
+                                        topStart = 0.dp,
+                                        topEnd = 4.dp,
+                                        bottomStart = 12.dp,
+                                        bottomEnd = 0.dp
+                                    ),
+                                    color = MaterialTheme.colorScheme.surface.copy(
+                                        alpha = 0.8f
+                                    )
+                                ) {
+                                    Text(
+                                        text = java.text.SimpleDateFormat(
+                                            "MM/dd HH:mm",
+                                            java.util.Locale.getDefault()
+                                        )
+                                            .format(java.util.Date(item.timestamp)),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.padding(
+                                            horizontal = 6.dp,
+                                            vertical = 3.dp
+                                        )
+                                    )
+                                }
+
+                                // Selection indicator
+                                if (isSelectionMode) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(8.dp)
+                                            .size(24.dp)
+                                            .background(
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Black.copy(
+                                                    alpha = 0.3f
+                                                ),
+                                                shape = CircleShape
+                                            )
+                                            .border(
+                                                width = 2.dp,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White,
+                                                shape = CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Selected",
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Floating selection mode bottom bar
+            if (isSelectionMode) {
+                ElevatedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .padding(16.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    elevation = CardDefaults.elevatedCardElevation(
+                        defaultElevation = 6.dp
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = {
+                                isSelectionMode = false
+                                selectedItems.clear()
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Exit selection mode"
+                            )
+                        }
+
+                        Text(
+                            text = stringResource(
+                                R.string.selected_items_count,
+                                selectedItems.size
+                            ),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // Select all / Deselect all button
+                            val visibleCount = historyItems.size
+                            val visibleItems = historyItems
+                            val isAllSelected =
+                                selectedItems.size == visibleCount && visibleItems.all { it in selectedItems }
+                            IconButton(
+                                onClick = {
+                                    if (isAllSelected) {
+                                        selectedItems.clear()
+                                        isSelectionMode = false
+                                    } else {
+                                        selectedItems.clear()
+                                        selectedItems.addAll(visibleItems)
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = if (isAllSelected)
+                                        Icons.Default.CheckCircle
+                                    else
+                                        Icons.Default.CheckCircleOutline,
+                                    contentDescription = if (isAllSelected) "Deselect all" else "Select all",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            // Delete button
+                            IconButton(
+                                onClick = { showBatchDeleteDialog = true },
+                                enabled = selectedItems.isNotEmpty()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Delete selected",
+                                    tint = if (selectedItems.isNotEmpty())
+                                        MaterialTheme.colorScheme.error
+                                    else
+                                        MaterialTheme.colorScheme.onSurface.copy(
+                                            alpha = 0.38f
+                                        )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Box(
@@ -1011,1504 +2663,11 @@ fun ModelRunScreen(
                         .padding(paddingValues)
                 ) { page ->
                     when (page) {
-                        0 -> {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 16.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                ElevatedCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = MaterialTheme.shapes.large
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                stringResource(R.string.prompt_settings),
-                                                style = MaterialTheme.typography.titleMedium,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            var showAdvancedSettings by remember {
-                                                mutableStateOf(
-                                                    false
-                                                )
-                                            }
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                if (useImg2img) {
-                                                    TextButton(
-                                                        onClick = {
-                                                            onSelectImageClick()
-                                                        }
-                                                    ) {
-                                                        Text(
-                                                            "img2img",
-                                                            style = MaterialTheme.typography.bodyMedium,
-                                                            modifier = Modifier.padding(end = 4.dp)
-                                                        )
-                                                        Icon(
-                                                            Icons.Default.Image,
-                                                            contentDescription = "select image",
-                                                            modifier = Modifier.size(20.dp)
-                                                        )
-                                                    }
-                                                }
-                                                TextButton(
-                                                    onClick = { showAdvancedSettings = true }
-                                                ) {
-                                                    Text(
-                                                        stringResource(R.string.advanced_settings),
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        modifier = Modifier.padding(end = 4.dp)
-                                                    )
-                                                    Icon(
-                                                        Icons.Default.Settings,
-                                                        contentDescription = stringResource(R.string.settings),
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                }
-                                            }
-                                            if (showAdvancedSettings) {
-                                                AlertDialog(
-                                                    onDismissRequest = {
-                                                        showAdvancedSettings = false
-                                                    },
-                                                    title = { Text(stringResource(R.string.advanced_settings_title)) },
-                                                    text = {
-                                                        Column(
-                                                            verticalArrangement = Arrangement.spacedBy(
-                                                                8.dp
-                                                            ),
-                                                            modifier = Modifier.padding(vertical = 8.dp)
-                                                        ) {
-                                                            Column {
-                                                                Text(
-                                                                    stringResource(
-                                                                        R.string.steps,
-                                                                        steps.roundToInt()
-                                                                    ),
-                                                                    style = MaterialTheme.typography.bodyMedium
-                                                                )
-                                                                Slider(
-                                                                    value = steps,
-                                                                    onValueChange = onStepsChange,
-                                                                    valueRange = 1f..50f,
-                                                                    steps = 48,
-                                                                    modifier = Modifier.fillMaxWidth()
-                                                                )
-                                                            }
+                        0 -> PromptPage()
 
-                                                            Column {
-                                                                Text(
-                                                                    "CFG Scale: %.1f".format(cfg),
-                                                                    style = MaterialTheme.typography.bodyMedium
-                                                                )
-                                                                Slider(
-                                                                    value = cfg,
-                                                                    onValueChange = onCfgChange,
-                                                                    valueRange = 1f..30f,
-                                                                    steps = 57,
-                                                                    modifier = Modifier.fillMaxWidth()
-                                                                )
-                                                            }
-                                                            if (model.runOnCpu) {
-                                                                Column {
-                                                                    Text(
-                                                                        stringResource(
-                                                                            R.string.image_size,
-                                                                            size,
-                                                                            size
-                                                                        ),
-                                                                        style = MaterialTheme.typography.bodyMedium
-                                                                    )
-                                                                    Slider(
-                                                                        value = size.toFloat(),
-                                                                        onValueChange = onSizeChange,
-                                                                        valueRange = 128f..512f,
-                                                                        steps = 5,
-                                                                        modifier = Modifier.fillMaxWidth()
-                                                                    )
-                                                                }
-                                                            }
-                                                            if (model.runOnCpu) {
-                                                                Row(
-                                                                    modifier = Modifier.fillMaxWidth(),
-                                                                    verticalAlignment = Alignment.CenterVertically,
-                                                                    horizontalArrangement = Arrangement.spacedBy(
-                                                                        8.dp
-                                                                    )
-                                                                ) {
-                                                                    Text(
-                                                                        "Runtime",
-                                                                        style = MaterialTheme.typography.bodyMedium
-                                                                    )
-                                                                    FilterChip(
-                                                                        selected = !useOpenCL,
-                                                                        onClick = {
-                                                                            useOpenCL = false
-                                                                            saveAllFields()
-                                                                        },
-                                                                        label = { Text("CPU") },
-                                                                        modifier = Modifier.weight(
-                                                                            1f
-                                                                        )
-                                                                    )
-                                                                    FilterChip(
-                                                                        selected = useOpenCL,
-                                                                        onClick = {
-                                                                            if (!useOpenCL) {
-                                                                                showOpenCLWarningDialog =
-                                                                                    true
-                                                                            } else {
-                                                                                useOpenCL = false
-                                                                                saveAllFields()
-                                                                            }
-                                                                        },
-                                                                        label = { Text("GPU") },
-                                                                        modifier = Modifier.weight(
-                                                                            1f
-                                                                        )
-                                                                    )
-                                                                }
-                                                            }
-                                                            Column {
-                                                                Text(
-                                                                    stringResource(
-                                                                        R.string.batch_count,
-                                                                        batchCounts
-                                                                    ),
-                                                                    style = MaterialTheme.typography.bodyMedium
-                                                                )
-                                                                Slider(
-                                                                    value = batchCounts.toFloat(),
-                                                                    onValueChange = onBatchCountsChange,
-                                                                    valueRange = 1f..10f,
-                                                                    steps = 8,
-                                                                    modifier = Modifier.fillMaxWidth()
-                                                                )
-                                                            }
-                                                            if (useImg2img) {
-                                                                Column {
-                                                                    Text(
-                                                                        "[img2img]Denoise Strength: %.2f".format(
-                                                                            denoiseStrength
-                                                                        ),
-                                                                        style = MaterialTheme.typography.bodyMedium
-                                                                    )
-                                                                    Slider(
-                                                                        value = denoiseStrength,
-                                                                        onValueChange = onDenoiseStrengthChange,
-                                                                        valueRange = 0f..1f,
-                                                                        steps = 99,
-                                                                        modifier = Modifier.fillMaxWidth()
-                                                                    )
-                                                                }
-                                                            }
-                                                            Column(
-                                                                modifier = Modifier.fillMaxWidth(),
-                                                                verticalArrangement = Arrangement.spacedBy(
-                                                                    8.dp
-                                                                )
-                                                            ) {
-                                                                OutlinedTextField(
-                                                                    value = seed,
-                                                                    onValueChange = onSeedChange,
-                                                                    label = { Text(stringResource(R.string.random_seed)) },
-                                                                    keyboardOptions = KeyboardOptions(
-                                                                        keyboardType = KeyboardType.Number
-                                                                    ),
-                                                                    modifier = Modifier.fillMaxWidth(),
-                                                                    shape = MaterialTheme.shapes.medium,
-                                                                    trailingIcon = {
-                                                                        if (seed.isNotEmpty()) {
-                                                                            IconButton(onClick = {
-                                                                                seed = ""
-                                                                                saveAllFields()
-                                                                            }) {
-                                                                                Icon(
-                                                                                    Icons.Default.Clear,
-                                                                                    contentDescription = "clear"
-                                                                                )
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                )
+                        1 -> ResultPage()
 
-                                                                if (returnedSeed != null) {
-                                                                    FilledTonalButton(
-                                                                        onClick = {
-                                                                            seed =
-                                                                                returnedSeed.toString()
-                                                                            saveAllFields()
-                                                                        },
-                                                                        modifier = Modifier.fillMaxWidth()
-                                                                    ) {
-                                                                        Icon(
-                                                                            Icons.Default.Refresh,
-                                                                            contentDescription = stringResource(
-                                                                                R.string.use_last_seed
-                                                                            ),
-                                                                            modifier = Modifier
-                                                                                .size(
-                                                                                    20.dp
-                                                                                )
-                                                                                .padding(end = 4.dp)
-                                                                        )
-                                                                        Text(
-                                                                            stringResource(
-                                                                                R.string.use_last_seed,
-                                                                                returnedSeed.toString()
-                                                                            )
-                                                                        )
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    },
-                                                    confirmButton = {
-                                                        Row(
-                                                            modifier = Modifier.fillMaxWidth(),
-                                                            horizontalArrangement = Arrangement.SpaceBetween
-                                                        ) {
-                                                            TextButton(
-                                                                onClick = {
-                                                                    showResetConfirmDialog = true
-                                                                },
-                                                                colors = ButtonDefaults.textButtonColors(
-                                                                    contentColor = MaterialTheme.colorScheme.error
-                                                                )
-                                                            ) {
-                                                                Icon(
-                                                                    Icons.Default.Refresh,
-                                                                    contentDescription = stringResource(
-                                                                        R.string.reset
-                                                                    ),
-                                                                    modifier = Modifier
-                                                                        .size(20.dp)
-                                                                        .padding(end = 4.dp)
-                                                                )
-                                                                Text(stringResource(R.string.reset))
-                                                            }
-
-                                                            TextButton(onClick = {
-                                                                showAdvancedSettings = false
-                                                            }) {
-                                                                Text(stringResource(R.string.confirm))
-                                                            }
-                                                        }
-                                                    }
-                                                )
-                                            }
-                                        }
-
-                                        var expandedPrompt by remember { mutableStateOf(false) }
-                                        var expandedNegativePrompt by remember {
-                                            mutableStateOf(
-                                                false
-                                            )
-                                        }
-
-                                        OutlinedTextField(
-                                            value = prompt,
-                                            onValueChange = onPromptChange,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable(
-                                                    interactionSource = interactionSource,
-                                                    indication = null
-                                                ) { },
-                                            label = { Text(stringResource(R.string.image_prompt)) },
-                                            maxLines = if (expandedPrompt) Int.MAX_VALUE else 2,
-                                            minLines = if (expandedPrompt) 3 else 2,
-                                            shape = MaterialTheme.shapes.medium,
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                                            ),
-                                            trailingIcon = {
-                                                IconButton(onClick = {
-                                                    expandedPrompt = !expandedPrompt
-                                                }) {
-                                                    Icon(
-                                                        if (expandedPrompt) Icons.Default.KeyboardArrowUp
-                                                        else Icons.Default.KeyboardArrowDown,
-                                                        contentDescription = if (expandedPrompt) "collapse" else "expand"
-                                                    )
-                                                }
-                                            }
-                                        )
-
-                                        OutlinedTextField(
-                                            value = negativePrompt,
-                                            onValueChange = onNegativePromptChange,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable(
-                                                    interactionSource = interactionSource,
-                                                    indication = null
-                                                ) { },
-                                            label = { Text(stringResource(R.string.negative_prompt)) },
-                                            maxLines = if (expandedNegativePrompt) Int.MAX_VALUE else 2,
-                                            minLines = if (expandedNegativePrompt) 3 else 2,
-                                            shape = MaterialTheme.shapes.medium,
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                                            ),
-                                            trailingIcon = {
-                                                IconButton(onClick = {
-                                                    expandedNegativePrompt = !expandedNegativePrompt
-                                                }) {
-                                                    Icon(
-                                                        if (expandedNegativePrompt) Icons.Default.KeyboardArrowUp
-                                                        else Icons.Default.KeyboardArrowDown,
-                                                        contentDescription = if (expandedNegativePrompt) "collapse" else "expand"
-                                                    )
-                                                }
-                                            }
-                                        )
-
-                                        Button(
-                                            onClick = {
-                                                focusManager.clearFocus()
-                                                android.util.Log.d(
-                                                    "ModelRunScreen",
-                                                    "start generation"
-                                                )
-                                                generationParamsTmp = GenerationParameters(
-                                                    steps = steps.roundToInt(),
-                                                    cfg = cfg,
-                                                    seed = 0,
-                                                    prompt = prompt,
-                                                    negativePrompt = negativePrompt,
-                                                    generationTime = "",
-                                                    size = size,
-                                                    runOnCpu = model.runOnCpu,
-                                                    denoiseStrength = denoiseStrength,
-                                                    useOpenCL = useOpenCL
-                                                )
-
-                                                android.util.Log.d(
-                                                    "ModelRunScreen",
-                                                    "start generation batch: $batchCounts times"
-                                                )
-
-                                                // If seed is set, only generate once regardless of batch count
-                                                val actualBatchCount =
-                                                    if (seed.isNotBlank()) 1 else batchCounts
-
-                                                batchGenerationJob = coroutineScope.launch {
-                                                    for (i in 0 until actualBatchCount) {
-                                                        currentBatchIndex = i + 1
-                                                        android.util.Log.d(
-                                                            "ModelRunScreen",
-                                                            "preparing batch $i"
-                                                        )
-
-                                                        val batchIntent = Intent(
-                                                            context,
-                                                            BackgroundGenerationService::class.java
-                                                        ).apply {
-                                                            putExtra("prompt", prompt)
-                                                            putExtra(
-                                                                "negative_prompt",
-                                                                negativePrompt
-                                                            )
-                                                            putExtra("steps", steps.roundToInt())
-                                                            putExtra("cfg", cfg)
-                                                            seed.toLongOrNull()
-                                                                ?.let { putExtra("seed", it) }
-                                                            putExtra("size", size)
-                                                            putExtra(
-                                                                "denoise_strength",
-                                                                denoiseStrength
-                                                            )
-                                                            putExtra("use_opencl", useOpenCL)
-                                                            putExtra("batch_index", i)
-                                                            if (selectedImageUri != null && base64EncodeDone) {
-                                                                putExtra("has_image", true)
-                                                                if (isInpaintMode && maskBitmap != null) {
-                                                                    putExtra("has_mask", true)
-                                                                }
-                                                            }
-                                                        }
-
-                                                        android.util.Log.d(
-                                                            "ModelRunScreen",
-                                                            "start service - batch $i"
-                                                        )
-
-                                                        context.startForegroundService(batchIntent)
-                                                        android.util.Log.d(
-                                                            "ModelRunScreen",
-                                                            "start service sent - batch $i"
-                                                        )
-
-                                                        BackgroundGenerationService.generationState
-                                                            .first { state ->
-                                                                state is BackgroundGenerationService.GenerationState.Complete ||
-                                                                        state is BackgroundGenerationService.GenerationState.Error
-                                                            }
-
-                                                        android.util.Log.d(
-                                                            "ModelRunScreen",
-                                                            "batch $i completed, waiting for service to stop"
-                                                        )
-
-                                                        // Wait for service to actually stop
-                                                        val waitStartTime =
-                                                            System.currentTimeMillis()
-                                                        val timeoutMs = 5000L
-                                                        while (BackgroundGenerationService.isServiceRunning.value) {
-                                                            if (System.currentTimeMillis() - waitStartTime > timeoutMs) {
-                                                                android.util.Log.w(
-                                                                    "ModelRunScreen",
-                                                                    "Timeout waiting for service to stop"
-                                                                )
-                                                                break
-                                                            }
-                                                            delay(100)
-                                                        }
-
-                                                        android.util.Log.d(
-                                                            "ModelRunScreen",
-                                                            "service stopped, wait time: ${System.currentTimeMillis() - waitStartTime}ms"
-                                                        )
-
-                                                        BackgroundGenerationService.resetState()
-                                                        android.util.Log.d(
-                                                            "ModelRunScreen",
-                                                            "service state reset, ready for next batch"
-                                                        )
-                                                    }
-                                                    currentBatchIndex = 0
-                                                    isRunning = false
-                                                    android.util.Log.d(
-                                                        "ModelRunScreen",
-                                                        "all batches completed, isRunning set to false"
-                                                    )
-                                                }
-                                            },
-                                            enabled = serviceState !is GenerationState.Progress && !isRunning && !isUpscaling,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            shape = MaterialTheme.shapes.medium
-                                        ) {
-                                            if (serviceState is GenerationState.Progress || isUpscaling) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(24.dp),
-                                                    color = MaterialTheme.colorScheme.onPrimary
-                                                )
-                                            } else {
-                                                Text(stringResource(R.string.generate_image))
-
-                                            }
-                                        }
-                                    }
-                                }
-
-
-                                AnimatedVisibility(
-                                    visible = errorMessage != null,
-                                    enter = expandVertically() + fadeIn(),
-                                    exit = shrinkVertically() + fadeOut()
-                                ) {
-                                    errorMessage?.let { msg ->
-                                        Card(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            colors = CardDefaults.cardColors(
-                                                containerColor = MaterialTheme.colorScheme.errorContainer
-                                            )
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(16.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Error,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.error
-                                                )
-                                                Text(
-                                                    msg,
-                                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                AnimatedVisibility(
-                                    visible = isRunning,
-                                    enter = expandVertically() + fadeIn(),
-                                    exit = shrinkVertically() + fadeOut()
-                                ) {
-                                    ElevatedCard(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = MaterialTheme.shapes.large
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(16.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Text(
-                                                text = if (currentBatchIndex > 0) "${
-                                                    stringResource(
-                                                        R.string.generating
-                                                    )
-                                                } ($currentBatchIndex/$batchCounts)…" else stringResource(
-                                                    R.string.generating
-                                                ),
-                                                style = MaterialTheme.typography.titleMedium
-                                            )
-                                            LinearProgressIndicator(
-                                                progress = { progress },
-                                                modifier = Modifier.fillMaxWidth(),
-                                            )
-                                            Text(
-                                                "${(progress * 100).toInt()}%",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(
-                                                    alpha = 0.7f
-                                                )
-                                            )
-                                        }
-                                    }
-                                }
-
-                                AnimatedVisibility(
-                                    visible = selectedImageUri != null && base64EncodeDone,
-                                    enter = expandVertically() + fadeIn(),
-                                    exit = shrinkVertically() + fadeOut()
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 8.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.Start
-                                        ) {
-                                            Card(
-                                                modifier = Modifier
-                                                    .size(100.dp),
-                                                shape = RoundedCornerShape(8.dp),
-                                            ) {
-                                                Box {
-                                                    croppedBitmap?.let { bitmap ->
-                                                        AsyncImage(
-                                                            model = ImageRequest.Builder(
-                                                                LocalContext.current
-                                                            )
-                                                                .data(bitmap)
-                                                                .crossfade(true)
-                                                                .build(),
-                                                            contentDescription = "Cropped Image",
-                                                            modifier = Modifier.fillMaxSize()
-                                                        )
-                                                    } ?: selectedImageUri?.let { uri ->
-                                                        AsyncImage(
-                                                            model = ImageRequest.Builder(
-                                                                LocalContext.current
-                                                            )
-                                                                .data(uri)
-                                                                .crossfade(true)
-                                                                .build(),
-                                                            contentDescription = "Selected Image",
-                                                            modifier = Modifier.fillMaxSize()
-                                                        )
-                                                    }
-                                                    IconButton(
-                                                        onClick = {
-                                                            selectedImageUri = null
-                                                            croppedBitmap = null
-                                                            maskBitmap = null
-                                                            isInpaintMode = false
-                                                            cropRect = null
-                                                            savedPathHistory = null
-                                                        },
-                                                        modifier = Modifier
-                                                            .size(24.dp)
-                                                            .background(
-                                                                color = MaterialTheme.colorScheme.surface.copy(
-                                                                    alpha = 0.7f
-                                                                ),
-                                                                shape = CircleShape
-                                                            )
-                                                            .align(Alignment.TopEnd)
-                                                    ) {
-                                                        Icon(
-                                                            Icons.Default.Clear,
-                                                            contentDescription = "Remove Image",
-                                                            modifier = Modifier.size(16.dp)
-                                                        )
-                                                    }
-                                                }
-                                            }
-
-                                            AnimatedVisibility(
-                                                visible = croppedBitmap != null && !isInpaintMode,
-                                                enter = fadeIn() + expandHorizontally(),
-                                                exit = fadeOut() + shrinkHorizontally()
-                                            ) {
-                                                Row {
-                                                    Spacer(modifier = Modifier.width(12.dp))
-                                                    FilledTonalIconButton(
-                                                        onClick = {
-                                                            if (croppedBitmap != null) {
-                                                                showInpaintScreen = true
-                                                            } else {
-                                                                Toast.makeText(
-                                                                    context,
-                                                                    "Please Crop First",
-                                                                    Toast.LENGTH_SHORT
-                                                                ).show()
-                                                            }
-                                                        },
-                                                        shape = CircleShape,
-                                                        modifier = Modifier.size(40.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.Default.Brush,
-                                                            contentDescription = "Set Mask",
-                                                        )
-                                                    }
-                                                }
-                                            }
-
-                                            AnimatedVisibility(
-                                                visible = isInpaintMode && maskBitmap != null,
-                                                enter = fadeIn() + expandHorizontally(),
-                                                exit = fadeOut() + shrinkHorizontally()
-                                            ) {
-                                                Row {
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Card(
-                                                        modifier = Modifier
-                                                            .size(100.dp)
-                                                            .clickable {
-                                                                if (croppedBitmap != null && maskBitmap != null) {
-                                                                    showInpaintScreen = true
-                                                                }
-                                                            },
-                                                        shape = RoundedCornerShape(8.dp),
-                                                    ) {
-                                                        Box {
-                                                            maskBitmap?.let { mb ->
-                                                                AsyncImage(
-                                                                    model = ImageRequest.Builder(
-                                                                        LocalContext.current
-                                                                    )
-                                                                        .data(mb)
-                                                                        .crossfade(true)
-                                                                        .build(),
-                                                                    contentDescription = "Mask Image",
-                                                                    modifier = Modifier.fillMaxSize()
-                                                                )
-                                                            }
-                                                            IconButton(
-                                                                onClick = {
-                                                                    maskBitmap = null
-                                                                    isInpaintMode = false
-                                                                    savedPathHistory = null
-                                                                },
-                                                                modifier = Modifier
-                                                                    .size(24.dp)
-                                                                    .background(
-                                                                        color = MaterialTheme.colorScheme.surface.copy(
-                                                                            alpha = 0.7f
-                                                                        ),
-                                                                        shape = CircleShape
-                                                                    )
-                                                                    .align(Alignment.TopEnd)
-                                                            ) {
-                                                                Icon(
-                                                                    Icons.Default.Clear,
-                                                                    contentDescription = "Clear Mask",
-                                                                    modifier = Modifier.size(16.dp)
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        1 -> {
-                            // Load history when page is visible (if not already loaded)
-                            LaunchedEffect(pagerState.currentPage) {
-                                if (pagerState.currentPage == 1 && historyItems.isEmpty() && !isLoadingHistory) {
-                                    isLoadingHistory = true
-                                    try {
-                                        val items = historyManager.loadHistoryForModel(modelId)
-                                        historyItems.clear()
-                                        historyItems.addAll(items)
-                                    } catch (e: Exception) {
-                                        android.util.Log.e(
-                                            "ModelRunScreen",
-                                            "Failed to load history",
-                                            e
-                                        )
-                                    } finally {
-                                        isLoadingHistory = false
-                                    }
-                                }
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 16.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                Crossfade(
-                                    targetState = currentBitmap != null,
-                                    label = "result_crossfade"
-                                ) { hasResult ->
-                                    if (!hasResult) {
-                                        ElevatedCard(
-                                            modifier = Modifier.padding(16.dp)
-                                        ) {
-                                            Column(
-                                                modifier = Modifier
-                                                    .padding(24.dp),
-                                                horizontalAlignment = Alignment.CenterHorizontally,
-                                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Image,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(48.dp),
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                                Text(
-                                                    stringResource(R.string.no_results),
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
-                                                Text(
-                                                    stringResource(R.string.no_results_hint),
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                                Button(
-                                                    onClick = {
-                                                        coroutineScope.launch {
-                                                            pagerState.animateScrollToPage(0)
-                                                        }
-                                                    },
-                                                    modifier = Modifier.padding(top = 8.dp)
-                                                ) {
-                                                    Text(stringResource(R.string.go_to_generate))
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                    ElevatedCard(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = MaterialTheme.shapes.large
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(16.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    stringResource(R.string.result_tab),
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                currentBitmap?.let { bitmap ->
-                                                    Row(
-                                                        horizontalArrangement = Arrangement.spacedBy(
-                                                            8.dp
-                                                        )
-                                                    ) {
-                                                        if (BuildConfig.FLAVOR == "filter") {
-                                                            FilledTonalIconButton(
-                                                                onClick = {
-                                                                    showReportDialog = true
-                                                                }
-                                                            ) {
-                                                                Icon(
-                                                                    imageVector = Icons.Default.Report,
-                                                                    contentDescription = "report inappropriate content"
-                                                                )
-                                                            }
-                                                        }
-
-                                                        // Upscaler button - only show for NPU runtime and resolution <= 1024
-                                                        if (model?.runOnCpu == false &&
-                                                            generationParams?.size?.let { it <= 1024 } == true
-                                                        ) {
-                                                            FilledTonalIconButton(
-                                                                onClick = {
-                                                                    showUpscalerDialog = true
-                                                                },
-                                                                enabled = !isRunning && !isUpscaling
-                                                            ) {
-                                                                Icon(
-                                                                    imageVector = Icons.Default.AutoFixHigh,
-                                                                    contentDescription = "upscale image"
-                                                                )
-                                                            }
-                                                        }
-
-                                                        FilledTonalIconButton(
-                                                            onClick = {
-                                                                handleSaveImage(
-                                                                    context = context,
-                                                                    bitmap = bitmap,
-                                                                    onSuccess = {
-                                                                        Toast.makeText(
-                                                                            context,
-                                                                            context.getString(R.string.image_saved),
-                                                                            Toast.LENGTH_SHORT
-                                                                        ).show()
-                                                                    },
-                                                                    onError = { error ->
-                                                                        Toast.makeText(
-                                                                            context,
-                                                                            error,
-                                                                            Toast.LENGTH_SHORT
-                                                                        ).show()
-                                                                    }
-                                                                )
-                                                            }
-                                                        ) {
-                                                            Icon(
-                                                                imageVector = Icons.Default.Save,
-                                                                contentDescription = "save image"
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            key(imageVersion) {
-                                                Surface(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .aspectRatio(1f)
-                                                        .clickable {
-                                                            if (currentBitmap != null) {
-                                                                isPreviewMode = true
-                                                                scale = 1f
-                                                                offsetX = 0f
-                                                                offsetY = 0f
-                                                            }
-                                                        },
-                                                    shape = MaterialTheme.shapes.medium,
-                                                    shadowElevation = 4.dp
-                                                ) {
-                                                    currentBitmap?.let { bitmap ->
-                                                        AsyncImage(
-                                                            model = ImageRequest.Builder(
-                                                                LocalContext.current
-                                                            )
-                                                                .data(bitmap)
-                                                                .size(coil.size.Size.ORIGINAL)
-                                                                .crossfade(true)
-                                                                .build(),
-                                                            contentDescription = "generated image",
-                                                            modifier = Modifier.fillMaxSize()
-                                                        )
-                                                    }
-                                                }
-                                            }
-
-                                            if (historyItems.size > 1) {
-                                                LazyRow(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .padding(top = 8.dp),
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                                ) {
-                                                    items(historyItems.take(20).size) { idx ->
-                                                        val item = historyItems[idx]
-                                                        Card(
-                                                            modifier = Modifier
-                                                                .size(72.dp)
-                                                                .clickable {
-                                                                    // Load bitmap from file
-                                                                    val bitmap =
-                                                                        android.graphics.BitmapFactory.decodeFile(
-                                                                            item.imageFile.absolutePath
-                                                                        )
-                                                                    if (bitmap != null) {
-                                                                        currentBitmap = bitmap
-                                                                        generationParams =
-                                                                            item.params
-                                                                        imageVersion++
-                                                                    }
-                                                                },
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        ) {
-                                                            AsyncImage(
-                                                                model = ImageRequest.Builder(
-                                                                    LocalContext.current
-                                                                )
-                                                                    .data(item.imageFile)
-                                                                    .size(72)
-                                                                    .build(),
-                                                                contentDescription = "thumb",
-                                                                modifier = Modifier.fillMaxSize()
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            Card(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable { showParametersDialog = true },
-                                                colors = CardDefaults.cardColors(
-                                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                                )
-                                            ) {
-                                                Column(
-                                                    modifier = Modifier.padding(12.dp),
-                                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        Text(
-                                                            stringResource(R.string.generation_params),
-                                                            style = MaterialTheme.typography.labelLarge,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
-                                                        Icon(
-                                                            Icons.Default.Info,
-                                                            contentDescription = "view details",
-                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
-                                                    }
-
-                                                    generationParams?.let { params ->
-                                                        Text(
-                                                            stringResource(
-                                                                R.string.result_params,
-                                                                params.steps,
-                                                                params.cfg,
-                                                                params.seed.toString()
-                                                            ),
-                                                            style = MaterialTheme.typography.bodySmall,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                                                                alpha = 0.8f
-                                                            )
-                                                        )
-                                                        Text(
-                                                            stringResource(
-                                                                R.string.result_params_2,
-                                                                params.size,
-                                                                params.generationTime ?: "unknown",
-                                                                if (params.runOnCpu) {
-                                                                    if (params.useOpenCL) "GPU" else "CPU"
-                                                                } else "NPU"
-                                                            ),
-                                                            style = MaterialTheme.typography.bodySmall,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                                                                alpha = 0.8f
-                                                            )
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    }
-                                }
-                                if (showReportDialog && currentBitmap != null && generationParams != null) {
-                                    AlertDialog(
-                                        onDismissRequest = { showReportDialog = false },
-                                        title = { Text("Report") },
-                                        text = {
-                                            Column {
-//                                                Text("Report this image?")
-                                                Text(
-                                                    "Report this image if you feel it is inappropriate. Params and image will be sent to the server for review.",
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        },
-                                        confirmButton = {
-                                            TextButton(
-                                                onClick = {
-                                                    showReportDialog = false
-                                                    coroutineScope.launch {
-                                                        currentBitmap?.let { bitmap ->
-                                                            reportImage(
-                                                                context = context,
-                                                                bitmap = bitmap,
-                                                                modelName = model.name,
-                                                                params = generationParams!!,
-                                                                onSuccess = {
-                                                                    Toast.makeText(
-                                                                        context,
-                                                                        "Thanks for your report.",
-                                                                        Toast.LENGTH_SHORT
-                                                                    ).show()
-                                                                },
-                                                                onError = { error ->
-                                                                    Toast.makeText(
-                                                                        context,
-                                                                        "Error: $error",
-                                                                        Toast.LENGTH_SHORT
-                                                                    ).show()
-                                                                }
-                                                            )
-                                                        }
-                                                    }
-                                                },
-                                                colors = ButtonDefaults.textButtonColors(
-                                                    contentColor = MaterialTheme.colorScheme.error
-                                                )
-                                            ) {
-                                                Text("Report")
-                                            }
-                                        },
-                                        dismissButton = {
-                                            TextButton(onClick = { showReportDialog = false }) {
-                                                Text("Cancel")
-                                            }
-                                        }
-                                    )
-                                }
-                                if (showParametersDialog && generationParams != null) {
-                                    AlertDialog(
-                                        onDismissRequest = { showParametersDialog = false },
-                                        title = { Text(stringResource(R.string.params_detail)) },
-                                        text = {
-                                            Column(
-                                                modifier = Modifier
-                                                    .verticalScroll(rememberScrollState())
-                                                    .padding(vertical = 8.dp),
-                                                verticalArrangement = Arrangement.spacedBy(16.dp)
-                                            ) {
-                                                Column {
-                                                    Text(
-                                                        stringResource(R.string.basic_params),
-                                                        style = MaterialTheme.typography.titleSmall,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                    Spacer(modifier = Modifier.height(4.dp))
-                                                    Text(
-                                                        stringResource(
-                                                            R.string.basic_step,
-                                                            generationParams?.steps ?: 0
-                                                        ),
-                                                        style = MaterialTheme.typography.bodyMedium
-                                                    )
-                                                    Text(
-                                                        "CFG: %.1f".format(generationParams?.cfg),
-                                                        style = MaterialTheme.typography.bodyMedium
-                                                    )
-                                                    Text(
-                                                        stringResource(
-                                                            R.string.basic_size,
-                                                            generationParams?.size ?: 0,
-                                                            generationParams?.size ?: 0
-                                                        ),
-                                                        style = MaterialTheme.typography.bodyMedium
-                                                    )
-                                                    generationParams?.seed?.let {
-                                                        Text(
-                                                            stringResource(R.string.basic_seed, it),
-                                                            style = MaterialTheme.typography.bodyMedium
-                                                        )
-                                                    }
-                                                    Text(
-                                                        stringResource(
-                                                            R.string.basic_runtime,
-                                                            if (generationParams?.runOnCpu == true) {
-                                                                if (generationParams?.useOpenCL == true) "GPU" else "CPU"
-                                                            } else "NPU"
-                                                        ),
-                                                        style = MaterialTheme.typography.bodyMedium
-                                                    )
-                                                    Text(
-                                                        stringResource(
-                                                            R.string.basic_time,
-                                                            generationParams?.generationTime
-                                                                ?: "unknown"
-                                                        ),
-                                                        style = MaterialTheme.typography.bodyMedium
-                                                    )
-                                                }
-
-                                                Column {
-                                                    Text(
-                                                        stringResource(R.string.image_prompt),
-                                                        style = MaterialTheme.typography.titleSmall,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                    Spacer(modifier = Modifier.height(4.dp))
-                                                    Text(
-                                                        generationParams?.prompt ?: "",
-                                                        style = MaterialTheme.typography.bodyMedium
-                                                    )
-                                                }
-
-                                                Column {
-                                                    Text(
-                                                        stringResource(R.string.negative_prompt),
-                                                        style = MaterialTheme.typography.titleSmall,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                    Spacer(modifier = Modifier.height(4.dp))
-                                                    Text(
-                                                        generationParams?.negativePrompt ?: "",
-                                                        style = MaterialTheme.typography.bodyMedium
-                                                    )
-                                                }
-                                            }
-                                        },
-                                        confirmButton = {
-                                            TextButton(onClick = { showParametersDialog = false }) {
-                                                Text(stringResource(R.string.close))
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        2 -> {
-                            // History page
-                            // Load history only on first visit
-                            LaunchedEffect(Unit) {
-                                if (historyItems.isEmpty()) {
-                                    isLoadingHistory = true
-                                    try {
-                                        val items = historyManager.loadHistoryForModel(modelId)
-                                        historyItems.clear()
-                                        historyItems.addAll(items)
-                                    } catch (e: Exception) {
-                                        android.util.Log.e(
-                                            "ModelRunScreen",
-                                            "Failed to load history",
-                                            e
-                                        )
-                                    } finally {
-                                        isLoadingHistory = false
-                                    }
-                                }
-                            }
-
-                            // Handle back button in selection mode
-                            BackHandler(enabled = isSelectionMode) {
-                                isSelectionMode = false
-                                selectedItems.clear()
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                            ) {
-                                if (isLoadingHistory) {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CircularProgressIndicator()
-                                    }
-                                } else if (historyItems.isEmpty()) {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                                            modifier = Modifier.offset(y = (-60).dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Image,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(64.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Text(
-                                                stringResource(R.string.no_history),
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Text(
-                                                stringResource(R.string.no_history_hint),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                                        columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(
-                                            2
-                                        ),
-                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                                            16.dp
-                                        ),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                                        modifier = Modifier.fillMaxSize()
-                                    ) {
-                                        items(minOf(historyItems.size, 100)) { index ->
-                                            val item = historyItems[index]
-                                            val isSelected = selectedItems.contains(item)
-                                            Card(
-                                                modifier = Modifier
-                                                    .aspectRatio(1f)
-                                                    .combinedClickable(
-                                                        onClick = {
-                                                            if (isSelectionMode) {
-                                                                // Toggle selection
-                                                                if (isSelected) {
-                                                                    selectedItems.remove(item)
-                                                                    if (selectedItems.isEmpty()) {
-                                                                        isSelectionMode = false
-                                                                    }
-                                                                } else {
-                                                                    selectedItems.add(item)
-                                                                }
-                                                            } else {
-                                                                // Normal preview
-                                                                selectedHistoryItem = item
-                                                                showHistoryDetailDialog = true
-                                                            }
-                                                        },
-                                                        onLongClick = {
-                                                            if (!isSelectionMode) {
-                                                                isSelectionMode = true
-                                                                selectedItems.clear()
-                                                                selectedItems.add(item)
-                                                            }
-                                                        }
-                                                    ),
-                                                shape = RoundedCornerShape(12.dp),
-                                                elevation = CardDefaults.cardElevation(
-                                                    defaultElevation = 2.dp
-                                                ),
-                                                border = if (isSelected) BorderStroke(
-                                                    3.dp,
-                                                    MaterialTheme.colorScheme.primary
-                                                ) else null
-                                            ) {
-                                                Box {
-                                                    AsyncImage(
-                                                        model = ImageRequest.Builder(LocalContext.current)
-                                                            .data(item.imageFile)
-                                                            .crossfade(true)
-                                                            .build(),
-                                                        contentDescription = "Generated image",
-                                                        modifier = Modifier.fillMaxSize()
-                                                    )
-
-                                                    // Timestamp overlay
-                                                    Surface(
-                                                        modifier = Modifier.align(Alignment.BottomStart),
-                                                        shape = RoundedCornerShape(
-                                                            topStart = 0.dp,
-                                                            topEnd = 4.dp,
-                                                            bottomStart = 12.dp,
-                                                            bottomEnd = 0.dp
-                                                        ),
-                                                        color = MaterialTheme.colorScheme.surface.copy(
-                                                            alpha = 0.8f
-                                                        )
-                                                    ) {
-                                                        Text(
-                                                            text = java.text.SimpleDateFormat(
-                                                                "MM/dd HH:mm",
-                                                                java.util.Locale.getDefault()
-                                                            )
-                                                                .format(java.util.Date(item.timestamp)),
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            modifier = Modifier.padding(
-                                                                horizontal = 6.dp,
-                                                                vertical = 3.dp
-                                                            )
-                                                        )
-                                                    }
-
-                                                    // Selection indicator
-                                                    if (isSelectionMode) {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .align(Alignment.TopEnd)
-                                                                .padding(8.dp)
-                                                                .size(28.dp)
-                                                                .background(
-                                                                    color = if (isSelected)
-                                                                        MaterialTheme.colorScheme.primary
-                                                                    else
-                                                                        Color.White.copy(alpha = 0.7f),
-                                                                    shape = CircleShape
-                                                                )
-                                                                .border(
-                                                                    width = 2.dp,
-                                                                    color = if (isSelected)
-                                                                        MaterialTheme.colorScheme.primary
-                                                                    else
-                                                                        Color.Gray,
-                                                                    shape = CircleShape
-                                                                ),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            if (isSelected) {
-                                                                Icon(
-                                                                    imageVector = Icons.Default.Check,
-                                                                    contentDescription = "Selected",
-                                                                    tint = Color.White,
-                                                                    modifier = Modifier.size(20.dp)
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Bottom hint if there are more than 100 items
-                                        if (historyItems.size > 100) {
-                                            item(span = {
-                                                androidx.compose.foundation.lazy.grid.GridItemSpan(
-                                                    2
-                                                )
-                                            }) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .padding(vertical = 16.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = stringResource(R.string.recent_100_items),
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Floating selection mode bottom bar
-                                if (isSelectionMode) {
-                                    Surface(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .align(Alignment.BottomCenter)
-                                            .padding(16.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant,
-                                        shape = RoundedCornerShape(16.dp),
-                                        tonalElevation = 8.dp,
-                                        shadowElevation = 8.dp
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            IconButton(
-                                                onClick = {
-                                                    isSelectionMode = false
-                                                    selectedItems.clear()
-                                                }
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Close,
-                                                    contentDescription = "Exit selection mode"
-                                                )
-                                            }
-
-                                            Text(
-                                                text = stringResource(
-                                                    R.string.selected_items_count,
-                                                    selectedItems.size
-                                                ),
-                                                style = MaterialTheme.typography.titleMedium,
-                                                fontWeight = FontWeight.Bold
-                                            )
-
-                                            Row(
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                // Select all / Deselect all button (only visible items, max 100)
-                                                val visibleCount = minOf(historyItems.size, 100)
-                                                val visibleItems = historyItems.take(visibleCount)
-                                                val isAllSelected =
-                                                    selectedItems.size == visibleCount && visibleItems.all { it in selectedItems }
-                                                IconButton(
-                                                    onClick = {
-                                                        if (isAllSelected) {
-                                                            selectedItems.clear()
-                                                            isSelectionMode = false
-                                                        } else {
-                                                            selectedItems.clear()
-                                                            selectedItems.addAll(visibleItems)
-                                                        }
-                                                    }
-                                                ) {
-                                                    Icon(
-                                                        imageVector = if (isAllSelected)
-                                                            Icons.Default.CheckCircle
-                                                        else
-                                                            Icons.Default.CheckCircleOutline,
-                                                        contentDescription = if (isAllSelected) "Deselect all" else "Select all",
-                                                        tint = MaterialTheme.colorScheme.primary
-                                                    )
-                                                }
-
-                                                // Delete button
-                                                IconButton(
-                                                    onClick = { showBatchDeleteDialog = true },
-                                                    enabled = selectedItems.isNotEmpty()
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Delete,
-                                                        contentDescription = "Delete selected",
-                                                        tint = if (selectedItems.isNotEmpty())
-                                                            MaterialTheme.colorScheme.error
-                                                        else
-                                                            MaterialTheme.colorScheme.onSurface.copy(
-                                                                alpha = 0.38f
-                                                            )
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        2 -> HistoryPage()
                     }
                 }
             }
@@ -2516,6 +2675,8 @@ fun ModelRunScreen(
         if (showCropScreen && imageUriForCrop != null) {
             CropImageScreen(
                 imageUri = imageUriForCrop!!,
+                width = currentWidth,
+                height = currentHeight,
                 onCropComplete = { base64String, bitmap, rect ->
                     handleCropComplete(base64String, bitmap, rect)
                 },
@@ -2532,7 +2693,7 @@ fun ModelRunScreen(
                 existingMaskBitmap = if (isInpaintMode) maskBitmap else null,
                 existingPathHistory = savedPathHistory,
                 onInpaintComplete = { maskBase64, originalBitmap, maskBitmap, pathHistory ->
-                    handleInpaintComplete(maskBase64, originalBitmap, maskBitmap, pathHistory)
+                    handleInpaintComplete(maskBase64, maskBitmap, pathHistory)
                 },
                 onCancel = {
                     showInpaintScreen = false
@@ -2685,6 +2846,59 @@ fun ModelRunScreen(
         var downloadingUpscalerId by remember { mutableStateOf<String?>(null) }
         var downloadProgress by remember { mutableStateOf<DownloadProgress?>(null) }
 
+        val downloadState by ModelDownloadService.downloadState.collectAsState()
+
+        LaunchedEffect(downloadState) {
+            when (val state = downloadState) {
+                is ModelDownloadService.DownloadState.Downloading -> {
+                    val upscaler = upscalerRepository.upscalers.find { it.id == state.modelId }
+                    if (upscaler != null) {
+                        downloadingUpscalerId = upscaler.id
+                        downloadProgress = DownloadProgress(
+                            progress = state.progress,
+                            downloadedBytes = state.downloadedBytes,
+                            totalBytes = state.totalBytes
+                        )
+                    }
+                }
+
+                is ModelDownloadService.DownloadState.Success -> {
+                    upscalerRepository.refreshUpscalerState(state.modelId)
+                    downloadingUpscalerId = null
+                    downloadProgress = null
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.download_done),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                is ModelDownloadService.DownloadState.Error -> {
+                    downloadingUpscalerId = null
+                    downloadProgress = null
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.error_download_failed, state.message),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                is ModelDownloadService.DownloadState.Extracting -> {
+                    val upscaler = upscalerRepository.upscalers.find { it.id == state.modelId }
+                    if (upscaler != null) {
+                        downloadingUpscalerId = upscaler.id
+                        downloadProgress = null // Indeterminate progress during extraction
+                    }
+                }
+
+                is ModelDownloadService.DownloadState.Idle -> {
+                    if (downloadingUpscalerId != null && downloadProgress == null) {
+                        downloadingUpscalerId = null
+                    }
+                }
+            }
+        }
+
         UpscalerSelectDialog(
             upscalers = upscalerRepository.upscalers,
             selectedUpscalerId = tempSelectedUpscalerId,
@@ -2699,8 +2913,9 @@ fun ModelRunScreen(
                     upscalerRepository.upscalers.find { it.id == tempSelectedUpscalerId }
                 if (selectedUpscaler != null && selectedUpscaler.isDownloaded) {
                     // Save selection
-                    upscalerPreferences.edit()
-                        .putString("${modelId}_selected_upscaler", selectedUpscaler.id).apply()
+                    upscalerPreferences.edit {
+                        putString("${modelId}_selected_upscaler", selectedUpscaler.id)
+                    }
                     showUpscalerDialog = false
 
                     // Execute upscale
@@ -2721,15 +2936,15 @@ fun ModelRunScreen(
                                         try {
                                             val timestamp = System.currentTimeMillis()
                                             val historyDir =
-                                                java.io.File(context.filesDir, "history/$modelId")
+                                                File(context.filesDir, "history/$modelId")
                                             historyDir.mkdirs()
 
                                             // Save as JPG
                                             val imageFile =
-                                                java.io.File(historyDir, "$timestamp.jpg")
+                                                File(historyDir, "$timestamp.jpg")
                                             java.io.FileOutputStream(imageFile).use { out ->
                                                 upscaledBitmap.compress(
-                                                    android.graphics.Bitmap.CompressFormat.JPEG,
+                                                    Bitmap.CompressFormat.JPEG,
                                                     95,
                                                     out
                                                 )
@@ -2737,9 +2952,12 @@ fun ModelRunScreen(
 
                                             // Save parameters JSON
                                             val updatedParams =
-                                                params.copy(size = upscaledBitmap.width)
+                                                params.copy(
+                                                    width = upscaledBitmap.width,
+                                                    height = upscaledBitmap.height
+                                                )
                                             val jsonFile =
-                                                java.io.File(historyDir, "$timestamp.json")
+                                                File(historyDir, "$timestamp.json")
                                             val jsonObject = org.json.JSONObject().apply {
                                                 put("steps", updatedParams.steps)
                                                 put("cfg", updatedParams.cfg)
@@ -2747,7 +2965,8 @@ fun ModelRunScreen(
                                                 put("prompt", updatedParams.prompt)
                                                 put("negativePrompt", updatedParams.negativePrompt)
                                                 put("generationTime", updatedParams.generationTime)
-                                                put("size", updatedParams.size)
+                                                put("width", updatedParams.width)
+                                                put("height", updatedParams.height)
                                                 put("runOnCpu", updatedParams.runOnCpu)
                                                 put(
                                                     "denoiseStrength",
@@ -2771,7 +2990,7 @@ fun ModelRunScreen(
                                                 historyItems.add(0, newHistoryItem)
                                             }
                                         } catch (e: Exception) {
-                                            android.util.Log.e(
+                                            Log.e(
                                                 "ModelRunScreen",
                                                 "Failed to save upscaled image",
                                                 e
@@ -2793,7 +3012,7 @@ fun ModelRunScreen(
                             }
                         }
                     }
-                } else if (selectedUpscaler != null && !selectedUpscaler.isDownloaded) {
+                } else if (selectedUpscaler != null) {
                     Toast.makeText(
                         context,
                         context.getString(R.string.download_model_first),
@@ -2804,39 +3023,7 @@ fun ModelRunScreen(
             onDownload = { upscaler ->
                 downloadingUpscalerId = upscaler.id
                 downloadProgress = null
-                scope.launch {
-                    upscalerRepository.downloadUpscaler(upscaler).collect { result ->
-                        when (result) {
-                            is DownloadResult.Progress -> {
-                                downloadProgress = result.progress
-                            }
-
-                            is DownloadResult.Success -> {
-                                downloadingUpscalerId = null
-                                downloadProgress = null
-                                upscalerRepository.refreshUpscalerState(upscaler.id)
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.download_done),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-
-                            is DownloadResult.Error -> {
-                                downloadingUpscalerId = null
-                                downloadProgress = null
-                                Toast.makeText(
-                                    context,
-                                    context.getString(
-                                        R.string.error_download_failed,
-                                        result.message
-                                    ),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        }
-                    }
-                }
+                upscaler.startDownload(context)
             }
         )
     }
@@ -2903,8 +3090,8 @@ fun ModelRunScreen(
         var historyOffsetY by remember { mutableStateOf(0f) }
 
         // Load bitmap
-        val historyBitmap = remember(selectedHistoryItem) {
-            android.graphics.BitmapFactory.decodeFile(
+        val historyBitmap = remember(selectedHistoryItem?.imageFile?.absolutePath) {
+            BitmapFactory.decodeFile(
                 selectedHistoryItem!!.imageFile.absolutePath
             )
         }
@@ -3003,7 +3190,24 @@ fun ModelRunScreen(
                             shape = CircleShape
                         )
                         .clickable {
-                            showHistoryParametersDialog = true
+                            if (selectedHistoryItem != null) {
+                                scope.launch {
+                                    if (selectedHistoryItem!!.params == null) {
+                                        val params =
+                                            historyManager.loadHistoryItemParams(selectedHistoryItem!!)
+                                        if (params != null) {
+                                            val newItem =
+                                                selectedHistoryItem!!.copy(params = params)
+                                            val index = historyItems.indexOf(selectedHistoryItem!!)
+                                            if (index != -1) {
+                                                historyItems[index] = newItem
+                                            }
+                                            selectedHistoryItem = newItem
+                                        }
+                                    }
+                                    showHistoryParametersDialog = true
+                                }
+                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -3029,17 +3233,17 @@ fun ModelRunScreen(
                                         context = context,
                                         bitmap = historyBitmap,
                                         onSuccess = {
-                                            android.widget.Toast.makeText(
+                                            Toast.makeText(
                                                 context,
                                                 context.getString(R.string.image_saved),
-                                                android.widget.Toast.LENGTH_SHORT
+                                                Toast.LENGTH_SHORT
                                             ).show()
                                         },
                                         onError = { errorMsg ->
-                                            android.widget.Toast.makeText(
+                                            Toast.makeText(
                                                 context,
                                                 errorMsg,
-                                                android.widget.Toast.LENGTH_SHORT
+                                                Toast.LENGTH_SHORT
                                             ).show()
                                         }
                                     )
@@ -3085,97 +3289,102 @@ fun ModelRunScreen(
     // History parameters dialog
     if (showHistoryParametersDialog && selectedHistoryItem != null) {
         val params = selectedHistoryItem!!.params
-        AlertDialog(
-            onDismissRequest = { showHistoryParametersDialog = false },
-            title = { Text(stringResource(R.string.generation_params_title)) },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.verticalScroll(rememberScrollState())
-                ) {
-                    Column {
-                        Text(
-                            "Steps: ${params.steps}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            "CFG: %.1f".format(params.cfg),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            stringResource(R.string.basic_size, params.size, params.size),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        params.seed?.let {
+        if (params != null) {
+            AlertDialog(
+                onDismissRequest = { showHistoryParametersDialog = false },
+                title = { Text(stringResource(R.string.generation_params_title)) },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.verticalScroll(rememberScrollState())
+                    ) {
+                        Column {
                             Text(
-                                stringResource(R.string.basic_seed, it),
+                                "Steps: ${params.steps}",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                "CFG: %.1f".format(params.cfg),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                stringResource(R.string.basic_size, params.width, params.height),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            params.seed?.let {
+                                Text(
+                                    stringResource(R.string.basic_seed, it),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                            Text(
+                                stringResource(
+                                    R.string.basic_runtime,
+                                    if (params.runOnCpu) {
+                                        if (params.useOpenCL) "GPU" else "CPU"
+                                    } else "NPU"
+                                ),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                stringResource(
+                                    R.string.basic_time,
+                                    params.generationTime ?: "unknown"
+                                ),
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         }
-                        Text(
-                            stringResource(
-                                R.string.basic_runtime,
-                                if (params.runOnCpu) {
-                                    if (params.useOpenCL) "GPU" else "CPU"
-                                } else "NPU"
-                            ),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            stringResource(R.string.basic_time, params.generationTime ?: "unknown"),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
 
-                    Column {
-                        Text(
-                            stringResource(R.string.image_prompt),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            params.prompt,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
+                        Column {
+                            Text(
+                                stringResource(R.string.image_prompt),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                params.prompt,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
 
-                    Column {
-                        Text(
-                            stringResource(R.string.negative_prompt),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            params.negativePrompt,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                        Column {
+                            Text(
+                                stringResource(R.string.negative_prompt),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                params.negativePrompt,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            // Show seed confirmation dialog
+                            showHistoryParametersDialog = false
+                            showSeedConfirmDialog = true
+                        }
+                    ) {
+                        Text(stringResource(R.string.reproduce))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showHistoryParametersDialog = false }) {
+                        Text(stringResource(R.string.close))
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        // Show seed confirmation dialog
-                        showHistoryParametersDialog = false
-                        showSeedConfirmDialog = true
-                    }
-                ) {
-                    Text(stringResource(R.string.reproduce))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showHistoryParametersDialog = false }) {
-                    Text(stringResource(R.string.close))
-                }
-            }
-        )
+            )
+        }
     }
 
     // Seed confirmation dialog for reproduce
-    if (showSeedConfirmDialog && selectedHistoryItem != null) {
-        val params = selectedHistoryItem!!.params
+    if (showSeedConfirmDialog && selectedHistoryItem != null && selectedHistoryItem!!.params != null) {
+        val params = selectedHistoryItem!!.params!!
         AlertDialog(
             onDismissRequest = {
                 showSeedConfirmDialog = false
@@ -3252,16 +3461,16 @@ fun ModelRunScreen(
                                 showDeleteHistoryDialog = false
                                 showHistoryDetailDialog = false
                                 selectedHistoryItem = null
-                                android.widget.Toast.makeText(
+                                Toast.makeText(
                                     context,
                                     context.getString(R.string.deleted),
-                                    android.widget.Toast.LENGTH_SHORT
+                                    Toast.LENGTH_SHORT
                                 ).show()
                             } else {
-                                android.widget.Toast.makeText(
+                                Toast.makeText(
                                     context,
                                     context.getString(R.string.delete_failed_message),
-                                    android.widget.Toast.LENGTH_SHORT
+                                    Toast.LENGTH_SHORT
                                 ).show()
                             }
                         }
@@ -3318,10 +3527,10 @@ fun ModelRunScreen(
                                     failCount
                                 )
                             }
-                            android.widget.Toast.makeText(
+                            Toast.makeText(
                                 context,
                                 message,
-                                android.widget.Toast.LENGTH_SHORT
+                                Toast.LENGTH_SHORT
                             ).show()
                         }
                     }

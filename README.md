@@ -16,9 +16,9 @@ This project is **now open sourced and completely free**. Hope you enjoy it!
 If you like it, please consider [sponsor](https://github.com/xororz/local-dream?tab=readme-ov-file#-support-this-project) this project.
 
 > [!NOTE]
-> Most users don't get how to properly use highres mode. Please check [here](#npu-high-resolution-support).
+> Currently focus on SD1.5 models. SD2.1 models are no longer maintained due to poor quality and not popular. SDXL/Flux models are too large for most devices. So will not support them for now.
 >
-> Non-flagship chips are now experimentally supported. It should work on NPUs that are Hexagon V68 or above.
+> Most users don't get how to properly use highres mode. Please check [here](#npu-high-resolution-support).
 >
 > Try our [NPU Model Conversion Guide](https://github.com/xororz/local-dream/tree/master/convert) if you want to run your own models on npu.
 >
@@ -139,10 +139,8 @@ Open this project in Android Studio and navigate to:
 
 ## NPU High Resolution Support
 
-After downloading a 512 resolution model, you can download patches to enable 768×768 and 1024×1024 image generation.
-
 > [!IMPORTANT]
-> Please note that quantized high-resolution models may produce images with poor layout. We recommend first generating at 512 resolution (optionally you can upscale it to 2048), then using the high-resolution model for img2img (which is essentially Highres.fix). The suggested img2img denoise_strength is around 0.8. After that, you can get images with better layout and details.
+> Please note that quantized high-resolution(>768x768) models may produce images with poor layout. We recommend first generating at 512 resolution (optionally you can upscale it), then using the high-resolution model for img2img (which is essentially Highres.fix). The suggested img2img denoise_strength is around 0.8. After that, you can get images with better layout and details.
 
 ## Device Compatibility
 
@@ -171,16 +169,17 @@ Now supports importing from local SD1.5 based safetensor for CPU/GPU.
 
 Now you can import your own NPU models converted using our easy-to-follow [NPU Model Conversion Guide](https://github.com/xororz/local-dream/tree/master/convert). And you can also download some pre-converted models from [xororz/sd-qnn](https://huggingface.co/xororz/sd-qnn/tree/main) or [Mr-J-369](https://huggingface.co/Mr-J-369). Download `_min` if you are using non-flagship chips. Download `_8gen1` if you are using 8gen1. Download `_8gen2` if you are using 8gen2/3/4/5. We recommend checking the instructions on the original model page to set up prompts and parameters.
 
+The following models are built-in and can be downloaded directly in the app:
+
 <div align="center">
 
-| Model                    | Type  | CPU/GPU | NPU | Clip Skip | Source                                                                           |
-| ------------------------ | ----- | :-----: | :-: | :-------: | -------------------------------------------------------------------------------- |
-| **Anything V5.0**        | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/9409?modelVersionId=30163)                  |
-| **ChilloutMix**          | SD1.5 |   ✅    | ✅  |     1     | [CivitAI](https://civitai.com/models/6424/chilloutmix?modelVersionId=11732)      |
-| **Absolute Reality**     | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/81458?modelVersionId=132760)                |
-| **QteaMix**              | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/50696/qteamix-q?modelVersionId=94654)       |
-| **CuteYukiMix**          | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/28169?modelVersionId=265102)                |
-| **Stable Diffusion 2.1** | SD2.1 |   ❌    | ✅  |     1     | [HuggingFace](https://huggingface.co/stabilityai/stable-diffusion-2-1/tree/main) |
+| Model                | Type  | CPU/GPU | NPU | Clip Skip | Source                                                                      |
+| -------------------- | ----- | :-----: | :-: | :-------: | --------------------------------------------------------------------------- |
+| **AnythingV5**       | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/9409?modelVersionId=30163)             |
+| **ChilloutMix**      | SD1.5 |   ✅    | ✅  |     1     | [CivitAI](https://civitai.com/models/6424/chilloutmix?modelVersionId=11732) |
+| **Absolute Reality** | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/81458?modelVersionId=132760)           |
+| **QteaMix**          | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/50696/qteamix-q?modelVersionId=94654)  |
+| **CuteYukiMix**      | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/28169?modelVersionId=265102)           |
 
 </div>
 
