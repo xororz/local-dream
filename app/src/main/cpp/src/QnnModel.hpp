@@ -238,7 +238,7 @@ class QnnModel : public QnnSampleApp {
     {
       uint16_t *latents_uint16 =
           static_cast<uint16_t *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[0]).data);
-      int elementCount = 1 * 4 * sample_size * sample_size;
+      int elementCount = 1 * 4 * sample_width * sample_height;
       qnn::tools::datautil::floatToTfN(
           latents_uint16, latents,
           inputs[0].v1.quantizeParams.scaleOffsetEncoding.offset,
@@ -291,7 +291,7 @@ class QnnModel : public QnnSampleApp {
         return returnStatus;
       }
 
-      int elementCount = 1 * 4 * sample_size * sample_size;
+      int elementCount = 1 * 4 * sample_width * sample_height;
       memcpy(latents_pred, tmp, elementCount * sizeof(float));
       free(tmp);
     }
@@ -330,7 +330,7 @@ class QnnModel : public QnnSampleApp {
     {
       uint16_t *pixel_values_uint16 =
           static_cast<uint16_t *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[0]).data);
-      int elementCount = 1 * 3 * output_size * output_size;
+      int elementCount = 1 * 3 * output_width * output_height;
       qnn::tools::datautil::floatToTfN(
           pixel_values_uint16, pixel_values,
           inputs[0].v1.quantizeParams.scaleOffsetEncoding.offset,
@@ -360,7 +360,7 @@ class QnnModel : public QnnSampleApp {
     if (StatusCode::SUCCESS == returnStatus) {
       {
         float *tmp = nullptr;
-        int elementCount = 1 * 4 * sample_size * sample_size;
+        int elementCount = 1 * 4 * sample_width * sample_height;
         if (qnn::tools::iotensor::StatusCode::SUCCESS !=
             m_ioTensor.convertToFloat(&tmp, &outputs[0])) {
           returnStatus = StatusCode::FAILURE;
@@ -371,7 +371,7 @@ class QnnModel : public QnnSampleApp {
       }
       {
         float *tmp = nullptr;
-        int elementCount = 1 * 4 * sample_size * sample_size;
+        int elementCount = 1 * 4 * sample_width * sample_height;
         if (qnn::tools::iotensor::StatusCode::SUCCESS !=
             m_ioTensor.convertToFloat(&tmp, &outputs[1])) {
           returnStatus = StatusCode::FAILURE;
@@ -414,7 +414,7 @@ class QnnModel : public QnnSampleApp {
     {
       uint16_t *latents_uint16 =
           static_cast<uint16_t *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[0]).data);
-      int elementCount = 1 * 4 * sample_size * sample_size;
+      int elementCount = 1 * 4 * sample_width * sample_height;
       qnn::tools::datautil::floatToTfN(
           latents_uint16, latents,
           inputs[0].v1.quantizeParams.scaleOffsetEncoding.offset,
@@ -443,7 +443,7 @@ class QnnModel : public QnnSampleApp {
     // get output
     if (StatusCode::SUCCESS == returnStatus) {
       float *tmp = nullptr;
-      int elementCount = 1 * 3 * output_size * output_size;
+      int elementCount = 1 * 3 * output_width * output_height;
       if (qnn::tools::iotensor::StatusCode::SUCCESS !=
           m_ioTensor.convertToFloat(&tmp, &outputs[0])) {
         returnStatus = StatusCode::FAILURE;
@@ -529,6 +529,101 @@ class QnnModel : public QnnSampleApp {
     memcpy(output_image,
            static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(outputs[0]).data),
            1 * 3 * 768 * 768 * sizeof(float));
+    return returnStatus;
+  }
+
+  StatusCode createFromBuffer(const uint8_t *buffer, uint64_t bufferSize) {
+    if (nullptr == buffer || 0 == bufferSize) {
+      QNN_ERROR("Invalid buffer provided. Buffer is null or size is 0.");
+      return StatusCode::FAILURE;
+    }
+
+    if (nullptr ==
+            m_qnnFunctionPointers.qnnSystemInterface.systemContextCreate ||
+        nullptr == m_qnnFunctionPointers.qnnSystemInterface
+                       .systemContextGetBinaryInfo ||
+        nullptr == m_qnnFunctionPointers.qnnSystemInterface.systemContextFree) {
+      QNN_ERROR("QNN System function pointers are not populated.");
+      return StatusCode::FAILURE;
+    }
+
+    auto returnStatus = StatusCode::SUCCESS;
+    QnnSystemContext_Handle_t sysCtxHandle{nullptr};
+
+    if (QNN_SUCCESS !=
+        m_qnnFunctionPointers.qnnSystemInterface.systemContextCreate(
+            &sysCtxHandle)) {
+      QNN_ERROR("Could not create system handle.");
+      returnStatus = StatusCode::FAILURE;
+    }
+
+    const QnnSystemContext_BinaryInfo_t *binaryInfo{nullptr};
+    Qnn_ContextBinarySize_t binaryInfoSize{0};
+
+    void *nonConstBuffer =
+        const_cast<void *>(static_cast<const void *>(buffer));
+
+    if (StatusCode::SUCCESS == returnStatus &&
+        QNN_SUCCESS !=
+            m_qnnFunctionPointers.qnnSystemInterface.systemContextGetBinaryInfo(
+                sysCtxHandle, nonConstBuffer, bufferSize, &binaryInfo,
+                &binaryInfoSize)) {
+      QNN_ERROR("Failed to get context binary info");
+      returnStatus = StatusCode::FAILURE;
+    }
+
+    if (StatusCode::SUCCESS == returnStatus &&
+        !copyMetadataToGraphsInfo(binaryInfo, m_graphsInfo, m_graphsCount)) {
+      QNN_ERROR("Failed to copy metadata.");
+      returnStatus = StatusCode::FAILURE;
+    }
+
+    m_qnnFunctionPointers.qnnSystemInterface.systemContextFree(sysCtxHandle);
+    sysCtxHandle = nullptr;
+
+    if (StatusCode::SUCCESS == returnStatus &&
+        nullptr == m_qnnFunctionPointers.qnnInterface.contextCreateFromBinary) {
+      QNN_ERROR("contextCreateFromBinaryFnHandle is nullptr.");
+      returnStatus = StatusCode::FAILURE;
+    }
+
+    if (StatusCode::SUCCESS == returnStatus &&
+        m_qnnFunctionPointers.qnnInterface.contextCreateFromBinary(
+            m_backendHandle, m_deviceHandle,
+            (const QnnContext_Config_t **)m_contextConfig, nonConstBuffer,
+            bufferSize, &m_context, m_profileBackendHandle)) {
+      QNN_ERROR("Could not create context from binary.");
+      returnStatus = StatusCode::FAILURE;
+    }
+
+    if (ProfilingLevel::OFF != m_profilingLevel) {
+      extractBackendProfilingInfo(m_profileBackendHandle);
+    }
+
+    m_isContextCreated = true;
+
+    if (StatusCode::SUCCESS == returnStatus) {
+      for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
+        if (nullptr == m_qnnFunctionPointers.qnnInterface.graphRetrieve) {
+          QNN_ERROR("graphRetrieveFnHandle is nullptr.");
+          returnStatus = StatusCode::FAILURE;
+          break;
+        }
+        if (QNN_SUCCESS != m_qnnFunctionPointers.qnnInterface.graphRetrieve(
+                               m_context, (*m_graphsInfo)[graphIdx].graphName,
+                               &((*m_graphsInfo)[graphIdx].graph))) {
+          QNN_ERROR("Unable to retrieve graph handle for graph Idx: %d",
+                    graphIdx);
+          returnStatus = StatusCode::FAILURE;
+        }
+      }
+    }
+
+    if (StatusCode::SUCCESS != returnStatus) {
+      QNN_DEBUG("Cleaning up graph Info structures.");
+      qnn_wrapper_api::freeGraphsInfo(&m_graphsInfo, m_graphsCount);
+    }
+
     return returnStatus;
   }
 };

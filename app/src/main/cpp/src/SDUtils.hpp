@@ -231,7 +231,7 @@ bool safety_check(const std::vector<uint8_t> &image_data, int width, int height,
 }
 
 void decode_image(const std::vector<uint8_t> &image_binary,
-                  std::vector<uint8_t> &output_pixels, int output_size) {
+                  std::vector<uint8_t> &output_pixels, int output_width, int output_height) {
   int width, height, channels;
   uint8_t *decoded_data =
       stbi_load_from_memory(image_binary.data(), image_binary.size(), &width,
@@ -246,15 +246,15 @@ void decode_image(const std::vector<uint8_t> &image_binary,
   }
 
   // Determine the scale and crop dimensions to maintain aspect ratio
-  float scale = std::max(static_cast<float>(output_size) / width,
-                         static_cast<float>(output_size) / height);
+  float scale = std::max(static_cast<float>(output_width) / width,
+                         static_cast<float>(output_height) / height);
 
   int scaled_width = static_cast<int>(width * scale);
   int scaled_height = static_cast<int>(height * scale);
 
   // Calculate crop positions (center crop)
-  int crop_x = (scaled_width - output_size) / 2;
-  int crop_y = (scaled_height - output_size) / 2;
+  int crop_x = (scaled_width - output_width) / 2;
+  int crop_y = (scaled_height - output_height) / 2;
 
   // Resize the image with stb_image_resize
   std::vector<uint8_t> resized_image(scaled_width * scaled_height * 3);
@@ -269,12 +269,12 @@ void decode_image(const std::vector<uint8_t> &image_binary,
   stbi_image_free(decoded_data);
 
   // Perform center crop
-  output_pixels.resize(output_size * output_size * 3);
-  for (int y = 0; y < output_size; y++) {
-    for (int x = 0; x < output_size; x++) {
+  output_pixels.resize(output_width * output_height * 3);
+  for (int y = 0; y < output_height; y++) {
+    for (int x = 0; x < output_width; x++) {
       for (int c = 0; c < 3; c++) {
         int src_idx = ((y + crop_y) * scaled_width + (x + crop_x)) * 3 + c;
-        int dst_idx = (y * output_size + x) * 3 + c;
+        int dst_idx = (y * output_width + x) * 3 + c;
 
         // Ensure we're not accessing out of bounds
         if (src_idx >= 0 && src_idx < scaled_width * scaled_height * 3) {

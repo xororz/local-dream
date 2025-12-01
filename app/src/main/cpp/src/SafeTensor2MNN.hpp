@@ -371,8 +371,8 @@ void generateClipModel(const std::string& dir,
       "weight",
       true);
   std::ofstream token_emb_file(dir + "/token_emb.bin", std::ios::binary);
-  token_emb_file.write(reinterpret_cast<const char*>(reader.data.data()),
-                       reader.data.size() * sizeof(float));
+  token_emb_file.write(reinterpret_cast<const char*>(reader.fp16_data.data()),
+                       reader.fp16_data.size() * sizeof(uint16_t));
   token_emb_file.close();
 }
 
