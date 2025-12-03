@@ -2017,7 +2017,7 @@ fun CustomModelDialog(
 
                 OutlinedButton(
                     onClick = {
-                        filePickerLauncher.launch("*/*")
+                        filePickerLauncher.launch("application/octet-stream")
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -2053,7 +2053,7 @@ fun CustomModelDialog(
 
                     OutlinedButton(
                         onClick = {
-                            loraPickerLauncher.launch("*/*")
+                            loraPickerLauncher.launch("application/octet-stream")
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
