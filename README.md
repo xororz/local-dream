@@ -5,7 +5,7 @@
 **Android Stable Diffusion with Snapdragon NPU acceleration**  
 _Also supports CPU/GPU inference_
 
-<img src="./assets/demo1.jpg" alt="App Demo" width="600">
+<img src="./assets/demo1.jpg" alt="App Demo" width="800">
 
 </div>
 
@@ -20,7 +20,7 @@ If you like it, please consider [sponsor](https://github.com/xororz/local-dream?
 >
 > Most users don't get how to properly use highres mode. Please check [here](#npu-high-resolution-support).
 >
-> Try our [NPU Model Conversion Guide](https://github.com/xororz/local-dream/tree/master/convert) if you want to run your own models on npu.
+> Now you can import your own NPU models converted using our easy-to-follow [NPU Model Conversion Guide](https://github.com/xororz/local-dream/tree/master/convert). And you can also download some pre-converted models from [xororz/sd-qnn](https://huggingface.co/xororz/sd-qnn/tree/main) or [Mr-J-369](https://huggingface.co/Mr-J-369). Download `_min` if you are using non-flagship chips. Download `_8gen1` if you are using 8gen1. Download `_8gen2` if you are using 8gen2/3/4/5. We recommend checking the instructions on the original model page to set up prompts and parameters.
 >
 > You can join our [telegram group](https://t.me/local_dream) for discussion or help with testing.
 
@@ -35,11 +35,8 @@ If you like it, please consider [sponsor](https://github.com/xororz/local-dream?
 - 🎨 **txt2img** - Generate images from text descriptions
 - 🖼️ **img2img** - Transform existing images
 - 🎭 **inpaint** - Redraw selected areas of images
-
-<div align="center">
-<img src="./assets/demo2.jpg" alt="Feature Demo" width="600">
-</div>
-
+- **custom models** - Import your own SD1.5 models for CPU (in app) or NPU (follow [conversion guide](https://github.com/xororz/local-dream/tree/master/convert)). You can get some pre-converted models from [xororz/sd-qnn](https://huggingface.co/xororz/sd-qnn) or [Mr-J-369](https://huggingface.co/Mr-J-369)
+- **lora support** - Support adding LoRA weights to custom CPU models when importing.
 - **prompt weights** - Emphasize certain words in prompts. E.g., `(masterpiece:1.5)`. Same format as [Automatic1111](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
 - **embeddings** - Support for custom embeddings like [EasyNegative](https://civitai.com/models/7808/easynegative). SafeTensor format is required. Convert `pt` to `safetensors` using [this](https://chino.icu/local-dream/pt2sf.py)
 - **upscalers** - 4x upscaling with [realesrgan_x4plus_anime_6b](https://github.com/xinntao/Real-ESRGAN/) and [4x-UltraSharpV2_Lite](https://huggingface.co/Kim2091/UltraSharpV2)
@@ -148,12 +145,11 @@ Open this project in Android Studio and navigate to:
 
 Compatible with devices featuring:
 
-- **Snapdragon 8 Gen 1**
-- **Snapdragon 8+ Gen 1**
+- **Snapdragon 8 Gen 1/8+ Gen 1**
 - **Snapdragon 8 Gen 2**
 - **Snapdragon 8 Gen 3**
 - **Snapdragon 8 Elite**
-- **Snapdragon 8 Elite Gen 5**
+- **Snapdragon 8 Elite Gen 5/8 Gen 5**
 - Non-flagship chips with Hexagon V68 or above (e.g., Snapdragon 7 Gen 1, 8s Gen 3)
 
 > **Note**: Other devices cannot download NPU models
@@ -164,10 +160,6 @@ Compatible with devices featuring:
 - **Compatibility**: Most Android devices from recent years
 
 ## Available Models
-
-Now supports importing from local SD1.5 based safetensor for CPU/GPU.
-
-Now you can import your own NPU models converted using our easy-to-follow [NPU Model Conversion Guide](https://github.com/xororz/local-dream/tree/master/convert). And you can also download some pre-converted models from [xororz/sd-qnn](https://huggingface.co/xororz/sd-qnn/tree/main) or [Mr-J-369](https://huggingface.co/Mr-J-369). Download `_min` if you are using non-flagship chips. Download `_8gen1` if you are using 8gen1. Download `_8gen2` if you are using 8gen2/3/4/5. We recommend checking the instructions on the original model page to set up prompts and parameters.
 
 The following models are built-in and can be downloaded directly in the app:
 
