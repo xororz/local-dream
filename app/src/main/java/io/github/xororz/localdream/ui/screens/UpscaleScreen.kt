@@ -249,6 +249,19 @@ fun UpscaleScreen(
     }
 
     LaunchedEffect(Unit) {
+        launch(Dispatchers.IO) {
+            try {
+                context.cacheDir.listFiles { file ->
+                    file.name.startsWith("upscaled_temp_") && file.name.endsWith(".jpg")
+                }?.forEach { file ->
+                    if (file.delete()) {
+                        Log.d("UpscaleScreen", "Deleted temp file: ${file.name}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("UpscaleScreen", "Failed to clean temp files", e)
+            }
+        }
         startUpscalerBackend()
     }
 
