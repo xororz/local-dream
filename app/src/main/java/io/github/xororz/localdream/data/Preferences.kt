@@ -28,6 +28,7 @@ class GenerationPreferences(private val context: Context) {
     private fun getUseOpenCLKey(modelId: String) = booleanPreferencesKey("${modelId}_use_opencl")
 
     private fun getBatchCountsKey(modelId: String) = intPreferencesKey("${modelId}_batch_counts")
+    private fun getSchedulerKey(modelId: String) = stringPreferencesKey("${modelId}_scheduler")
 
     private val BASE_URL_KEY = stringPreferencesKey("base_url")
     private val SELECTED_SOURCE_KEY = stringPreferencesKey("selected_source")
@@ -69,7 +70,8 @@ class GenerationPreferences(private val context: Context) {
         height: Int,
         denoiseStrength: Float,
         useOpenCL: Boolean,
-        batchCounts: Int
+        batchCounts: Int,
+        scheduler: String
     ) {
         context.dataStore.edit { preferences ->
             preferences[getPromptKey(modelId)] = prompt
@@ -82,6 +84,7 @@ class GenerationPreferences(private val context: Context) {
             preferences[getDenoiseStrengthKey(modelId)] = denoiseStrength
             preferences[getUseOpenCLKey(modelId)] = useOpenCL
             preferences[getBatchCountsKey(modelId)] = batchCounts
+            preferences[getSchedulerKey(modelId)] = scheduler
         }
     }
 
@@ -112,7 +115,8 @@ class GenerationPreferences(private val context: Context) {
                     height = preferences[getHeightKey(modelId)] ?: -1,
                     denoiseStrength = preferences[getDenoiseStrengthKey(modelId)] ?: 0.6f,
                     useOpenCL = preferences[getUseOpenCLKey(modelId)] ?: false,
-                    batchCounts = preferences[getBatchCountsKey(modelId)] ?: 1
+                    batchCounts = preferences[getBatchCountsKey(modelId)] ?: 1,
+                    scheduler = preferences[getSchedulerKey(modelId)] ?: "dpm"
                 )
             }
     }
@@ -129,6 +133,7 @@ class GenerationPreferences(private val context: Context) {
             preferences.remove(getDenoiseStrengthKey(modelId))
             preferences.remove(getUseOpenCLKey(modelId))
             preferences.remove(getBatchCountsKey(modelId))
+            preferences.remove(getSchedulerKey(modelId))
         }
     }
 }
@@ -143,5 +148,6 @@ data class GenerationPrefs(
     val height: Int = -1,
     val denoiseStrength: Float = 0.6f,
     val useOpenCL: Boolean = false,
-    val batchCounts: Int = 1
+    val batchCounts: Int = 1,
+    val scheduler: String = "dpm"
 )

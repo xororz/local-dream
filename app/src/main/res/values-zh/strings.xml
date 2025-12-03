@@ -146,7 +146,7 @@
     <!-- Info Messages -->
     <string name="image_saved">图片已保存到相册</string>
     <string name="loading_model">模型加载中…</string>
-    
+
     <!-- File Manager -->
     <string name="file_manager">文件管理器</string>
     <string name="file_manager_desc">管理模型文件</string>
@@ -158,13 +158,13 @@
     <string name="back_to_folders">返回文件夹</string>
     <string name="model_folder">模型：%s</string>
     <string name="file_count">%d 个文件</string>
-    
+
     <!-- Settings -->
     <string name="general_settings">常规设置</string>
     <string name="download_source">下载源</string>
     <string name="feature_settings">功能设置</string>
     <string name="file_management">文件管理</string>
-    
+
     <!-- Custom Model -->
     <string name="add_custom_model">添加自定义模型</string>
     <string name="add_custom_npu_model">添加自定义NPU模型</string>
@@ -243,5 +243,6 @@
     <string name="switch_resolution">切换分辨率</string>
     <string name="switch_resolution_hint">切换分辨率将重启后端服务，当前生成会被中断。是否继续？</string>
     <string name="resolution">分辨率</string>
+    <string name="scheduler">调度器</string>
     <string name="extracting">解压中…</string>
 </resources>

@@ -105,6 +105,7 @@ class BackgroundGenerationService : Service() {
         val height = intent.getIntExtra("height", 512)
         val denoiseStrength = intent.getFloatExtra("denoise_strength", 0.6f)
         val useOpenCL = intent.getBooleanExtra("use_opencl", false)
+        val scheduler = intent.getStringExtra("scheduler") ?: "dpm"
 
         val image = if (intent.getBooleanExtra("has_image", false)) {
             try {
@@ -161,7 +162,8 @@ class BackgroundGenerationService : Service() {
                 image,
                 mask,
                 denoiseStrength,
-                useOpenCL
+                useOpenCL,
+                scheduler
             )
         }
 
@@ -179,7 +181,8 @@ class BackgroundGenerationService : Service() {
         image: String?,
         mask: String?,
         denoiseStrength: Float,
-        useOpenCL: Boolean
+        useOpenCL: Boolean,
+        scheduler: String
     ) = withContext(Dispatchers.IO) {
         try {
             updateState(GenerationState.Progress(0f))
@@ -194,6 +197,7 @@ class BackgroundGenerationService : Service() {
                 put("height", height)
                 put("denoise_strength", denoiseStrength)
                 put("use_opencl", useOpenCL)
+                put("scheduler", scheduler)
                 seed?.let { put("seed", it) }
                 image?.let { put("image", it) }
                 mask?.let { put("mask", it) }

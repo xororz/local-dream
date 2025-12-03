@@ -146,7 +146,7 @@
     <!-- Info Messages -->
     <string name="image_saved">Image saved to gallery</string>
     <string name="loading_model">Loading model…</string>
-    
+
     <!-- File Manager -->
     <string name="file_manager">File Manager</string>
     <string name="file_manager_desc">Manage model files</string>
@@ -158,13 +158,13 @@
     <string name="back_to_folders">Back to Folders</string>
     <string name="model_folder">Model: %s</string>
     <string name="file_count">%d files</string>
-    
+
     <!-- Settings -->
     <string name="general_settings">General Settings</string>
     <string name="download_source">Download Source</string>
     <string name="feature_settings">Feature Settings</string>
     <string name="file_management">File Management</string>
-    
+
     <!-- Custom Model -->
     <string name="add_custom_model">Add Custom Model</string>
     <string name="add_custom_npu_model">Add Custom NPU Model</string>
@@ -243,5 +243,6 @@
     <string name="switch_resolution">Switch Resolution</string>
     <string name="switch_resolution_hint">Switching resolution will restart the backend service and interrupt current generation. Continue?</string>
     <string name="resolution">Resolution</string>
+    <string name="scheduler">Scheduler</string>
     <string name="extracting">Extracting…</string>
 </resources>

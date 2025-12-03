@@ -247,7 +247,8 @@ data class GenerationParameters(
     val height: Int,
     val runOnCpu: Boolean,
     val denoiseStrength: Float = 0.6f,
-    val useOpenCL: Boolean = false
+    val useOpenCL: Boolean = false,
+    val scheduler: String = "dpm"
 )
 
 @SuppressLint("DefaultLocale")
@@ -317,6 +318,7 @@ fun ModelRunScreen(
     var denoiseStrength by remember { mutableStateOf(0.6f) }
     var useOpenCL by remember { mutableStateOf(false) }
     var batchCounts by remember { mutableStateOf(1) }
+    var scheduler by remember { mutableStateOf("dpm") }
     var currentBatchIndex by remember { mutableStateOf(0) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var base64EncodeDone by remember { mutableStateOf(false) }
@@ -389,7 +391,8 @@ fun ModelRunScreen(
                 height = currentHeight,
                 denoiseStrength = denoiseStrength,
                 useOpenCL = useOpenCL,
-                batchCounts = batchCounts
+                batchCounts = batchCounts,
+                scheduler = scheduler
             )
         }
     }
@@ -667,6 +670,7 @@ fun ModelRunScreen(
             denoiseStrength = prefs.denoiseStrength
             useOpenCL = prefs.useOpenCL
             batchCounts = prefs.batchCounts
+            scheduler = prefs.scheduler
 
             currentWidth =
                 if (prefs.width == -1) (if (model?.runOnCpu == true) 256 else 512) else prefs.width
@@ -774,7 +778,8 @@ fun ModelRunScreen(
                         width = if (model?.runOnCpu == true) generationParamsTmp.width else currentWidth,
                         height = if (model?.runOnCpu == true) generationParamsTmp.height else currentHeight,
                         runOnCpu = model?.runOnCpu ?: false,
-                        useOpenCL = generationParamsTmp.useOpenCL
+                        useOpenCL = generationParamsTmp.useOpenCL,
+                        scheduler = generationParamsTmp.scheduler
                     )
 
                     // Save to disk and update history list
@@ -970,6 +975,7 @@ fun ModelRunScreen(
                         cfg = 7f
                         seed = ""
                         batchCounts = 1
+                        scheduler = "dpm"
                         prompt = model?.defaultPrompt ?: ""
                         negativePrompt = model?.defaultNegativePrompt ?: ""
                         denoiseStrength = 0.6f
@@ -985,7 +991,8 @@ fun ModelRunScreen(
                                 height = if (model?.runOnCpu == true) 256 else 512,
                                 denoiseStrength = 0.6f,
                                 useOpenCL = useOpenCL,
-                                batchCounts = 1
+                                batchCounts = 1,
+                                scheduler = "dpm"
                             )
                         }
                         showResetConfirmDialog = false
@@ -1109,19 +1116,19 @@ fun ModelRunScreen(
                                 text = {
                                     Column(
                                         verticalArrangement = Arrangement.spacedBy(
-                                            8.dp
+                                            2.dp
                                         ),
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .verticalScroll(rememberScrollState())
-                                            .padding(vertical = 8.dp)
+                                            .padding(vertical = 4.dp)
                                     ) {
                                         if (model?.runOnCpu == false && availableResolutions.isNotEmpty()) {
                                             Column(
                                                 modifier = Modifier.fillMaxWidth(),
-                                                verticalArrangement = Arrangement.spacedBy(
-                                                    8.dp
-                                                )
+                                                // verticalArrangement = Arrangement.spacedBy(
+                                                //     4.dp
+                                                // )
                                             ) {
                                                 Text(
                                                     stringResource(R.string.resolution),
@@ -1157,6 +1164,39 @@ fun ModelRunScreen(
                                                         )
                                                     }
                                                 }
+                                            }
+                                        }
+
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            // verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                stringResource(R.string.scheduler),
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .horizontalScroll(rememberScrollState()),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                FilterChip(
+                                                    selected = scheduler == "dpm",
+                                                    onClick = {
+                                                        scheduler = "dpm"
+                                                        saveAllFields()
+                                                    },
+                                                    label = { Text("DPM++ 2M") }
+                                                )
+                                                FilterChip(
+                                                    selected = scheduler == "euler_a",
+                                                    onClick = {
+                                                        scheduler = "euler_a"
+                                                        saveAllFields()
+                                                    },
+                                                    label = { Text("Euler A") }
+                                                )
                                             }
                                         }
 
@@ -1465,7 +1505,8 @@ fun ModelRunScreen(
                                 height = currentHeight,
                                 runOnCpu = model?.runOnCpu ?: false,
                                 denoiseStrength = denoiseStrength,
-                                useOpenCL = useOpenCL
+                                useOpenCL = useOpenCL,
+                                scheduler = scheduler
                             )
 
                             Log.d(
@@ -1505,6 +1546,7 @@ fun ModelRunScreen(
                                             denoiseStrength
                                         )
                                         putExtra("use_opencl", useOpenCL)
+                                        putExtra("scheduler", scheduler)
                                         putExtra("batch_index", i)
                                         if (selectedImageUri != null && base64EncodeDone) {
                                             putExtra("has_image", true)
@@ -2233,6 +2275,16 @@ fun ModelRunScreen(
                                             if (generationParams?.useOpenCL == true) "GPU" else "CPU"
                                         } else "NPU"
                                     ),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    "${stringResource(R.string.scheduler)}: ${
+                                        when (generationParams?.scheduler) {
+                                            "dpm" -> "DPM++ 2M"
+                                            "euler_a" -> "Euler A"
+                                            else -> generationParams?.scheduler ?: "DPM++ 2M"
+                                        }
+                                    }",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                                 Text(
@@ -3327,6 +3379,16 @@ fun ModelRunScreen(
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Text(
+                                "${stringResource(R.string.scheduler)}: ${
+                                    when (params.scheduler) {
+                                        "dpm" -> "DPM++ 2M"
+                                        "euler_a" -> "Euler A"
+                                        else -> params.scheduler
+                                    }
+                                }",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
                                 stringResource(
                                     R.string.basic_time,
                                     params.generationTime ?: "unknown"
@@ -3402,6 +3464,7 @@ fun ModelRunScreen(
                         cfg = params.cfg
                         steps = params.steps.toFloat()
                         seed = params.seed?.toString() ?: ""
+                        scheduler = params.scheduler
                         saveAllFields()
 
                         // Close dialogs and switch to prompt page
@@ -3425,6 +3488,7 @@ fun ModelRunScreen(
                         cfg = params.cfg
                         steps = params.steps.toFloat()
                         seed = ""  // Don't copy seed
+                        scheduler = params.scheduler
                         saveAllFields()
 
                         // Close dialogs and switch to prompt page
