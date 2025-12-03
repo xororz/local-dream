@@ -8,7 +8,7 @@
 #include <xtensor/xarray.hpp>
 #include <xtensor/xview.hpp>
 
-inline xt::xarray<float> pyrDown(const xt::xarray<float>& img) {
+inline xt::xarray<float> pyrDown(const xt::xarray<float> &img) {
   auto shape = img.shape();
   int h = shape[1];
   int w = shape[2];
@@ -40,7 +40,7 @@ inline xt::xarray<float> pyrDown(const xt::xarray<float>& img) {
   return result;
 }
 
-inline xt::xarray<float> pyrUp(const xt::xarray<float>& img, int target_h,
+inline xt::xarray<float> pyrUp(const xt::xarray<float> &img, int target_h,
                                int target_w) {
   auto shape = img.shape();
   int h = shape[1];
@@ -76,9 +76,9 @@ inline xt::xarray<float> pyrUp(const xt::xarray<float>& img, int target_h,
   return result;
 }
 
-inline xt::xarray<float> laplacianPyramidBlend(const xt::xarray<float>& img1,
-                                               const xt::xarray<float>& img2,
-                                               const xt::xarray<float>& mask) {
+inline xt::xarray<float> laplacianPyramidBlend(const xt::xarray<float> &img1,
+                                               const xt::xarray<float> &img2,
+                                               const xt::xarray<float> &mask) {
   auto shape = img1.shape();
   int height = shape[1];
   int width = shape[2];

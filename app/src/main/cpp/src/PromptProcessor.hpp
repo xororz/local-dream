@@ -24,14 +24,14 @@ class PromptProcessor {
   std::map<std::string, std::vector<float>> embeddings_;
   std::string embeddings_dir_;
 
-  static std::string toLowerCase(const std::string& str) {
+  static std::string toLowerCase(const std::string &str) {
     std::string result = str;
     std::transform(result.begin(), result.end(), result.begin(),
                    [](unsigned char c) { return std::tolower(c); });
     return result;
   }
 
-  static std::string trim(const std::string& str) {
+  static std::string trim(const std::string &str) {
     size_t start = str.find_first_not_of(" \t\r\n");
     if (start == std::string::npos) return "";
     size_t end = str.find_last_not_of(" \t\r\n");
@@ -47,11 +47,11 @@ class PromptProcessor {
     TokenNode() : weight(1.0f), is_group(false) {}
   };
 
-  TokenNode parsePromptTree(const std::string& prompt) {
+  TokenNode parsePromptTree(const std::string &prompt) {
     TokenNode root;
     root.is_group = true;
     root.weight = 1.0f;
-    std::stack<TokenNode*> node_stack;
+    std::stack<TokenNode *> node_stack;
     node_stack.push(&root);
 
     std::string current_text;
@@ -84,9 +84,9 @@ class PromptProcessor {
           current_text.clear();
         }
 
-        TokenNode* parent = node_stack.top();
+        TokenNode *parent = node_stack.top();
         parent->children.push_back(TokenNode());
-        TokenNode* new_node = &parent->children.back();
+        TokenNode *new_node = &parent->children.back();
         new_node->is_group = true;
         new_node->weight = 1.1f;
         node_stack.push(new_node);
@@ -146,9 +146,9 @@ class PromptProcessor {
           current_text.clear();
         }
 
-        TokenNode* parent = node_stack.top();
+        TokenNode *parent = node_stack.top();
         parent->children.push_back(TokenNode());
-        TokenNode* new_node = &parent->children.back();
+        TokenNode *new_node = &parent->children.back();
         new_node->is_group = true;
         new_node->weight = 0.9f;
         node_stack.push(new_node);
@@ -208,12 +208,12 @@ class PromptProcessor {
     return root;
   }
 
-  void flattenTree(const TokenNode& node, float parent_weight,
-                   std::vector<PromptToken>& tokens) {
+  void flattenTree(const TokenNode &node, float parent_weight,
+                   std::vector<PromptToken> &tokens) {
     float current_weight = parent_weight * node.weight;
 
     if (node.is_group) {
-      for (const auto& child : node.children) {
+      for (const auto &child : node.children) {
         flattenTree(child, current_weight, tokens);
       }
     } else {
@@ -233,7 +233,7 @@ class PromptProcessor {
  public:
   PromptProcessor() = default;
 
-  void loadEmbeddings(const std::string& embeddings_dir) {
+  void loadEmbeddings(const std::string &embeddings_dir) {
     embeddings_dir_ = embeddings_dir;
     embeddings_.clear();
 
@@ -241,7 +241,7 @@ class PromptProcessor {
       return;
     }
 
-    for (const auto& entry :
+    for (const auto &entry :
          std::filesystem::directory_iterator(embeddings_dir)) {
       if (entry.path().extension() == ".safetensors") {
         try {
@@ -254,14 +254,14 @@ class PromptProcessor {
             reader.read(tensor_names[0], true);
             embeddings_[name_lower] = reader.data;
           }
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
           // could not load this embedding
         }
       }
     }
   }
 
-  std::vector<PromptToken> process(const std::string& prompt) {
+  std::vector<PromptToken> process(const std::string &prompt) {
     std::vector<PromptToken> tokens;
 
     TokenNode tree = parsePromptTree(prompt);
@@ -273,7 +273,7 @@ class PromptProcessor {
 
   size_t getEmbeddingCount() const { return embeddings_.size(); }
 
-  bool hasEmbedding(const std::string& name) const {
+  bool hasEmbedding(const std::string &name) const {
     return embeddings_.find(toLowerCase(name)) != embeddings_.end();
   }
 };

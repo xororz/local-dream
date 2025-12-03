@@ -1,5 +1,5 @@
 set -e
-cmake --preset android-release
+cmake --preset android-release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build --preset android-release
 
 mkdir -p lib

@@ -11,12 +11,14 @@
 
 #include "Config.hpp"
 #include "DPMSolverMultistepScheduler.hpp"
+#include "EulerAncestralDiscreteScheduler.hpp"
 #include "FloatConversion.hpp"
 #include "LaplacianBlend.hpp"
 #include "PromptProcessor.hpp"
 #include "QnnModel.hpp"
 #include "SDUtils.hpp"
 #include "SafeTensor2MNN.hpp"
+#include "Scheduler.hpp"
 
 // QNN Headers
 #include "BuildId.hpp"
@@ -89,6 +91,7 @@ std::string negative_prompt;
 int steps;
 float cfg;
 unsigned seed;
+std::string scheduler_type;
 std::vector<float> img_data;
 std::vector<float> mask_data;
 std::vector<float> mask_data_full;
@@ -1487,17 +1490,29 @@ GenerationResult generateImage(
     progress_callback(current_step, total_run_steps);
 
     // --- Scheduler & Latents ---
-    DPMSolverMultistepScheduler scheduler(
-        1000, 0.00085f, 0.012f, "scaled_linear", 2, "epsilon", "leading");
-    if (ponyv55) scheduler.set_prediction_type("v_prediction");
-    scheduler.set_timesteps(steps);
-    xt::xarray<float> timesteps = scheduler.get_timesteps();
+    std::unique_ptr<Scheduler> scheduler;
+    if (scheduler_type == "euler_a" || scheduler_type == "eulera") {
+      scheduler = std::make_unique<EulerAncestralDiscreteScheduler>(
+          1000, 0.00085f, 0.012f, "scaled_linear", "epsilon", "leading");
+    } else {
+      // Default to DPM solver
+      scheduler = std::make_unique<DPMSolverMultistepScheduler>(
+          1000, 0.00085f, 0.012f, "scaled_linear", 2, "epsilon", "leading");
+    }
+    if (ponyv55) scheduler->set_prediction_type("v_prediction");
+    scheduler->set_timesteps(steps);
+    xt::xarray<float> timesteps = scheduler->get_timesteps();
     std::vector<int> shape = {1, 4, sample_height, sample_width};
     std::vector<int> shape_batch2 = {batch_size, 4, sample_height,
                                      sample_width};
     xt::random::seed(seed);
     xt::xarray<float> latents = xt::random::randn<float>(shape);
     xt::xarray<float> latents_noise = xt::random::randn<float>(shape);
+
+    // Scale initial latents by init_noise_sigma (required for Euler schedulers)
+    float init_noise_sigma = scheduler->get_init_noise_sigma();
+    latents = latents * init_noise_sigma;
+
     xt::xarray<float> original_latents, original_image, mask, mask_full;
     int start_step = 0;
 
@@ -1682,9 +1697,9 @@ GenerationResult generateImage(
       original_latents = img_lat_scaled;
       start_step = steps * (1.0f - denoise_strength);
       total_run_steps -= start_step;
-      scheduler.set_begin_index(start_step);
+      scheduler->set_begin_index(start_step);
       xt::xarray<int> t = {(int)(timesteps(start_step))};
-      latents = scheduler.add_noise(original_latents, latents_noise, t);
+      latents = scheduler->add_noise(original_latents, latents_noise, t);
 
       if (request_has_mask) {
         mask = xt::adapt(mask_data, {1, 4, sample_height, sample_width});
@@ -1751,13 +1766,18 @@ GenerationResult generateImage(
 
     for (int i = start_step; i < timesteps.size(); ++i) {
       auto step_start_time = std::chrono::high_resolution_clock::now();
+
+      // Scale model input (required for Euler schedulers)
+      float current_ts = timesteps(i);
+      xt::xarray<float> latents_scaled =
+          scheduler->scale_model_input(latents, current_ts);
+
       std::vector<float> latents_in_vec;
       latents_in_vec.reserve(batch_size * single_latent_size);
-      latents_in_vec.insert(latents_in_vec.end(), latents.begin(),
-                            latents.end());
-      latents_in_vec.insert(latents_in_vec.end(), latents.begin(),
-                            latents.end());
-      float current_ts = timesteps(i);
+      latents_in_vec.insert(latents_in_vec.end(), latents_scaled.begin(),
+                            latents_scaled.end());
+      latents_in_vec.insert(latents_in_vec.end(), latents_scaled.begin(),
+                            latents_scaled.end());
       std::vector<float> unet_out_latents(batch_size * single_latent_size);
 
       if (use_mnn) {
@@ -1832,12 +1852,12 @@ GenerationResult generateImage(
       xt::xarray<float> txt = xt::view(noise_pred_batch, 1);
       xt::xarray<float> noise_pred = uncond + cfg * (txt - uncond);
       noise_pred = xt::eval(noise_pred);
-      latents = scheduler.step(noise_pred, timesteps(i), latents).prev_sample;
+      latents = scheduler->step(noise_pred, timesteps(i), latents).prev_sample;
 
       if (request_has_mask) {
         xt::xarray<int> t_xt = {(int)(timesteps(i))};
         xt::xarray<float> orig_noised =
-            scheduler.add_noise(original_latents, latents_noise, t_xt);
+            scheduler->add_noise(original_latents, latents_noise, t_xt);
         latents = xt::eval(orig_noised * (1.0f - mask) + latents * mask);
       }
 
@@ -2216,6 +2236,7 @@ int main(int argc, char **argv) {
       negative_prompt = json.value("negative_prompt", "");
       steps = json.value("steps", 20);
       cfg = json.value("cfg", 7.5f);
+      scheduler_type = json.value("scheduler", "dpm");
       use_opencl = json.value("use_opencl", false);
       seed = json.value(
           "seed",

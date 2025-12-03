@@ -231,7 +231,8 @@ bool safety_check(const std::vector<uint8_t> &image_data, int width, int height,
 }
 
 void decode_image(const std::vector<uint8_t> &image_binary,
-                  std::vector<uint8_t> &output_pixels, int output_width, int output_height) {
+                  std::vector<uint8_t> &output_pixels, int output_width,
+                  int output_height) {
   int width, height, channels;
   uint8_t *decoded_data =
       stbi_load_from_memory(image_binary.data(), image_binary.size(), &width,

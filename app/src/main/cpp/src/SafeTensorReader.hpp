@@ -30,7 +30,7 @@ class SafeTensorReader {
     }
 
     uint64_t header_size_raw;
-    file.read(reinterpret_cast<char*>(&header_size_raw), 8);
+    file.read(reinterpret_cast<char *>(&header_size_raw), 8);
     if (file.gcount() != 8) {
       throw std::runtime_error("Cannot read header size");
     }
@@ -46,11 +46,11 @@ class SafeTensorReader {
     nlohmann::json header_json;
     try {
       header_json = nlohmann::json::parse(header_str);
-    } catch (const nlohmann::json::exception& e) {
+    } catch (const nlohmann::json::exception &e) {
       throw std::runtime_error("JSON parse error: " + std::string(e.what()));
     }
 
-    for (auto& [tensor_name, tensor_info] : header_json.items()) {
+    for (auto &[tensor_name, tensor_info] : header_json.items()) {
       if (tensor_name == "__metadata__") {
         continue;
       }
@@ -66,7 +66,7 @@ class SafeTensorReader {
     file.close();
   }
 
-  int calculate_tensor_size(const std::vector<int>& shape) {
+  int calculate_tensor_size(const std::vector<int> &shape) {
     int size = 1;
     for (int dim : shape) {
       size *= dim;
@@ -78,18 +78,18 @@ class SafeTensorReader {
   std::vector<float> data;
   std::vector<uint16_t> fp16_data;
 
-  explicit SafeTensorReader(const std::string& filename)
+  explicit SafeTensorReader(const std::string &filename)
       : filename_(filename), header_size_(0) {
     parse_header();
   }
 
-  bool read(const std::string& tensor_name, bool convert = true) {
+  bool read(const std::string &tensor_name, bool convert = true) {
     auto it = tensor_map_.find(tensor_name);
     if (it == tensor_map_.end()) {
       throw std::runtime_error("Tensor not found: " + tensor_name);
     }
 
-    const TensorInfo& info = it->second;
+    const TensorInfo &info = it->second;
 
     if (info.dtype != "F16" && info.dtype != "F32" && info.dtype != "F64" &&
         info.dtype != "BF16") {
@@ -115,7 +115,7 @@ class SafeTensorReader {
       }
 
       fp16_data.resize(tensor_size);
-      file.read(reinterpret_cast<char*>(fp16_data.data()), expected_bytes);
+      file.read(reinterpret_cast<char *>(fp16_data.data()), expected_bytes);
       if (file.gcount() != static_cast<std::streamsize>(expected_bytes)) {
         throw std::runtime_error("Cannot read tensor data: " + tensor_name);
       }
@@ -134,7 +134,7 @@ class SafeTensorReader {
       }
 
       data.resize(tensor_size);
-      file.read(reinterpret_cast<char*>(data.data()), expected_bytes);
+      file.read(reinterpret_cast<char *>(data.data()), expected_bytes);
       if (file.gcount() != static_cast<std::streamsize>(expected_bytes)) {
         throw std::runtime_error("Cannot read tensor data: " + tensor_name);
       }
@@ -151,7 +151,7 @@ class SafeTensorReader {
       }
 
       std::vector<double> fp64_data(tensor_size);
-      file.read(reinterpret_cast<char*>(fp64_data.data()), expected_bytes);
+      file.read(reinterpret_cast<char *>(fp64_data.data()), expected_bytes);
       if (file.gcount() != static_cast<std::streamsize>(expected_bytes)) {
         throw std::runtime_error("Cannot read tensor data: " + tensor_name);
       }
@@ -170,7 +170,7 @@ class SafeTensorReader {
       }
 
       std::vector<uint16_t> bf16_temp(tensor_size);
-      file.read(reinterpret_cast<char*>(bf16_temp.data()), expected_bytes);
+      file.read(reinterpret_cast<char *>(bf16_temp.data()), expected_bytes);
       if (file.gcount() != static_cast<std::streamsize>(expected_bytes)) {
         throw std::runtime_error("Cannot read tensor data: " + tensor_name);
       }
@@ -187,11 +187,11 @@ class SafeTensorReader {
     return true;
   }
 
-  bool has_tensor(const std::string& tensor_name) const {
+  bool has_tensor(const std::string &tensor_name) const {
     return tensor_map_.find(tensor_name) != tensor_map_.end();
   }
 
-  std::vector<int> get_tensor_shape(const std::string& tensor_name) const {
+  std::vector<int> get_tensor_shape(const std::string &tensor_name) const {
     auto it = tensor_map_.find(tensor_name);
     if (it != tensor_map_.end()) {
       return it->second.shape;
@@ -201,7 +201,7 @@ class SafeTensorReader {
 
   std::vector<std::string> get_tensor_names() const {
     std::vector<std::string> names;
-    for (const auto& pair : tensor_map_) {
+    for (const auto &pair : tensor_map_) {
       names.push_back(pair.first);
     }
     return names;

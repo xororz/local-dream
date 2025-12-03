@@ -11,12 +11,10 @@
 #include <xtensor/xrandom.hpp>
 #include <xtensor/xview.hpp>
 
-class DPMSolverMultistepScheduler {
- public:
-  struct SchedulerOutput {
-    xt::xarray<float> prev_sample;
-  };
+#include "Scheduler.hpp"
 
+class DPMSolverMultistepScheduler : public Scheduler {
+ public:
   DPMSolverMultistepScheduler(int num_train_timesteps, float beta_start,
                               float beta_end, const std::string &beta_schedule,
                               int solver_order,
@@ -57,7 +55,7 @@ class DPMSolverMultistepScheduler {
     begin_index_ = std::nullopt;
   }
 
-  void set_timesteps(int num_inference_steps) {
+  void set_timesteps(int num_inference_steps) override {
     num_inference_steps_ = num_inference_steps;
 
     if (timestep_spacing_ == "leading") {
@@ -93,8 +91,14 @@ class DPMSolverMultistepScheduler {
     return {alpha_t, sigma_t};
   }
 
-  void set_prediction_type(const std::string &prediction_type) {
+  void set_prediction_type(const std::string &prediction_type) override {
     prediction_type_ = prediction_type;
+  }
+
+  xt::xarray<float> scale_model_input(const xt::xarray<float> &sample,
+                                      int timestep) override {
+    // DPM solver does not require input scaling
+    return sample;
   }
 
   xt::xarray<float> convert_model_output(const xt::xarray<float> &model_output,
@@ -216,7 +220,7 @@ class DPMSolverMultistepScheduler {
   }
 
   SchedulerOutput step(const xt::xarray<float> &model_output, int timestep,
-                       const xt::xarray<float> &sample) {
+                       const xt::xarray<float> &sample) override {
     if (!num_inference_steps_) {
       throw std::runtime_error("set_timesteps must be called before stepping");
     }
@@ -257,14 +261,14 @@ class DPMSolverMultistepScheduler {
     }
 
     step_index_ = step_index_.value() + 1;
-    return {prev_sample};
+    return {prev_sample, xt::xarray<float>()};
   }
 
-  void set_begin_index(int begin_index) { begin_index_ = begin_index; }
+  void set_begin_index(int begin_index) override { begin_index_ = begin_index; }
 
   xt::xarray<float> add_noise(const xt::xarray<float> &original_samples,
                               const xt::xarray<float> &noise,
-                              const xt::xarray<int> &timesteps) const {
+                              const xt::xarray<int> &timesteps) const override {
     std::vector<int> step_indices;
 
     if (!begin_index_) {
@@ -293,8 +297,8 @@ class DPMSolverMultistepScheduler {
     return alpha_t * original_samples + sigma_t * noise;
   }
 
-  const xt::xarray<float> &get_timesteps() const { return timesteps_; }
-  size_t get_step_index() const { return step_index_.value_or(0); }
+  const xt::xarray<float> &get_timesteps() const override { return timesteps_; }
+  size_t get_step_index() const override { return step_index_.value_or(0); }
 
   const xt::xarray<float> &get_betas() const { return betas_; }
   const xt::xarray<float> &get_alphas() const { return alphas_; }
@@ -306,11 +310,16 @@ class DPMSolverMultistepScheduler {
   const xt::xarray<float> &get_lambda_t() const { return lambda_t_; }
   const xt::xarray<float> &get_sigmas() const { return sigmas_; }
 
-  float get_current_sigma() const {
+  float get_current_sigma() const override {
     if (!step_index_) {
       return sigmas_(0);
     }
     return sigmas_(std::min<int>(step_index_.value(), int(sigmas_.size()) - 1));
+  }
+
+  float get_init_noise_sigma() const override {
+    // DPM solver does not require special initial noise scaling
+    return 1.0f;
   }
 
  private:
