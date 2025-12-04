@@ -1526,6 +1526,23 @@ fun ModelRunScreen(
                                         "preparing batch $i"
                                     )
 
+                                    // Update generationParamsTmp to reflect current parameters
+                                    // This allows parameters to be changed during batch execution
+                                    generationParamsTmp = GenerationParameters(
+                                        steps = steps.roundToInt(),
+                                        cfg = cfg,
+                                        seed = 0,
+                                        prompt = prompt,
+                                        negativePrompt = negativePrompt,
+                                        generationTime = "",
+                                        width = currentWidth,
+                                        height = currentHeight,
+                                        runOnCpu = model?.runOnCpu ?: false,
+                                        denoiseStrength = denoiseStrength,
+                                        useOpenCL = useOpenCL,
+                                        scheduler = scheduler
+                                    )
+
                                     val batchIntent = Intent(
                                         context,
                                         BackgroundGenerationService::class.java
