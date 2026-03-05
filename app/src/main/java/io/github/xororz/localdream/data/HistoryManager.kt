@@ -107,21 +107,27 @@ class HistoryManager(private val context: Context) {
                 val json = JSONObject(jsonString)
 
                 val (width, height) = try {
-                    when (val sizeValue = json.get("size")) {
-                        is String -> {
-                            val parts = sizeValue.split("x")
-                            if (parts.size == 2) {
-                                Pair(parts[0].toInt(), parts[1].toInt())
-                            } else {
-                                Pair(512, 512)
+                    if (json.has("size")) {
+                        when (val sizeValue = json.get("size")) {
+                            is String -> {
+                                val parts = sizeValue.split("x")
+                                if (parts.size == 2) {
+                                    Pair(parts[0].toInt(), parts[1].toInt())
+                                } else {
+                                    Pair(512, 512)
+                                }
                             }
-                        }
 
-                        is Int -> {
-                            Pair(sizeValue, sizeValue)
-                        }
+                            is Int -> {
+                                Pair(sizeValue, sizeValue)
+                            }
 
-                        else -> Pair(512, 512)
+                            else -> Pair(512, 512)
+                        }
+                    } else if (json.has("width") && json.has("height")) {
+                        Pair(json.getInt("width"), json.getInt("height"))
+                    } else {
+                        Pair(512, 512)
                     }
                 } catch (_: Exception) {
                     Pair(512, 512)
