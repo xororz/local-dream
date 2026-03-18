@@ -10,7 +10,7 @@
     <string name="ponyv55_description">Pony Diffusionシリーズ</string>
     <string name="backend_notify">バックエンドサービス実行中</string>
     <string name="backend_notify_title">SD モデルのバックエンド</string>
-    <string name="generating_notify">画像の生成中...</string>
+    <string name="generating_notify">画像の生成中…</string>
     <string name="settings">設定</string>
     <string name="confirm">決定</string>
     <string name="cancel">取り消す</string>
@@ -56,6 +56,7 @@
     <string name="img2img_hint">img2img機能を使用します。必要がない場合や問題が発生しない場合はオフにしてください。</string>
     <string name="show_process">生成プロセスを表示</string>
     <string name="show_process_hint">NPU モデル専用機能です。</string>
+    <string name="disable_upscale_resolution_check_hint">有効にすると、超解像の解像度チェックをスキップします。画像の生成が遅くなったり、エラーが発生したりするおそれがあります。</string>
     <string name="preview_stride">プレビューストライド</string>
     <string name="preview_stride_hint">%d ステップごとにプレビューを更新します (1 ～ 10)。</string>
     <string name="download_patch">高解像度パッチをダウンロード</string>
@@ -129,14 +130,14 @@
     <string name="error_generation_failed">生成失敗: %s</string>
     <string name="unknown_error">不明なエラー</string>
     <string name="image_saved">画像をギャラリーに保存しました</string>
-    <string name="loading_model">モデルの読み込み中...</string>
+    <string name="loading_model">モデルの読み込み中…</string>
     <string name="file_manager">ファイル管理</string>
     <string name="file_manager_desc">モデルファイルの管理</string>
     <string name="delete_file">ファイルを削除</string>
     <string name="delete_file_confirm">ファイル「%s」を削除してもよろしいですか?</string>
     <string name="file_deleted">ファイルが正常に削除されました</string>
     <string name="no_model_files">モデルが見当たりません</string>
-    <string name="loading_files">ファイルを読み込み中...</string>
+    <string name="loading_files">ファイルを読み込み中…</string>
     <string name="back_to_folders">フォルダに戻る</string>
     <string name="model_folder">モデル: %s</string>
     <string name="file_count">%dのファイル</string>
@@ -157,7 +158,7 @@
     <string name="add_model">モデルを追加</string>
     <string name="custom_model_hint">SD1.5アーキテクチャセーフテンソルモデルファイルのみをサポートします</string>
     <string name="custom_npu_model_hint">NPUモデルファイルを含むZIPファイルを選択してください。Qualcommデバイスでのみ利用可能です。</string>
-    <string name="converting">変換中...</string>
+    <string name="converting">変換中…</string>
     <string name="model_conversion_success">モデル変換完了!</string>
     <string name="model_conversion_failed">変換に失敗しました: %s</string>
     <string name="npu_model_added_success">NPUモデルの追加に成功しました！</string>
@@ -219,4 +220,5 @@
     <string name="resolution">解像度</string>
     <string name="scheduler">スケジューラー</string>
     <string name="extracting">抽出中…</string>
+    <string name="disable_upscale_resolution_check">解像度チェックをスキップ</string>
 </resources>

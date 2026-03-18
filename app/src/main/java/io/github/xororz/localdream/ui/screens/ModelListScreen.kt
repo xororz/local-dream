@@ -972,6 +972,12 @@ fun ModelListScreen(
                                     )
                                 }
 
+                                var disableUpscaleResolutionCheck by remember {
+                                    mutableStateOf(
+                                        preferences.getBoolean("disable_upscale_resolution_check", false)
+                                    )
+                                }
+
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1018,6 +1024,41 @@ fun ModelListScreen(
                                         modifier = Modifier.weight(1f)
                                     ) {
                                         Text(
+                                            text = stringResource(R.string.disable_upscale_resolution_check),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            stringResource(R.string.disable_upscale_resolution_check_hint),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                    Switch(
+                                        checked = disableUpscaleResolutionCheck,
+                                        onCheckedChange = {
+                                            disableUpscaleResolutionCheck = it
+                                            preferences.edit {
+                                                putBoolean("disable_upscale_resolution_check", it)
+                                            }
+                                        }
+                                    )
+                                }
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
                                             text = stringResource(R.string.show_process),
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Medium
@@ -1038,6 +1079,7 @@ fun ModelListScreen(
                                         }
                                     )
                                 }
+
                                 AnimatedVisibility(visible = showProcess) {
                                     Column {
                                         HorizontalDivider(

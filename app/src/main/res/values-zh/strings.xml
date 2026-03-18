@@ -63,9 +63,11 @@
     <string name="no_npu_models">暂无模型</string>
     <string name="img2img_hint">开启img2img功能，如果你不需要或遇到问题请关闭</string>
     <string name="show_process">显示生成过程</string>
+    <string name="disable_upscale_resolution_check">禁用超分功能的分辨率检查</string>
+    <string name="disable_upscale_resolution_check_hint">启用时，禁用对超分辨率功能的分辨率检查。这可能导致图像生成缓慢或出现错误。</string>
     <string name="show_process_hint">仅对NPU模型生效。开启后将显示扩散模型的中间生成步骤。这会降低生成速度，仅在好奇图像生成过程时开启，正常情况下请关闭。</string>
     <string name="preview_stride">预览步长</string>
-    <string name="preview_stride_hint">每 %d 步更新一次预览（1-10）。</string>
+    <string name="preview_stride_hint">每 %d 步更新一次预览（1–10）。</string>
     <string name="download_patch">下载高分辨率补丁</string>
     <string name="download_patch_hint">要为模型%2$s下载%1$dx%1$d分辨率补丁吗? 使模型能够生成%1$d分辨率图像</string>
     <string name="highres_patch">HighRes Patch</string>
