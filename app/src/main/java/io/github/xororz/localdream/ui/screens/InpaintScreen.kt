@@ -12,7 +12,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -28,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -45,10 +47,12 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.util.Base64
 import kotlin.math.max
+import kotlin.math.sqrt
 import android.content.Context
 import androidx.compose.ui.graphics.Color as ComposeColor
 import io.github.xororz.localdream.R
 import androidx.core.content.edit
+import androidx.compose.ui.draw.clipToBounds
 import androidx.core.graphics.createBitmap
 
 enum class ToolMode {
@@ -127,6 +131,10 @@ fun InpaintScreen(
     var brushSizeDpValue by remember { mutableStateOf(30f) }
     var isDrawing by remember { mutableStateOf(false) }
     val currentPathPoints = remember { mutableStateListOf<Offset>() }
+
+    var scale by remember { mutableStateOf(1f) }
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
 
     val pathHistory = remember {
         mutableStateListOf<PathData>().apply {
@@ -224,7 +232,7 @@ fun InpaintScreen(
         return max(1f, brushSizeInScreenPx * scale)
     }
 
-    fun updateDisplayMask(currentDensity: Density, currentImageRect: Rect?) {
+    fun updateDisplayMask() {
         val canvas = Canvas(tempBitmap)
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
 
@@ -235,12 +243,7 @@ fun InpaintScreen(
                     ToolMode.ERASER -> eraserPaint
                 }
 
-                paint.strokeWidth = convertDpToImagePixels(
-                    pathData.size,
-                    currentDensity,
-                    currentImageRect,
-                    originalBitmap.width
-                )
+                paint.strokeWidth = pathData.size
 
                 androidPath.reset()
                 androidPath.moveTo(pathData.points[0].x, pathData.points[0].y)
@@ -259,10 +262,10 @@ fun InpaintScreen(
 
             paint.strokeWidth = convertDpToImagePixels(
                 brushSizeDpValue,
-                currentDensity,
-                currentImageRect,
+                density,
+                imageRect,
                 originalBitmap.width
-            )
+            ) / scale
             androidPath.reset()
             androidPath.moveTo(currentPathPoints[0].x, currentPathPoints[0].y)
             for (i in 1 until currentPathPoints.size) {
@@ -291,12 +294,7 @@ fun InpaintScreen(
                         ToolMode.ERASER -> eraserPaint
                     }
 
-                    paint.strokeWidth = convertDpToImagePixels(
-                        pathData.size,
-                        density,
-                        imageRect,
-                        originalBitmap.width
-                    )
+                    paint.strokeWidth = pathData.size
 
                     androidPath.reset()
                     androidPath.moveTo(pathData.points[0].x, pathData.points[0].y)
@@ -322,19 +320,19 @@ fun InpaintScreen(
         }
     }
 
-    fun undoLastPath(currentDensity: Density, currentImageRect: Rect?) {
+    fun undoLastPath() {
         if (pathHistory.isNotEmpty()) {
             val lastPath = pathHistory.removeAt(pathHistory.size - 1)
             redoStack.add(lastPath)
-            updateDisplayMask(currentDensity, currentImageRect)
+            updateDisplayMask()
         }
     }
 
-    fun redoLastPath(currentDensity: Density, currentImageRect: Rect?) {
+    fun redoLastPath() {
         if (redoStack.isNotEmpty()) {
             val pathToRedo = redoStack.removeAt(redoStack.size - 1)
             pathHistory.add(pathToRedo)
-            updateDisplayMask(currentDensity, currentImageRect)
+            updateDisplayMask()
         }
     }
 
@@ -347,9 +345,10 @@ fun InpaintScreen(
         imageRect,
         density,
         displayUpdateTrigger,
-        currentToolMode
+        currentToolMode,
+        scale
     ) {
-        updateDisplayMask(density, imageRect)
+        updateDisplayMask()
     }
 
     if (showColorPicker) {
@@ -438,6 +437,7 @@ fun InpaintScreen(
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(16.dp)
+                        .clipToBounds()
                         .onGloballyPositioned { coordinates ->
                             val size = coordinates.size
                             val imageWidth = size.width.toFloat()
@@ -462,83 +462,161 @@ fun InpaintScreen(
                                 imageRect = newRect
                             }
                         }
-                ) {
-                    Image(
-                        bitmap = originalBitmap.asImageBitmap(),
-                        contentDescription = "Original Image",
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                        .pointerInput(Unit) {
+                            val containerWidth = size.width.toFloat()
+                            val containerHeight = size.height.toFloat()
 
-                    Canvas(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .pointerInput(Unit) {
-                                detectDragGestures(
-                                    onDragStart = { offset ->
-                                        val imagePoint = mapToImageCoordinate(offset)
-                                        if (imagePoint != null) {
-                                            isDrawing = true
-                                            currentPathPoints.clear()
-                                            currentPathPoints.add(imagePoint)
-                                            redoStack.clear()
+                            awaitEachGesture {
+                                val firstDown = awaitFirstDown(requireUnconsumed = false)
+                                var isMultiTouch = false
+                                var drawStarted = false
+
+                                fun touchToContent(pos: Offset): Offset {
+                                    val pivotX = containerWidth / 2f
+                                    val pivotY = containerHeight / 2f
+                                    return Offset(
+                                        (pos.x - offsetX - pivotX) / scale + pivotX,
+                                        (pos.y - offsetY - pivotY) / scale + pivotY
+                                    )
+                                }
+
+                                val contentPos = touchToContent(firstDown.position)
+                                val firstImgPt = mapToImageCoordinate(contentPos)
+                                if (firstImgPt != null) {
+                                    drawStarted = true
+                                    isDrawing = true
+                                    currentPathPoints.clear()
+                                    currentPathPoints.add(firstImgPt)
+                                }
+
+                                var prevPointers: List<Offset> = listOf(firstDown.position)
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val activeChanges = event.changes.filter { it.pressed }
+
+                                    if (activeChanges.isEmpty()) {
+                                        if (drawStarted && !isMultiTouch) {
+                                            isDrawing = false
+                                            if (currentPathPoints.isNotEmpty()) {
+                                                val imgPxSize = convertDpToImagePixels(
+                                                    brushSizeDpValue,
+                                                    density,
+                                                    imageRect,
+                                                    originalBitmap.width
+                                                ) / scale
+                                                pathHistory.add(
+                                                    PathData(
+                                                        points = currentPathPoints.toList(),
+                                                        size = imgPxSize,
+                                                        mode = currentToolMode,
+                                                        color = brushColor
+                                                    )
+                                                )
+                                                currentPathPoints.clear()
+                                                redoStack.clear()
+                                            }
                                         } else {
                                             isDrawing = false
+                                            currentPathPoints.clear()
                                         }
-                                    },
-                                    onDrag = { change, _ ->
-                                        if (isDrawing) {
-                                            val imagePoint = mapToImageCoordinate(change.position)
-                                            if (imagePoint != null) {
-                                                currentPathPoints.add(imagePoint)
-                                                change.consume()
-                                            }
-                                        }
-                                    },
-                                    onDragEnd = {
-                                        if (isDrawing) {
-                                            isDrawing = false
-                                            if (currentPathPoints.isNotEmpty()) {
-                                                pathHistory.add(
-                                                    PathData(
-                                                        points = currentPathPoints.toList(),
-                                                        size = brushSizeDpValue,
-                                                        mode = currentToolMode,
-                                                        color = brushColor
-                                                    )
-                                                )
-                                                currentPathPoints.clear()
-                                            }
-                                        }
-                                    },
-                                    onDragCancel = {
-                                        if (isDrawing) {
-                                            isDrawing = false
-                                            if (currentPathPoints.isNotEmpty()) {
-                                                pathHistory.add(
-                                                    PathData(
-                                                        points = currentPathPoints.toList(),
-                                                        size = brushSizeDpValue,
-                                                        mode = currentToolMode,
-                                                        color = brushColor
-                                                    )
-                                                )
-                                                currentPathPoints.clear()
-                                            }
-                                        }
+                                        break
                                     }
-                                )
+
+                                    if (activeChanges.size >= 2) {
+                                        if (!isMultiTouch) {
+                                            isMultiTouch = true
+                                            isDrawing = false
+                                            currentPathPoints.clear()
+                                            drawStarted = false
+                                            prevPointers = activeChanges.map { it.position }
+                                        }
+
+                                        val positions = activeChanges.map { it.position }
+                                        val prevCentroid = Offset(
+                                            prevPointers.map { it.x }.average().toFloat(),
+                                            prevPointers.map { it.y }.average().toFloat()
+                                        )
+                                        val currCentroid = Offset(
+                                            positions.map { it.x }.average().toFloat(),
+                                            positions.map { it.y }.average().toFloat()
+                                        )
+
+                                        val prevSpread = if (prevPointers.size >= 2) {
+                                            val dx = prevPointers[0].x - prevPointers[1].x
+                                            val dy = prevPointers[0].y - prevPointers[1].y
+                                            sqrt(dx * dx + dy * dy)
+                                        } else 0f
+                                        val currSpread = if (positions.size >= 2) {
+                                            val dx = positions[0].x - positions[1].x
+                                            val dy = positions[0].y - positions[1].y
+                                            sqrt(dx * dx + dy * dy)
+                                        } else 0f
+
+                                        val zoomFactor =
+                                            if (prevSpread > 10f) currSpread / prevSpread else 1f
+                                        val panDelta = currCentroid - prevCentroid
+
+                                        val newScale = (scale * zoomFactor).coerceIn(1f, 5f)
+                                        val effectiveZoom = newScale / scale
+
+                                        val pivotX = containerWidth / 2f
+                                        val pivotY = containerHeight / 2f
+                                        val newOffsetX =
+                                            (currCentroid.x - pivotX) * (1f - effectiveZoom) + offsetX * effectiveZoom + panDelta.x
+                                        val newOffsetY =
+                                            (currCentroid.y - pivotY) * (1f - effectiveZoom) + offsetY * effectiveZoom + panDelta.y
+
+                                        scale = newScale
+                                        offsetX = newOffsetX
+                                        offsetY = newOffsetY
+
+                                        prevPointers = positions
+                                        activeChanges.forEach { it.consume() }
+                                    } else if (!isMultiTouch && drawStarted) {
+                                        val change = activeChanges.first()
+                                        val cPos = touchToContent(change.position)
+                                        val imgPt = mapToImageCoordinate(cPos)
+                                        if (imgPt != null) {
+                                            currentPathPoints.add(imgPt)
+                                        }
+                                        change.consume()
+                                        prevPointers = listOf(change.position)
+                                    }
+                                }
                             }
+                        }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(
+                                scaleX = scale,
+                                scaleY = scale,
+                                translationX = offsetX,
+                                translationY = offsetY
+                            )
                     ) {
-                        val rect = imageRect ?: return@Canvas
-                        drawImage(
-                            image = displayMaskBitmap,
-                            srcOffset = IntOffset.Zero,
-                            srcSize = IntSize(tempBitmap.width, tempBitmap.height),
-                            dstOffset = IntOffset(rect.left.toInt(), rect.top.toInt()),
-                            dstSize = IntSize(rect.width.toInt(), rect.height.toInt()),
-                            alpha = 0.6f
+                        Image(
+                            bitmap = originalBitmap.asImageBitmap(),
+                            contentDescription = "Original Image",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
                         )
+
+                        Canvas(
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            val rect = imageRect ?: return@Canvas
+                            drawImage(
+                                image = displayMaskBitmap,
+                                srcOffset = IntOffset.Zero,
+                                srcSize = IntSize(tempBitmap.width, tempBitmap.height),
+                                dstOffset = IntOffset(rect.left.toInt(), rect.top.toInt()),
+                                dstSize = IntSize(rect.width.toInt(), rect.height.toInt()),
+                                alpha = 0.6f
+                            )
+                        }
                     }
                 }
 
@@ -691,11 +769,8 @@ fun InpaintScreen(
                                 Alignment.CenterHorizontally
                             )
                         ) {
-                            val currentDensity = LocalDensity.current
-                            val currentImageRect = imageRect
-
                             Button(
-                                onClick = { undoLastPath(currentDensity, currentImageRect) },
+                                onClick = { undoLastPath() },
                                 enabled = pathHistory.isNotEmpty() && !isLoading
                             ) {
                                 Icon(
@@ -708,7 +783,7 @@ fun InpaintScreen(
                             }
 
                             Button(
-                                onClick = { redoLastPath(currentDensity, currentImageRect) },
+                                onClick = { redoLastPath() },
                                 enabled = redoStack.isNotEmpty() && !isLoading,
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
                             ) {
