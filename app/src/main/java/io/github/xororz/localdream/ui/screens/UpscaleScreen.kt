@@ -9,10 +9,17 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -305,7 +312,7 @@ fun UpscaleScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = MaterialTheme.shapes.medium
                 ) {
                     Box(
                         modifier = Modifier
@@ -325,11 +332,21 @@ fun UpscaleScreen(
                                 verticalArrangement = Arrangement.Center,
                                 modifier = Modifier.padding(32.dp)
                             ) {
+                                val iconAlpha = remember { Animatable(0.4f) }
+                                LaunchedEffect(Unit) {
+                                    iconAlpha.animateTo(
+                                        targetValue = 0.8f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(1200),
+                                            repeatMode = RepeatMode.Reverse
+                                        )
+                                    )
+                                }
                                 Icon(
                                     imageVector = Icons.Default.Add,
                                     contentDescription = stringResource(R.string.add_image),
                                     modifier = Modifier.size(48.dp),
-                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = iconAlpha.value)
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
@@ -383,7 +400,7 @@ fun UpscaleScreen(
                                     .align(Alignment.BottomStart)
                                     .padding(12.dp),
                                 color = MaterialTheme.colorScheme.secondaryContainer,
-                                shape = RoundedCornerShape(8.dp)
+                                shape = MaterialTheme.shapes.small
                             ) {
                                 Text(
                                     text = "${selectedBitmap!!.width} × ${selectedBitmap!!.height}",
@@ -396,16 +413,33 @@ fun UpscaleScreen(
                     }
                 }
 
+                val fabEnabled = selectedBitmap != null && !isUpscaling
+                val fabContainerColor by animateColorAsState(
+                    targetValue = if (fabEnabled)
+                        MaterialTheme.colorScheme.primaryContainer
+                    else
+                        MaterialTheme.colorScheme.surfaceContainerHighest,
+                    animationSpec = tween(durationMillis = 300),
+                    label = "FabContainerColor"
+                )
+                val fabContentColor by animateColorAsState(
+                    targetValue = if (fabEnabled)
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    else
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                    animationSpec = tween(durationMillis = 300),
+                    label = "FabContentColor"
+                )
                 FloatingActionButton(
                     onClick = {
-                        if (selectedBitmap != null && !isUpscaling) {
+                        if (fabEnabled) {
                             showUpscalerDialog = true
                         }
                     },
                     modifier = Modifier.size(56.dp),
                     shape = CircleShape,
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    containerColor = fabContainerColor,
+                    contentColor = fabContentColor
                 ) {
                     Icon(
                         imageVector = Icons.Default.AutoFixHigh,
@@ -414,12 +448,17 @@ fun UpscaleScreen(
                     )
                 }
 
-                if (upscaledImageUri != null) {
+                AnimatedVisibility(
+                    visible = upscaledImageUri != null,
+                    enter = fadeIn(animationSpec = tween(400)) + expandVertically(expandFrom = Alignment.Top),
+                    exit = fadeOut(animationSpec = tween(300)) + shrinkVertically(shrinkTowards = Alignment.Top),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
                     ElevatedCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        shape = RoundedCornerShape(12.dp)
+                        modifier = Modifier.fillMaxSize(),
+                        shape = MaterialTheme.shapes.large
                     ) {
                         Box(modifier = Modifier.fillMaxSize()) {
                             ZoomableImage(
@@ -475,7 +514,7 @@ fun UpscaleScreen(
                                     .align(Alignment.BottomStart)
                                     .padding(12.dp),
                                 color = MaterialTheme.colorScheme.primaryContainer,
-                                shape = RoundedCornerShape(8.dp)
+                                shape = MaterialTheme.shapes.small
                             ) {
                                 Text(
                                     text = "${upscaledBitmap!!.width} × ${upscaledBitmap!!.height}",
@@ -486,7 +525,8 @@ fun UpscaleScreen(
                             }
                         }
                     }
-                } else {
+                }
+                if (upscaledImageUri == null) {
                     Spacer(modifier = Modifier.weight(1f))
                 }
             }
@@ -529,7 +569,11 @@ fun UpscaleScreen(
             }
         }
 
-        if (isUpscaling) {
+        AnimatedVisibility(
+            visible = isUpscaling,
+            enter = fadeIn(animationSpec = tween(300)),
+            exit = fadeOut(animationSpec = tween(300))
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

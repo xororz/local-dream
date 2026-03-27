@@ -17,14 +17,23 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -1644,14 +1653,30 @@ fun ModelRunScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.medium
                         ) {
-                            if (serviceState is GenerationState.Progress || isUpscaling) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(24.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                            } else {
-                                Text(stringResource(R.string.generate_image))
-
+                            AnimatedContent(
+                                targetState = serviceState is GenerationState.Progress || isUpscaling,
+                                transitionSpec = {
+                                    (fadeIn(animationSpec = tween(200)) + scaleIn(
+                                        initialScale = 0.8f,
+                                        animationSpec = tween(200)
+                                    ))
+                                        .togetherWith(
+                                            fadeOut(animationSpec = tween(200)) + scaleOut(
+                                                targetScale = 0.8f,
+                                                animationSpec = tween(200)
+                                            )
+                                        )
+                                },
+                                label = "GenerateButtonContent"
+                            ) { isLoading ->
+                                if (isLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                } else {
+                                    Text(stringResource(R.string.generate_image))
+                                }
                             }
                         }
                     }
@@ -1713,8 +1738,13 @@ fun ModelRunScreen(
                             ),
                             style = MaterialTheme.typography.titleMedium
                         )
+                        val animatedProgress by animateFloatAsState(
+                            targetValue = progress,
+                            animationSpec = tween(durationMillis = 300),
+                            label = "ProgressAnimation"
+                        )
                         LinearProgressIndicator(
-                            progress = { progress },
+                            progress = { animatedProgress },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Text(
@@ -1727,7 +1757,7 @@ fun ModelRunScreen(
                         intermediateBitmap?.let { bitmap ->
                             Spacer(modifier = Modifier.height(8.dp))
                             Card(
-                                shape = RoundedCornerShape(8.dp),
+                                shape = MaterialTheme.shapes.small,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .aspectRatio(currentWidth.toFloat() / currentHeight.toFloat())
@@ -1761,7 +1791,7 @@ fun ModelRunScreen(
                         Card(
                             modifier = Modifier
                                 .size(100.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = MaterialTheme.shapes.small,
                         ) {
                             Box {
                                 croppedBitmap?.let { bitmap ->
@@ -1860,7 +1890,7 @@ fun ModelRunScreen(
                                                 showInpaintScreen = true
                                             }
                                         },
-                                    shape = RoundedCornerShape(8.dp),
+                                    shape = MaterialTheme.shapes.small,
                                 ) {
                                     Box {
                                         maskBitmap?.let { mb ->
@@ -1931,10 +1961,25 @@ fun ModelRunScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
+                            val iconScale = remember { Animatable(1f) }
+                            LaunchedEffect(Unit) {
+                                iconScale.animateTo(
+                                    targetValue = 1.1f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(1500),
+                                        repeatMode = RepeatMode.Reverse
+                                    )
+                                )
+                            }
                             Icon(
                                 imageVector = Icons.Default.Image,
                                 contentDescription = null,
-                                modifier = Modifier.size(48.dp),
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .graphicsLayer(
+                                        scaleX = iconScale.value,
+                                        scaleY = iconScale.value
+                                    ),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Text(
@@ -2049,7 +2094,14 @@ fun ModelRunScreen(
                                 }
                             }
 
-                            key(imageVersion) {
+                            AnimatedContent(
+                                targetState = imageVersion,
+                                transitionSpec = {
+                                    fadeIn(animationSpec = tween(400)) togetherWith
+                                            fadeOut(animationSpec = tween(400))
+                                },
+                                label = "ImagePreviewCrossfade"
+                            ) { version ->
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -2129,7 +2181,7 @@ fun ModelRunScreen(
                                                         imageVersion++
                                                     }
                                                 },
-                                            shape = RoundedCornerShape(8.dp)
+                                            shape = MaterialTheme.shapes.small
                                         ) {
                                             AsyncImage(
                                                 model = ImageRequest.Builder(
@@ -2397,31 +2449,42 @@ fun ModelRunScreen(
                     CircularProgressIndicator()
                 }
             } else if (historyItems.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+                var emptyVisible by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { emptyVisible = true }
+                AnimatedVisibility(
+                    visible = emptyVisible,
+                    enter = fadeIn(animationSpec = tween(500)) + scaleIn(
+                        initialScale = 0.9f,
+                        animationSpec = tween(500)
+                    ),
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.offset(y = (-60).dp)
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Image,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            stringResource(R.string.no_history),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            stringResource(R.string.no_history_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.offset(y = (-60).dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Image,
+                                contentDescription = null,
+                                modifier = Modifier.size(64.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                stringResource(R.string.no_history),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                stringResource(R.string.no_history_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             } else {
@@ -2468,7 +2531,7 @@ fun ModelRunScreen(
                                         }
                                     }
                                 ),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = MaterialTheme.shapes.medium,
                             elevation = CardDefaults.cardElevation(
                                 defaultElevation = 2.dp
                             )
@@ -2565,7 +2628,7 @@ fun ModelRunScreen(
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
                         .padding(16.dp),
-                    shape = RoundedCornerShape(28.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
                     elevation = CardDefaults.elevatedCardElevation(
                         defaultElevation = 6.dp
                     )
@@ -2925,7 +2988,7 @@ fun ModelRunScreen(
                     .padding(bottom = 16.dp)
                     .background(
                         color = Color.Black.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(4.dp)
+                        shape = MaterialTheme.shapes.extraSmall
                     )
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             )

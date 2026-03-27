@@ -679,6 +679,14 @@ fun ModelListScreen(
                     ) { model ->
                         ModelCard(
                             model = model,
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = tween(durationMillis = 300),
+                                fadeOutSpec = tween(durationMillis = 300),
+                                placementSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessLow
+                                )
+                            ),
                             isSelected = selectedModels.contains(model),
                             isSelectionMode = isSelectionMode,
                             onClick = {
@@ -722,21 +730,35 @@ fun ModelListScreen(
 
                     if (models.isEmpty()) {
                         item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 32.dp),
-                                contentAlignment = Alignment.Center
+                            var visible by remember { mutableStateOf(false) }
+                            LaunchedEffect(Unit) { visible = true }
+                            AnimatedVisibility(
+                                visible = visible,
+                                enter = fadeIn(animationSpec = tween(500)) + expandVertically()
                             ) {
-                                Text(
-                                    text = if (page == 0)
-                                        stringResource(R.string.no_cpu_models)
-                                    else
-                                        stringResource(R.string.no_npu_models),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    textAlign = TextAlign.Center,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                )
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 32.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.SearchOff,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp),
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                    )
+                                    Text(
+                                        text = if (page == 0)
+                                            stringResource(R.string.no_cpu_models)
+                                        else
+                                            stringResource(R.string.no_npu_models),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        textAlign = TextAlign.Center,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    )
+                                }
                             }
                         }
                     }
@@ -1231,7 +1253,7 @@ fun ModelListScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(8.dp)
-                                .clip(RoundedCornerShape(4.dp)),
+                                .clip(MaterialTheme.shapes.extraSmall),
                             color = MaterialTheme.colorScheme.primary,
                             trackColor = MaterialTheme.colorScheme.surfaceVariant
                         )
@@ -1292,14 +1314,28 @@ fun TabPageIndicator(
         modifier = modifier
     ) {
         repeat(pageCount) { index ->
+            val isSelected = currentPage == index
+            val sizeFloat by animateFloatAsState(
+                targetValue = if (isSelected) 10f else 8f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMedium
+                ),
+                label = "IndicatorSize"
+            )
+            val color by animateColorAsState(
+                targetValue = if (isSelected)
+                    MaterialTheme.colorScheme.primary
+                else
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                animationSpec = tween(durationMillis = 300),
+                label = "IndicatorColor"
+            )
             Box(
                 modifier = Modifier
-                    .size(if (currentPage == index) 10.dp else 8.dp)
+                    .size(sizeFloat.dp)
                     .background(
-                        color = if (currentPage == index)
-                            MaterialTheme.colorScheme.primary
-                        else
-                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                        color = color,
                         shape = CircleShape
                     )
             )
@@ -1370,14 +1406,14 @@ fun ModelCard(
         elevation = CardDefaults.elevatedCardElevation(
             defaultElevation = elevation.dp
         ),
-        shape = RoundedCornerShape(16.dp)
+        shape = MaterialTheme.shapes.large
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp),
-                shape = RoundedCornerShape(4.dp),
+                shape = MaterialTheme.shapes.extraSmall,
                 color = if (model.runOnCpu)
                     MaterialTheme.colorScheme.tertiaryContainer
                 else
@@ -1853,7 +1889,7 @@ fun AddCustomModelButton(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
         ),
-        shape = RoundedCornerShape(20.dp)
+        shape = MaterialTheme.shapes.extraLarge
     ) {
         Row(
             modifier = Modifier
@@ -1894,7 +1930,7 @@ fun AddCustomNpuModelButton(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
         ),
-        shape = RoundedCornerShape(20.dp)
+        shape = MaterialTheme.shapes.extraLarge
     ) {
         Row(
             modifier = Modifier
