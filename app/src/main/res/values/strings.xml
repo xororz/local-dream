@@ -64,8 +64,11 @@
     <string name="img2img_hint">Use img2img feature. Turn off if you don\'t need or encounter any problems.</string>
     <string name="show_process">Show Generation Process</string>
     <string name="show_process_hint">Only works for NPU models. Show intermediate generation steps. This will slow down generation speed. Enable only when curious about the process.</string>
+    <string name="disable_upscale_resolution_check">Disable Upscale Resolution Check</string>
+    <string name="disable_upscale_resolution_check_hint">When enabled, it disables the resolution check for Upscale. This may cause slow image generation or errors.</string>
+
     <string name="preview_stride">Preview Stride</string>
-    <string name="preview_stride_hint">Update preview every %d steps (1-10).</string>
+    <string name="preview_stride_hint">Update preview every %d steps (1–10).</string>
     <string name="download_patch">Download High Resolution Patch</string>
     <string name="download_patch_hint">Download %1$dx%1$d high resolution patch for %2$s? This will enable %1$dpx generation.</string>
     <string name="highres_patch">HighRes Patch</string>

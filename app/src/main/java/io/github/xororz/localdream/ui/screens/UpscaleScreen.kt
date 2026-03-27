@@ -91,6 +91,11 @@ fun UpscaleScreen(
     val upscalerRepository = remember { UpscalerRepository(context) }
     val upscalerPreferences =
         remember { context.getSharedPreferences("upscaler_prefs", Context.MODE_PRIVATE) }
+    val appPreferences =
+        remember { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
+    val disableUpscaleResolutionCheck by remember {
+        mutableStateOf(appPreferences.getBoolean("disable_upscale_resolution_check", false))
+    }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -103,25 +108,27 @@ fun UpscaleScreen(
                     }
 
                     if (bitmap != null) {
-                        val totalPixels = bitmap.width.toLong() * bitmap.height.toLong()
-                        val maxPixels = 2048L * 2048L
+                        if (!disableUpscaleResolutionCheck) {
+                            val totalPixels = bitmap.width.toLong() * bitmap.height.toLong()
+                            val maxPixels = 2048 * 2048L
 
-                        if (totalPixels > maxPixels) {
-                            withContext(Dispatchers.Main) {
-                                errorMessage = context.getString(
-                                    R.string.image_resolution_too_large,
-                                    bitmap.width,
-                                    bitmap.height
-                                )
+                            if (totalPixels > maxPixels) {
+                                withContext(Dispatchers.Main) {
+                                    errorMessage = context.getString(
+                                        R.string.image_resolution_too_large,
+                                        bitmap.width,
+                                        bitmap.height
+                                    )
+                                }
+                                return@launch
                             }
-                        } else {
-                            selectedImageUri = it
-                            selectedBitmap = bitmap
-                            withContext(Dispatchers.Main) {
-                                sharedScale = 1f
-                                sharedOffsetX = 0f
-                                sharedOffsetY = 0f
-                            }
+                        }
+                        selectedImageUri = it
+                        selectedBitmap = bitmap
+                        withContext(Dispatchers.Main) {
+                            sharedScale = 1f
+                            sharedOffsetX = 0f
+                            sharedOffsetY = 0f
                         }
                     }
                 } catch (e: Exception) {
