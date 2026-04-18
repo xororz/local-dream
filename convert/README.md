@@ -1,5 +1,7 @@
 # Model Conversion Guide (SD1.5 Only)
 
+For an experimental SDXL host-side workflow, see [README_SDXL.md](README_SDXL.md).
+
 ## Overview
 
 This guide will help you convert your models to be compatible with the NPU for optimized performance on supported devices.
