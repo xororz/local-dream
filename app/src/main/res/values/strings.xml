@@ -4,7 +4,8 @@
 
     <!-- Models -->
     <string name="anythingv5_description">Anime Image Generation</string>
-    <string name="sdxl_base_description">SDXL Base 1.0 (1024×1024)</string>
+    <string name="sdxl_base_description">SDXL General Image Generation</string>
+    <string name="anythingxl_description">Anything SDXL Version</string>
     <string name="capture_logs">Capture logs</string>
     <string name="capture_logs_hint">Collect app logs while a model is running, then show them after you exit</string>
     <string name="sdxl_lowram">SDXL low RAM mode</string>

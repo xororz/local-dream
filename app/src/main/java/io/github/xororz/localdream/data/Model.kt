@@ -398,6 +398,7 @@ class ModelRepository(private val context: Context) {
         val predefinedModels = mutableListOf<Model>().apply {
             if (isSdxlCapableSoc(getDeviceSoc())) {
                 add(createSDXLBaseModel())
+                add(createAnythingXLModel())
             }
             add(createAnythingV5Model())
             add(createAnythingV5ModelCPU())
@@ -420,9 +421,7 @@ class ModelRepository(private val context: Context) {
 
     private fun createSDXLBaseModel(): Model {
         val id = "sdxl_base"
-        val soc = getDeviceSoc()
-        val suffix = Model.getChipsetSuffix(soc) ?: "min"
-        val fileUri = "xororz/sd-qnn/resolve/main/SDXL_Base_qnn2.28_${suffix}.zip"
+        val fileUri = "xororz/sdxl-qnn/resolve/main/sdxl_base_qnn2.28_8gen4.zip"
 
         val isDownloaded = Model.isModelDownloaded(context, id, false)
 
@@ -437,6 +436,29 @@ class ModelRepository(private val context: Context) {
             isDownloaded = isDownloaded,
             defaultPrompt = "masterpiece, best quality, a majestic cat sitting on a windowsill at sunset,",
             defaultNegativePrompt = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry,",
+            runOnCpu = false,
+            useCpuClip = true,
+            isSdxl = true
+        )
+    }
+
+    private fun createAnythingXLModel(): Model {
+        val id = "anythingxl"
+        val fileUri = "xororz/sdxl-qnn/resolve/main/anythingxl_qnn2.28_8gen4.zip"
+
+        val isDownloaded = Model.isModelDownloaded(context, id, false)
+
+        return Model(
+            id = id,
+            name = "Anything XL",
+            description = context.getString(R.string.anythingxl_description),
+            baseUrl = baseUrl,
+            fileUri = fileUri,
+            generationSize = 1024,
+            approximateSize = "4.2GB",
+            isDownloaded = isDownloaded,
+            defaultPrompt = "masterpiece, best quality, 1girl, solo, cute, white hair,",
+            defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = false,
             useCpuClip = true,
             isSdxl = true

@@ -4,7 +4,8 @@
 
     <!-- Models -->
     <string name="anythingv5_description">动漫图像生成模型</string>
-    <string name="sdxl_base_description">SDXL 基础模型 1.0 (1024×1024)</string>
+    <string name="sdxl_base_description">SDXL 通用图像生成模型</string>
+    <string name="anythingxl_description">Anything SDXL 版本</string>
     <string name="capture_logs">收集日志</string>
     <string name="capture_logs_hint">运行模型时收集应用日志，退出后展示</string>
     <string name="sdxl_lowram">SDXL 低内存模式</string>
