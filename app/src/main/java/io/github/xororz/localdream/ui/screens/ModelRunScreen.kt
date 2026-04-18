@@ -1235,6 +1235,14 @@ fun ModelRunScreen(
                                                         },
                                                         label = { Text("Euler A") }
                                                     )
+                                                    FilterChip(
+                                                        selected = scheduler == "lcm",
+                                                        onClick = {
+                                                            scheduler = "lcm"
+                                                            saveAllFields()
+                                                        },
+                                                        label = { Text("LCM") }
+                                                    )
                                                 }
                                             }
 
@@ -2394,6 +2402,7 @@ fun ModelRunScreen(
                                         when (generationParams?.scheduler) {
                                             "dpm" -> "DPM++ 2M"
                                             "euler_a" -> "Euler A"
+                                            "lcm" -> "LCM"
                                             else -> generationParams?.scheduler ?: "DPM++ 2M"
                                         }
                                     }",
@@ -3519,6 +3528,7 @@ fun ModelRunScreen(
                                     when (params.scheduler) {
                                         "dpm" -> "DPM++ 2M"
                                         "euler_a" -> "Euler A"
+                                        "lcm" -> "LCM"
                                         else -> params.scheduler
                                     }
                                 }",

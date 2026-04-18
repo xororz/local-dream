@@ -13,6 +13,7 @@
 #include "DPMSolverMultistepScheduler.hpp"
 #include "EulerAncestralDiscreteScheduler.hpp"
 #include "FloatConversion.hpp"
+#include "LCMScheduler.hpp"
 #include "LaplacianBlend.hpp"
 #include "PromptProcessor.hpp"
 #include "QnnModel.hpp"
@@ -638,8 +639,8 @@ void processCommandLine(int argc, char **argv) {
     dst.resize(posSize);
     posFile.read(reinterpret_cast<char *>(dst.data()), posSize * sizeof(float));
     posFile.close();
-    QNN_INFO("Loaded %s: %zu floats",
-             posEmbPath.filename().string().c_str(), posSize);
+    QNN_INFO("Loaded %s: %zu floats", posEmbPath.filename().string().c_str(),
+             posSize);
   };
 
   if (sdxl_mode) {
@@ -1058,8 +1059,7 @@ ProcessedPrompt processWeightedPrompt(const std::string &prompt_text,
       if (!has_emb) {
         for (int j = 0; j < dim1; j++) {
           float token_val = fp16_to_fp32(token_emb[token_id * dim1 + j]);
-          embeddings[i * dim1 + j] =
-              token_val * weight + pos_emb[i * dim1 + j];
+          embeddings[i * dim1 + j] = token_val * weight + pos_emb[i * dim1 + j];
         }
       } else {
         for (int j = 0; j < dim1; j++) {
@@ -1103,9 +1103,9 @@ ProcessedPrompt processWeightedPrompt(const std::string &prompt_text,
 }
 
 struct ProcessedPromptPair {
-  std::vector<int> ids;                    // old (2*77)
-  std::vector<float> negative_embeddings;  // new embedding (77*768)
-  std::vector<float> positive_embeddings;  // new embedding (77*768)
+  std::vector<int> ids;                      // old (2*77)
+  std::vector<float> negative_embeddings;    // new embedding (77*768)
+  std::vector<float> positive_embeddings;    // new embedding (77*768)
   std::vector<float> negative_embeddings_2;  // SDXL (77*1280)
   std::vector<float> positive_embeddings_2;  // SDXL (77*1280)
 };
@@ -1728,9 +1728,9 @@ GenerationResult generateImage(
     // SDXL-specific buffers.
     const int sdxl_concat_dim =
         text_embedding_size + text_embedding_size_2;  // 2048
-    std::vector<float> sdxl_encoder_hidden_states;  // [batch, 77, 2048]
-    std::vector<float> sdxl_text_embeds;            // [batch, 1280]
-    std::vector<float> sdxl_time_ids;               // [batch, 6]
+    std::vector<float> sdxl_encoder_hidden_states;    // [batch, 77, 2048]
+    std::vector<float> sdxl_text_embeds;              // [batch, 1280]
+    std::vector<float> sdxl_time_ids;                 // [batch, 6]
     if (sdxl_mode) {
       sdxl_encoder_hidden_states.assign(batch_size * 77 * sdxl_concat_dim,
                                         0.0f);
@@ -1755,52 +1755,51 @@ GenerationResult generateImage(
       if (!clipInterpreter || !clip2Interpreter)
         throw std::runtime_error("SDXL CLIP interpreters not initialized!");
 
-      auto run_sdxl_clip =
-          [&](const std::vector<float> &emb1, const std::vector<float> &emb2,
-              float *out_hidden_concat /*77*2048*/, float *out_pooled /*1280*/) {
-            // Encoder 1 (CLIP-L): 77x768 -> last_hidden_state 77x768
-            auto in1 =
-                clipInterpreter->getSessionInput(clipSession, "input_embedding");
-            memcpy(in1->host<float>(), emb1.data(),
-                   77 * text_embedding_size * sizeof(float));
-            clipInterpreter->runSession(clipSession);
-            auto out1 = clipInterpreter->getSessionOutput(clipSession,
-                                                          "last_hidden_state");
-            const float *out1_data = out1->host<float>();
+      auto run_sdxl_clip = [&](const std::vector<float> &emb1,
+                               const std::vector<float> &emb2,
+                               float *out_hidden_concat /*77*2048*/,
+                               float *out_pooled /*1280*/) {
+        // Encoder 1 (CLIP-L): 77x768 -> last_hidden_state 77x768
+        auto in1 =
+            clipInterpreter->getSessionInput(clipSession, "input_embedding");
+        memcpy(in1->host<float>(), emb1.data(),
+               77 * text_embedding_size * sizeof(float));
+        clipInterpreter->runSession(clipSession);
+        auto out1 =
+            clipInterpreter->getSessionOutput(clipSession, "last_hidden_state");
+        const float *out1_data = out1->host<float>();
 
-            // Encoder 2 (CLIP-G): 77x1280 -> last_hidden_state 77x1280 +
-            // pooled_output 1x1280
-            auto in2 = clip2Interpreter->getSessionInput(clip2Session,
-                                                        "input_embedding");
-            memcpy(in2->host<float>(), emb2.data(),
-                   77 * text_embedding_size_2 * sizeof(float));
-            clip2Interpreter->runSession(clip2Session);
-            auto out2_hidden = clip2Interpreter->getSessionOutput(
-                clip2Session, "last_hidden_state");
-            auto out2_pool = clip2Interpreter->getSessionOutput(
-                clip2Session, "pooled_output");
-            const float *out2_hidden_data = out2_hidden->host<float>();
-            const float *out2_pool_data = out2_pool->host<float>();
+        // Encoder 2 (CLIP-G): 77x1280 -> last_hidden_state 77x1280 +
+        // pooled_output 1x1280
+        auto in2 =
+            clip2Interpreter->getSessionInput(clip2Session, "input_embedding");
+        memcpy(in2->host<float>(), emb2.data(),
+               77 * text_embedding_size_2 * sizeof(float));
+        clip2Interpreter->runSession(clip2Session);
+        auto out2_hidden = clip2Interpreter->getSessionOutput(
+            clip2Session, "last_hidden_state");
+        auto out2_pool =
+            clip2Interpreter->getSessionOutput(clip2Session, "pooled_output");
+        const float *out2_hidden_data = out2_hidden->host<float>();
+        const float *out2_pool_data = out2_pool->host<float>();
 
-            // Concat along feature dim: [77, 768] + [77, 1280] = [77, 2048]
-            for (int t = 0; t < 77; t++) {
-              memcpy(out_hidden_concat + t * sdxl_concat_dim,
-                     out1_data + t * text_embedding_size,
-                     text_embedding_size * sizeof(float));
-              memcpy(out_hidden_concat + t * sdxl_concat_dim +
-                         text_embedding_size,
-                     out2_hidden_data + t * text_embedding_size_2,
-                     text_embedding_size_2 * sizeof(float));
-            }
-            memcpy(out_pooled, out2_pool_data,
-                   text_embedding_size_2 * sizeof(float));
-          };
+        // Concat along feature dim: [77, 768] + [77, 1280] = [77, 2048]
+        for (int t = 0; t < 77; t++) {
+          memcpy(out_hidden_concat + t * sdxl_concat_dim,
+                 out1_data + t * text_embedding_size,
+                 text_embedding_size * sizeof(float));
+          memcpy(out_hidden_concat + t * sdxl_concat_dim + text_embedding_size,
+                 out2_hidden_data + t * text_embedding_size_2,
+                 text_embedding_size_2 * sizeof(float));
+        }
+        memcpy(out_pooled, out2_pool_data,
+               text_embedding_size_2 * sizeof(float));
+      };
 
       // negative (batch idx 0)
       run_sdxl_clip(processed.negative_embeddings,
                     processed.negative_embeddings_2,
-                    sdxl_encoder_hidden_states.data(),
-                    sdxl_text_embeds.data());
+                    sdxl_encoder_hidden_states.data(), sdxl_text_embeds.data());
       // positive (batch idx 1)
       run_sdxl_clip(processed.positive_embeddings,
                     processed.positive_embeddings_2,
@@ -1922,6 +1921,10 @@ GenerationResult generateImage(
     if (scheduler_type == "euler_a" || scheduler_type == "eulera") {
       scheduler = std::make_unique<EulerAncestralDiscreteScheduler>(
           1000, 0.00085f, 0.012f, "scaled_linear", "epsilon", "leading");
+    } else if (scheduler_type == "lcm") {
+      scheduler = std::make_unique<LCMScheduler>(1000, 0.00085f, 0.012f,
+                                                 "scaled_linear", "epsilon", 50,
+                                                 10.0f, true, false);
     } else {
       // Default to DPM solver
       scheduler = std::make_unique<DPMSolverMultistepScheduler>(
@@ -2416,11 +2419,10 @@ GenerationResult generateImage(
             throw std::runtime_error("QNN UNET exec failed (uncond)");
 
           if (StatusCode::SUCCESS !=
-              unetApp->executeUnetGraphs(
-                  latents_in_ptr + single_latent_size,
-                  static_cast<int>(current_ts),
-                  embed_ptr + 77 * text_embedding_size,
-                  latents_out_ptr + single_latent_size))
+              unetApp->executeUnetGraphs(latents_in_ptr + single_latent_size,
+                                         static_cast<int>(current_ts),
+                                         embed_ptr + 77 * text_embedding_size,
+                                         latents_out_ptr + single_latent_size))
             throw std::runtime_error("QNN UNET exec failed (cond)");
         }
       }
@@ -2435,8 +2437,9 @@ GenerationResult generateImage(
       xt::xarray<float> noise_pred;
       if (!use_mnn && cfg == 1.0f) {
         // cfg = 1 path: only the cond half of unet_out_latents was filled.
-        std::vector<float> cond_only(unet_out_latents.begin() + single_latent_size,
-                                     unet_out_latents.end());
+        std::vector<float> cond_only(
+            unet_out_latents.begin() + single_latent_size,
+            unet_out_latents.end());
         noise_pred = xt::adapt(cond_only, shape);
       } else {
         xt::xarray<float> noise_pred_batch =
@@ -2559,8 +2562,8 @@ GenerationResult generateImage(
             throw std::runtime_error("QNN VAE dec SDXL exec failed");
         } else {
           if (StatusCode::SUCCESS !=
-              vaeDecoderApp->executeVaeDecoderGraphs(
-                  vae_dec_in_vec.data(), vae_dec_out_pixels.data()))
+              vaeDecoderApp->executeVaeDecoderGraphs(vae_dec_in_vec.data(),
+                                                     vae_dec_out_pixels.data()))
             throw std::runtime_error("QNN VAE dec exec failed");
         }
         if (sdxl_lowram) releaseSdxlQnnVaeDecoder();

@@ -364,8 +364,10 @@ class ModelRepository(private val context: Context) {
                 when {
                     sdxlFile.exists() ->
                         customModels.add(createCustomModel(dir, isNpu = true, isSdxl = true))
+
                     finishedFile.exists() ->
                         customModels.add(createCustomModel(dir, isNpu = false))
+
                     npuCustomFile.exists() ->
                         customModels.add(createCustomModel(dir, isNpu = true))
                 }

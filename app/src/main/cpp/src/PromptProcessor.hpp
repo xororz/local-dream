@@ -16,8 +16,8 @@ struct PromptToken {
   std::string text;
   float weight;
   bool is_embedding;
-  std::vector<float> embedding_data;     // 768-dim (SD1.5 / SDXL encoder 1)
-  std::vector<float> embedding_data_2;   // 1280-dim (SDXL encoder 2)
+  std::vector<float> embedding_data;    // 768-dim (SD1.5 / SDXL encoder 1)
+  std::vector<float> embedding_data_2;  // 1280-dim (SDXL encoder 2)
 };
 
 class PromptProcessor {
