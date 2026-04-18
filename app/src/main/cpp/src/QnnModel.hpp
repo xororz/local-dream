@@ -2,6 +2,7 @@
 #define QNNMODEL_HPP
 
 #include <HTP/QnnHtpDevice.h>
+#include <dlfcn.h>
 #include <inttypes.h>
 
 #include <Config.hpp>
@@ -21,6 +22,7 @@ class QnnModel : public QnnSampleApp {
  public:
   Qnn_Tensor_t *inputs = nullptr;
   Qnn_Tensor_t *outputs = nullptr;
+  void *m_modelHandle = nullptr;
   QnnModel(QnnFunctionPointers qnnFunctionPointers, std::string inputListPaths,
            std::string opPackagePaths, void *backendHandle,
            std::string outputPath = s_defaultOutputPath, bool debug = false,
@@ -35,6 +37,31 @@ class QnnModel : public QnnSampleApp {
                      backendHandle, outputPath, debug, outputDataType,
                      inputDataType, profilingLevel, dumpOutputs,
                      cachedBinaryPath, saveBinaryName) {}
+
+  ~QnnModel() {
+    // Tear down per-graph input/output tensors first (allocated lazily by
+    // setupInputAndOutputTensors). Must run before freeContext() since it
+    // relies on graphsInfo for tensor counts.
+    if ((inputs != nullptr || outputs != nullptr) && m_graphsInfo != nullptr &&
+        m_graphsCount > 0) {
+      m_ioTensor.tearDownInputAndOutputTensors(
+          inputs, outputs, (*m_graphsInfo)[0].numInputTensors,
+          (*m_graphsInfo)[0].numOutputTensors);
+    }
+    inputs = nullptr;
+    outputs = nullptr;
+
+    // freeContext() is not idempotent — only call when graphs are still alive.
+    if (m_graphsInfo != nullptr) {
+      freeContext();
+    }
+    freeDevice();
+    terminateBackend();
+    if (m_modelHandle != nullptr) {
+      dlclose(m_modelHandle);
+      m_modelHandle = nullptr;
+    }
+  }
 
   StatusCode enablePerformaceMode() {
     uint32_t powerConfigId;

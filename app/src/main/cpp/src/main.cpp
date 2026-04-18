@@ -146,6 +146,7 @@ std::unique_ptr<QnnModel> createQnnModel(const std::string &modelPath,
                                               &modelHandle);
   if (drvStatus != dynamicloadutil::StatusCode::SUCCESS) {
     QNN_ERROR("Failed get QNN func ptrs for %s.", modelName.c_str());
+    if (modelHandle) dlclose(modelHandle);
     return nullptr;
   }
   std::string inputListPaths, opPackagePaths, outputPath, saveBinaryName;
@@ -155,10 +156,14 @@ std::unique_ptr<QnnModel> createQnnModel(const std::string &modelPath,
       iotensor::OutputDataType::FLOAT_ONLY;
   iotensor::InputDataType inputDataType = iotensor::InputDataType::FLOAT;
   sample_app::ProfilingLevel profilingLevel = ProfilingLevel::OFF;
-  return std::make_unique<QnnModel>(
+  auto app = std::make_unique<QnnModel>(
       funcs, inputListPaths, opPackagePaths, backendHandle, outputPath, debug,
       outputDataType, inputDataType, profilingLevel, dumpOutputs, modelPath,
       saveBinaryName);
+  // Hand off the model library handle so the QnnModel destructor can dlclose
+  // it. Otherwise lowram mode leaks one .so handle per load cycle.
+  if (app) app->m_modelHandle = modelHandle;
+  return app;
 }
 
 namespace qnn {
@@ -811,6 +816,16 @@ void processCommandLine(int argc, char **argv) {
 }  // namespace tools
 }  // namespace qnn
 
+// Generic RAII guard: invokes the stored callable on scope exit unless
+// disarmed. Used in generateImage to ensure lowram-loaded SDXL models are
+// released even if the pipeline throws partway.
+struct ScopeExit {
+  std::function<void()> fn;
+  ~ScopeExit() {
+    if (fn) fn();
+  }
+};
+
 // --- SDXL low-RAM lazy load/release helpers ---
 static void loadSdxlClipMnnIfNeeded() {
   if (!clipInterpreter) {
@@ -886,8 +901,6 @@ static void loadSdxlQnnUnetIfNeeded() {
 
 static void releaseSdxlQnnUnet() {
   if (!unetApp) return;
-  unetApp->freeContext();
-  unetApp->freeDevice();
   unetApp.reset();
   QNN_INFO("[lowram] SDXL UNET released");
 }
@@ -907,8 +920,6 @@ static void loadSdxlQnnVaeDecoderIfNeeded() {
 
 static void releaseSdxlQnnVaeDecoder() {
   if (!vaeDecoderApp) return;
-  vaeDecoderApp->freeContext();
-  vaeDecoderApp->freeDevice();
   vaeDecoderApp.reset();
   QNN_INFO("[lowram] SDXL VAE Decoder released");
 }
@@ -930,8 +941,6 @@ static void loadSdxlQnnVaeEncoderIfNeeded() {
 
 static void releaseSdxlQnnVaeEncoder() {
   if (!vaeEncoderApp) return;
-  vaeEncoderApp->freeContext();
-  vaeEncoderApp->freeDevice();
   vaeEncoderApp.reset();
   QNN_INFO("[lowram] SDXL VAE Encoder released");
 }
@@ -1683,6 +1692,19 @@ GenerationResult generateImage(
       (mask_data.size() != 4 * sample_width * sample_height ||
        mask_data_full.size() != 3 * output_width * output_height))
     throw std::invalid_argument("Invalid global mask_data*");
+
+  // Catch-all guard: in lowram mode, release any model still loaded when this
+  // function exits (normal return or exception). The explicit release calls
+  // below stay in place to free memory between pipeline stages.
+  ScopeExit lowramReleaseGuard;
+  if (sdxl_lowram) {
+    lowramReleaseGuard.fn = []() {
+      if (clipInterpreter || clip2Interpreter) releaseSdxlClipMnn();
+      if (unetApp) releaseSdxlQnnUnet();
+      if (vaeDecoderApp) releaseSdxlQnnVaeDecoder();
+      if (vaeEncoderApp) releaseSdxlQnnVaeEncoder();
+    };
+  }
 
   try {
     auto start_time = std::chrono::high_resolution_clock::now();
@@ -3144,18 +3166,12 @@ int main(int argc, char **argv) {
 
       // Release the temporary upscaler model
       if (tempUpscalerApp) {
-        tempUpscalerApp->freeContext();
-        tempUpscalerApp->freeDevice();
         tempUpscalerApp.reset();
         QNN_INFO("Upscaler model released");
       }
 
     } catch (const std::invalid_argument &e) {
-      if (tempUpscalerApp) {
-        tempUpscalerApp->freeContext();
-        tempUpscalerApp->freeDevice();
-        tempUpscalerApp.reset();
-      }
+      tempUpscalerApp.reset();
       nlohmann::json err = {
           {"error",
            {{"message", "Invalid Arg: " + std::string(e.what())},
@@ -3164,11 +3180,7 @@ int main(int argc, char **argv) {
       res.set_content(err.dump(), "application/json");
       res.set_header("Access-Control-Allow-Origin", "*");
     } catch (const std::exception &e) {
-      if (tempUpscalerApp) {
-        tempUpscalerApp->freeContext();
-        tempUpscalerApp->freeDevice();
-        tempUpscalerApp.reset();
-      }
+      tempUpscalerApp.reset();
       nlohmann::json err = {
           {"error",
            {{"message", "Server Err: " + std::string(e.what())},
