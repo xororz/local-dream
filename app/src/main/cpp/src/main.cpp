@@ -2377,6 +2377,12 @@ GenerationResult generateImage(
         float *latents_in_ptr = latents_in_vec.data();
         float *latents_out_ptr = unet_out_latents.data();
 
+        // With cfg = 1.0, noise_pred = uncond + 1*(txt - uncond) = txt, so the
+        // unconditional pass is redundant. Skip it on QNN to halve UNet time.
+        // MNN runs both batches in a single graph call so the optimization
+        // does not apply there.
+        const bool skip_uncond = (cfg == 1.0f);
+
         if (sdxl_mode) {
           float *hidden_ptr = sdxl_encoder_hidden_states.data();
           float *pooled_ptr = sdxl_text_embeds.data();
@@ -2385,10 +2391,11 @@ GenerationResult generateImage(
           const int pooled_stride = text_embedding_size_2;
           const int time_ids_stride = 6;
 
-          if (StatusCode::SUCCESS !=
-              unetApp->executeUnetGraphsSDXL(
-                  latents_in_ptr, static_cast<int>(current_ts), hidden_ptr,
-                  pooled_ptr, time_ids_ptr, latents_out_ptr))
+          if (!skip_uncond &&
+              StatusCode::SUCCESS !=
+                  unetApp->executeUnetGraphsSDXL(
+                      latents_in_ptr, static_cast<int>(current_ts), hidden_ptr,
+                      pooled_ptr, time_ids_ptr, latents_out_ptr))
             throw std::runtime_error("QNN UNET SDXL exec failed (uncond)");
 
           if (StatusCode::SUCCESS !=
@@ -2401,10 +2408,11 @@ GenerationResult generateImage(
         } else {
           float *embed_ptr = text_embedding_float.data();
 
-          if (StatusCode::SUCCESS !=
-              unetApp->executeUnetGraphs(latents_in_ptr,
-                                         static_cast<int>(current_ts),
-                                         embed_ptr, latents_out_ptr))
+          if (!skip_uncond &&
+              StatusCode::SUCCESS !=
+                  unetApp->executeUnetGraphs(latents_in_ptr,
+                                             static_cast<int>(current_ts),
+                                             embed_ptr, latents_out_ptr))
             throw std::runtime_error("QNN UNET exec failed (uncond)");
 
           if (StatusCode::SUCCESS !=
@@ -2424,12 +2432,19 @@ GenerationResult generateImage(
       if (i == start_step) first_step_time_ms = step_dur.count();
       std::cout << "UNET step " << i << " dur: " << step_dur.count() << "ms\n";
 
-      xt::xarray<float> noise_pred_batch =
-          xt::adapt(unet_out_latents, shape_batch2);
-      xt::xarray<float> uncond = xt::view(noise_pred_batch, 0);
-      xt::xarray<float> txt = xt::view(noise_pred_batch, 1);
-      xt::xarray<float> noise_pred = uncond + cfg * (txt - uncond);
-      noise_pred = xt::eval(noise_pred);
+      xt::xarray<float> noise_pred;
+      if (!use_mnn && cfg == 1.0f) {
+        // cfg = 1 path: only the cond half of unet_out_latents was filled.
+        std::vector<float> cond_only(unet_out_latents.begin() + single_latent_size,
+                                     unet_out_latents.end());
+        noise_pred = xt::adapt(cond_only, shape);
+      } else {
+        xt::xarray<float> noise_pred_batch =
+            xt::adapt(unet_out_latents, shape_batch2);
+        xt::xarray<float> uncond = xt::view(noise_pred_batch, 0);
+        xt::xarray<float> txt = xt::view(noise_pred_batch, 1);
+        noise_pred = xt::eval(uncond + cfg * (txt - uncond));
+      }
       latents = scheduler->step(noise_pred, timesteps(i), latents).prev_sample;
 
       if (request_has_mask) {
