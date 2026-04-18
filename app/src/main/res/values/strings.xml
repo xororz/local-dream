@@ -4,6 +4,16 @@
 
     <!-- Models -->
     <string name="anythingv5_description">Anime Image Generation</string>
+    <string name="sdxl_base_description">SDXL General Image Generation</string>
+    <string name="anythingxl_description">Anything SDXL Version</string>
+    <string name="capture_logs">Capture logs</string>
+    <string name="capture_logs_hint">Collect app logs while a model is running, then show them after you exit</string>
+    <string name="sdxl_lowram">SDXL low RAM mode</string>
+    <string name="sdxl_lowram_hint">For SDXL only: load each model on demand and free it after use. Required on devices with less than 16GB RAM. Disables in-progress preview.</string>
+    <string name="captured_logs_title">Captured logs</string>
+    <string name="log_saved">Saved to %1$s</string>
+    <string name="log_save_failed">Failed to save log</string>
+    <string name="no_logs_captured">No logs were captured</string>
     <string name="chilloutmix_description">ChilloutMix Series</string>
     <string name="qteamix_description">Chibi Style Anime</string>
     <string name="cuteyukimix_description">Cute Style Anime</string>

@@ -113,7 +113,8 @@ data class Model(
     val defaultNegativePrompt: String = "",
     val runOnCpu: Boolean = false,
     val useCpuClip: Boolean = false,
-    val isCustom: Boolean = false
+    val isCustom: Boolean = false,
+    val isSdxl: Boolean = false
 
 ) {
 
@@ -348,8 +349,12 @@ class ModelRepository(private val context: Context) {
                 if (dir.isDirectory) {
                     val finishedFile = File(dir, "finished")
                     val npuCustomFile = File(dir, "npucustom")
+                    val sdxlFile = File(dir, "SDXL")
 
-                    if (finishedFile.exists()) {
+                    if (sdxlFile.exists()) {
+                        val customModel = createCustomModel(dir, isNpu = true, isSdxl = true)
+                        customModels.add(customModel)
+                    } else if (finishedFile.exists()) {
                         val customModel = createCustomModel(dir, isNpu = false)
                         customModels.add(customModel)
                     } else if (npuCustomFile.exists()) {
@@ -363,7 +368,11 @@ class ModelRepository(private val context: Context) {
         return customModels.sortedBy { it.name.lowercase() }
     }
 
-    private fun createCustomModel(modelDir: File, isNpu: Boolean = false): Model {
+    private fun createCustomModel(
+        modelDir: File,
+        isNpu: Boolean = false,
+        isSdxl: Boolean = false
+    ): Model {
         val modelId = modelDir.name
 
         return Model(
@@ -371,33 +380,89 @@ class ModelRepository(private val context: Context) {
             name = modelId,
             description = context.getString(R.string.custom_model),
             baseUrl = "",
+            generationSize = if (isSdxl) 1024 else 512,
             approximateSize = "Custom",
             isDownloaded = true,
             defaultPrompt = "masterpiece, best quality, a cat sat on a mat,",
             defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = !isNpu,
             useCpuClip = true,
-            isCustom = true
+            isCustom = true,
+            isSdxl = isSdxl
         )
     }
 
     private fun initializeModels(): List<Model> {
         val customModels = scanCustomModels()
 
-        val predefinedModels = mutableListOf(
-            createAnythingV5Model(),
-            createAnythingV5ModelCPU(),
-            createQteaMixModel(),
-            createQteaMixModelCPU(),
-            createAbsoluteRealityModel(),
-            createAbsoluteRealityModelCPU(),
-            createCuteYukiMixModel(),
-            createCuteYukiMixModelCPU(),
-            createChilloutMixModelCPU(),
-            createChilloutMixModel(),
-        )
+        val predefinedModels = mutableListOf<Model>().apply {
+            if (isSdxlCapableSoc(getDeviceSoc())) {
+                add(createSDXLBaseModel())
+                add(createAnythingXLModel())
+            }
+            add(createAnythingV5Model())
+            add(createAnythingV5ModelCPU())
+            add(createQteaMixModel())
+            add(createQteaMixModelCPU())
+            add(createAbsoluteRealityModel())
+            add(createAbsoluteRealityModelCPU())
+            add(createCuteYukiMixModel())
+            add(createCuteYukiMixModelCPU())
+            add(createChilloutMixModelCPU())
+            add(createChilloutMixModel())
+        }
 
         return customModels + predefinedModels
+    }
+
+    private fun isSdxlCapableSoc(soc: String): Boolean {
+        return soc in setOf("SM8750", "SM8750P", "SM8850", "SM8850P")
+    }
+
+    private fun createSDXLBaseModel(): Model {
+        val id = "sdxl_base"
+        val fileUri = "xororz/sdxl-qnn/resolve/main/sdxl_base_qnn2.28_8gen4.zip"
+
+        val isDownloaded = Model.isModelDownloaded(context, id, false)
+
+        return Model(
+            id = id,
+            name = "SDXL Base 1.0",
+            description = context.getString(R.string.sdxl_base_description),
+            baseUrl = baseUrl,
+            fileUri = fileUri,
+            generationSize = 1024,
+            approximateSize = "4.2GB",
+            isDownloaded = isDownloaded,
+            defaultPrompt = "masterpiece, best quality, a majestic cat sitting on a windowsill at sunset,",
+            defaultNegativePrompt = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry,",
+            runOnCpu = false,
+            useCpuClip = true,
+            isSdxl = true
+        )
+    }
+
+    private fun createAnythingXLModel(): Model {
+        val id = "anythingxl"
+        val fileUri = "xororz/sdxl-qnn/resolve/main/anythingxl_qnn2.28_8gen4.zip"
+
+        val isDownloaded = Model.isModelDownloaded(context, id, false)
+
+        return Model(
+            id = id,
+            name = "Anything XL",
+            description = context.getString(R.string.anythingxl_description),
+            baseUrl = baseUrl,
+            fileUri = fileUri,
+            generationSize = 1024,
+            approximateSize = "4.2GB",
+            isDownloaded = isDownloaded,
+            defaultPrompt = "masterpiece, best quality, 1girl, solo, cute, white hair,",
+            defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
+            runOnCpu = false,
+            useCpuClip = true,
+            isSdxl = true
+        )
     }
 
     private fun createAnythingV5Model(): Model {

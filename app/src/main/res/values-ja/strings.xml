@@ -2,6 +2,16 @@
 <resources>
     <string name="app_name">Local Dream</string>
     <string name="anythingv5_description">Anime Image Generation</string>
+    <string name="sdxl_base_description">SDXL General Image Generation</string>
+    <string name="anythingxl_description">Anything SDXL Version</string>
+    <string name="capture_logs">ログを収集</string>
+    <string name="capture_logs_hint">モデル実行中にアプリのログを収集し、終了後に表示します</string>
+    <string name="sdxl_lowram">SDXL 低メモリモード</string>
+    <string name="sdxl_lowram_hint">SDXL 専用：各モデルを必要時にのみ読み込み、使用後に解放します。16GB 未満のデバイスでは有効化してください。生成途中のプレビューは無効になります。</string>
+    <string name="captured_logs_title">収集されたログ</string>
+    <string name="log_saved">%1$s に保存しました</string>
+    <string name="log_save_failed">ログの保存に失敗しました</string>
+    <string name="no_logs_captured">ログは収集されませんでした</string>
     <string name="chilloutmix_description">ChilloutMix Series</string>
     <string name="qteamix_description">Chibi Style Anime</string>
     <string name="cuteyukimix_description">Cute Style Anime</string>

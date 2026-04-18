@@ -4,6 +4,16 @@
 
     <!-- Models -->
     <string name="anythingv5_description">动漫图像生成模型</string>
+    <string name="sdxl_base_description">SDXL 通用图像生成模型</string>
+    <string name="anythingxl_description">Anything SDXL 版本</string>
+    <string name="capture_logs">收集日志</string>
+    <string name="capture_logs_hint">运行模型时收集应用日志，退出后展示</string>
+    <string name="sdxl_lowram">SDXL 低内存模式</string>
+    <string name="sdxl_lowram_hint">仅 SDXL 生效：按需加载每个模型，用完即释放。小于 16GB 内存的设备建议开启。开启后将禁用生成过程预览。</string>
+    <string name="captured_logs_title">已收集的日志</string>
+    <string name="log_saved">已保存到 %1$s</string>
+    <string name="log_save_failed">日志保存失败</string>
+    <string name="no_logs_captured">未收集到日志</string>
     <string name="chilloutmix_description">人物图像生成模型</string>
     <string name="qteamix_description">动漫Q版风格模型</string>
     <string name="cuteyukimix_description">动漫特化可爱风格</string>

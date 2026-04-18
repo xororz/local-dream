@@ -21,9 +21,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import android.content.ContentValues
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import io.github.xororz.localdream.data.*
 import io.github.xororz.localdream.navigation.Screen
 import io.github.xororz.localdream.service.ModelDownloadService
+import io.github.xororz.localdream.utils.LogCapture
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.launch
 import java.text.DecimalFormat
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -368,6 +379,100 @@ fun ModelListScreen(
             onEmbeddingImported = {
                 scope.launch {
                     snackbarHostState.showSnackbar(context.getString(R.string.embedding_imported))
+                }
+            }
+        )
+    }
+
+    val capturedLogs = LogCapture.lastCapturedLogs.value
+    if (capturedLogs != null) {
+        AlertDialog(
+            onDismissRequest = { LogCapture.consume() },
+            title = { Text(stringResource(R.string.captured_logs_title)) },
+            text = {
+                if (capturedLogs.isBlank()) {
+                    Text(stringResource(R.string.no_logs_captured))
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp)
+                            .background(
+                                MaterialTheme.colorScheme.surfaceContainerHighest,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = capturedLogs,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US)
+                        .format(Date())
+                    val filename = "local_dream_log_$timestamp.log"
+                    scope.launch(Dispatchers.IO) {
+                        val savedPath = try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                val values = ContentValues().apply {
+                                    put(MediaStore.Downloads.DISPLAY_NAME, filename)
+                                    put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                                    put(
+                                        MediaStore.Downloads.RELATIVE_PATH,
+                                        Environment.DIRECTORY_DOWNLOADS + "/LocalDream"
+                                    )
+                                }
+                                val resolver = context.contentResolver
+                                val uri = resolver.insert(
+                                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                                    values
+                                ) ?: throw java.io.IOException("MediaStore insert failed")
+                                resolver.openOutputStream(uri)?.use { out ->
+                                    out.write(capturedLogs.toByteArray(Charsets.UTF_8))
+                                } ?: throw java.io.IOException("openOutputStream failed")
+                                "Downloads/LocalDream/$filename"
+                            } else {
+                                val dir = File(
+                                    Environment.getExternalStoragePublicDirectory(
+                                        Environment.DIRECTORY_DOWNLOADS
+                                    ),
+                                    "LocalDream"
+                                )
+                                if (!dir.exists()) dir.mkdirs()
+                                val file = File(dir, filename)
+                                FileOutputStream(file).use { out ->
+                                    out.write(capturedLogs.toByteArray(Charsets.UTF_8))
+                                }
+                                file.absolutePath
+                            }
+                        } catch (e: Exception) {
+                            Log.e("LogCapture", "save failed", e)
+                            null
+                        }
+                        withContext(Dispatchers.Main) {
+                            val msg = if (savedPath != null) {
+                                context.getString(R.string.log_saved, savedPath)
+                            } else {
+                                context.getString(R.string.log_save_failed)
+                            }
+                            snackbarHostState.showSnackbar(msg)
+                            LogCapture.consume()
+                        }
+                    }
+                }) {
+                    Text(stringResource(R.string.save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { LogCapture.consume() }) {
+                    Text(stringResource(R.string.close))
                 }
             }
         )
@@ -993,6 +1098,22 @@ fun ModelListScreen(
                                         preferences.getBoolean("show_diffusion_process", false)
                                     )
                                 }
+                                var captureLogs by remember {
+                                    mutableStateOf(
+                                        preferences.getBoolean("enable_log_capture", false)
+                                    )
+                                }
+                                var sdxlLowRam by remember {
+                                    mutableStateOf(
+                                        preferences.getBoolean("sdxl_lowram", true).also {
+                                            if (!preferences.contains("sdxl_lowram")) {
+                                                preferences.edit {
+                                                    putBoolean("sdxl_lowram", true)
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
 
                                 Row(
                                     modifier = Modifier
@@ -1108,6 +1229,76 @@ fun ModelListScreen(
                                             )
                                         }
                                     }
+                                }
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.capture_logs),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            stringResource(R.string.capture_logs_hint),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                    Switch(
+                                        checked = captureLogs,
+                                        onCheckedChange = {
+                                            captureLogs = it
+                                            preferences.edit {
+                                                putBoolean("enable_log_capture", it)
+                                            }
+                                        }
+                                    )
+                                }
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.sdxl_lowram),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            stringResource(R.string.sdxl_lowram_hint),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                    Switch(
+                                        checked = sdxlLowRam,
+                                        onCheckedChange = {
+                                            sdxlLowRam = it
+                                            preferences.edit {
+                                                putBoolean("sdxl_lowram", it)
+                                            }
+                                        }
+                                    )
                                 }
                             }
                         }
@@ -1972,7 +2163,7 @@ fun CustomNpuModelDialog(
             selectedZipUri = it
             if (modelName.isBlank()) {
                 getFileNameFromUri(context, it)?.let { fileName ->
-                    modelName = fileName.substringBeforeLast(".")
+                    modelName = fileName.substringBeforeLast(".").substringBefore("_qnn")
                 }
             }
         }

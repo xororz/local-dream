@@ -159,6 +159,7 @@ import io.github.xororz.localdream.service.BackendService
 import io.github.xororz.localdream.service.BackgroundGenerationService
 import io.github.xororz.localdream.service.BackgroundGenerationService.GenerationState
 import io.github.xororz.localdream.service.ModelDownloadService
+import io.github.xororz.localdream.utils.LogCapture
 import io.github.xororz.localdream.utils.performUpscale
 import io.github.xororz.localdream.utils.reportImage
 import io.github.xororz.localdream.utils.saveImage
@@ -316,8 +317,8 @@ fun ModelRunScreen(
                 prompt = "",
                 negativePrompt = "",
                 generationTime = "",
-                width = if (model?.runOnCpu == true) 256 else 512,
-                height = if (model?.runOnCpu == true) 256 else 512,
+                width = if (model?.isSdxl == true) 1024 else if (model?.runOnCpu == true) 256 else 512,
+                height = if (model?.isSdxl == true) 1024 else if (model?.runOnCpu == true) 256 else 512,
                 runOnCpu = model?.runOnCpu ?: false
             )
         )
@@ -346,8 +347,8 @@ fun ModelRunScreen(
     var hasInitialized by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
 
-    var currentWidth by remember { mutableStateOf(if (model?.runOnCpu == true) 256 else 512) }
-    var currentHeight by remember { mutableStateOf(if (model?.runOnCpu == true) 256 else 512) }
+    var currentWidth by remember { mutableStateOf(if (model?.isSdxl == true) 1024 else if (model?.runOnCpu == true) 256 else 512) }
+    var currentHeight by remember { mutableStateOf(if (model?.isSdxl == true) 1024 else if (model?.runOnCpu == true) 256 else 512) }
     var availableResolutions by remember { mutableStateOf<List<Resolution>>(emptyList()) }
     var showResolutionChangeDialog by remember { mutableStateOf(false) }
     var pendingResolution by remember { mutableStateOf<Resolution?>(null) }
@@ -646,8 +647,21 @@ fun ModelRunScreen(
         navController.navigateUp()
     }
 
+    DisposableEffect(modelId) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val captureEnabled = prefs.getBoolean("enable_log_capture", false)
+        if (captureEnabled) {
+            LogCapture.start()
+        }
+        onDispose {
+            if (captureEnabled) {
+                LogCapture.stopAndPublish()
+            }
+        }
+    }
+
     LaunchedEffect(modelId, model?.runOnCpu) {
-        if (model?.runOnCpu == false) {
+        if (model?.runOnCpu == false && model.isSdxl == false) {
             val baseResolution = Resolution(512, 512)
             val patchResolutions = PatchScanner.scanAvailableResolutions(context, modelId)
 
@@ -685,9 +699,13 @@ fun ModelRunScreen(
             scheduler = prefs.scheduler
 
             currentWidth =
-                if (prefs.width == -1) (if (model?.runOnCpu == true) 256 else 512) else prefs.width
+                if (model?.isSdxl == true) 1024
+                else if (prefs.width == -1) (if (model?.runOnCpu == true) 256 else 512)
+                else prefs.width
             currentHeight =
-                if (prefs.height == -1) (if (model?.runOnCpu == true) 256 else 512) else prefs.height
+                if (model?.isSdxl == true) 1024
+                else if (prefs.height == -1) (if (model?.runOnCpu == true) 256 else 512)
+                else prefs.height
 
             hasInitialized = true
         }
@@ -1002,8 +1020,8 @@ fun ModelRunScreen(
                                 steps = 20f,
                                 cfg = 7f,
                                 seed = "",
-                                width = if (model?.runOnCpu == true) 256 else 512,
-                                height = if (model?.runOnCpu == true) 256 else 512,
+                                width = if (model?.isSdxl == true) 1024 else if (model?.runOnCpu == true) 256 else 512,
+                                height = if (model?.isSdxl == true) 1024 else if (model?.runOnCpu == true) 256 else 512,
                                 denoiseStrength = 0.6f,
                                 useOpenCL = useOpenCL,
                                 batchCounts = 1,
@@ -1143,7 +1161,7 @@ fun ModelRunScreen(
                                                 .verticalScroll(rememberScrollState())
                                                 .padding(vertical = 4.dp)
                                         ) {
-                                            if (model?.runOnCpu == false && availableResolutions.isNotEmpty()) {
+                                            if (model?.runOnCpu == false && model.isSdxl == false && availableResolutions.isNotEmpty()) {
                                                 Column(
                                                     modifier = Modifier.fillMaxWidth(),
                                                     // verticalArrangement = Arrangement.spacedBy(
