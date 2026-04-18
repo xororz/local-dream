@@ -16,11 +16,11 @@ This project is **now open sourced and completely free**. Hope you enjoy it!
 If you like it, please consider [sponsor](https://github.com/xororz/local-dream?tab=readme-ov-file#-support-this-project) this project.
 
 > [!NOTE]
-> Currently focus on SD1.5 models. SD2.1 models are no longer maintained due to poor quality and not popular. SDXL/Flux models are too large for most devices. So will not support them for now.
+> Currently focus on SD1.5 and SDXL models. SD2.1 models are no longer maintained due to poor quality and not popular. SDXL models are only available for Snapdragon 8 Elite and Snapdragon 8 Elite Gen 5.
 >
-> Most users don't get how to properly use highres mode. Please check [here](#npu-high-resolution-support).
+> Most users don't get how to properly use highres mode for SD1.5. Please check [here](#npu-high-resolution-support).
 >
-> Now you can import your own NPU models converted using our easy-to-follow [NPU Model Conversion Guide](https://github.com/xororz/local-dream/tree/master/convert). And you can also download some pre-converted models from [xororz/sd-qnn](https://huggingface.co/xororz/sd-qnn/tree/main) or [Mr-J-369](https://huggingface.co/Mr-J-369). Download `_min` if you are using non-flagship chips. Download `_8gen1` if you are using 8gen1. Download `_8gen2` if you are using 8gen2/3/4/5. We recommend checking the instructions on the original model page to set up prompts and parameters.
+> Now you can import your own NPU models converted using our easy-to-follow [NPU Model Conversion Guide](https://github.com/xororz/local-dream/tree/master/convert). And you can also download some pre-converted models from [xororz/sd-qnn](https://huggingface.co/xororz/sd-qnn/tree/main) or [xororz/sdxl-qnn](https://huggingface.co/xororz/sdxl-qnn/tree/main) or [Mr-J-369](https://huggingface.co/Mr-J-369). For SD1.5 models, download `_min` if you are using non-flagship chips. Download `_8gen1` if you are using 8gen1. Download `_8gen2` if you are using 8gen2/3/4/5. We recommend checking the instructions on the original model page to set up prompts and parameters.
 >
 > You can join our [telegram group](https://t.me/local_dream) for discussion or help with testing.
 
@@ -35,7 +35,7 @@ If you like it, please consider [sponsor](https://github.com/xororz/local-dream?
 - 🎨 **txt2img** - Generate images from text descriptions
 - 🖼️ **img2img** - Transform existing images
 - 🎭 **inpaint** - Redraw selected areas of images
-- **custom models** - Import your own SD1.5 models for CPU (in app) or NPU (follow [conversion guide](https://github.com/xororz/local-dream/tree/master/convert)). You can get some pre-converted models from [xororz/sd-qnn](https://huggingface.co/xororz/sd-qnn) or [Mr-J-369](https://huggingface.co/Mr-J-369)
+- **custom models** - Import your own SD1.5 models for CPU (in app), SD1.5 and SDXL for NPU (follow [conversion guide](https://github.com/xororz/local-dream/tree/master/convert)). You can get some pre-converted models from [xororz/sd-qnn](https://huggingface.co/xororz/sd-qnn/tree/main) or [xororz/sdxl-qnn](https://huggingface.co/xororz/sdxl-qnn/tree/main) or [Mr-J-369](https://huggingface.co/Mr-J-369)
 - **lora support** - Support adding LoRA weights to custom CPU models when importing.
 - **prompt weights** - Emphasize certain words in prompts. E.g., `(masterpiece:1.5)`. Same format as [Automatic1111](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
 - **embeddings** - Support for custom embeddings like [EasyNegative](https://civitai.com/models/7808/easynegative). SafeTensor format is required. Convert `pt` to `safetensors` using [this](https://chino.icu/local-dream/pt2sf.py)
@@ -124,7 +124,7 @@ Open this project in Android Studio and navigate to:
 
 - **SDK**: Qualcomm QNN SDK leveraging Hexagon NPU
 - **Quantization**: W8A16 static quantization for optimal performance
-- **Resolution**: Fixed 512×512 model shape
+- **Resolution**: For SD1.5, fixed 512×512 base model shape, more shapes available using patches. For SDXL, fixed 1024x1024 model shape
 - **Performance**: Extremely fast inference speed
 
 ### CPU/GPU Inference
@@ -137,13 +137,13 @@ Open this project in Android Studio and navigate to:
 ## NPU High Resolution Support
 
 > [!IMPORTANT]
-> Please note that quantized high-resolution(>768x768) models may produce images with poor layout. We recommend first generating at 512 resolution (optionally you can upscale it), then using the high-resolution model for img2img (which is essentially Highres.fix). The suggested img2img denoise_strength is around 0.8. After that, you can get images with better layout and details.
+> Please note that quantized high-resolution(>768x768) SD1.5 models may produce images with poor layout. We recommend first generating at 512 resolution (optionally you can upscale it), then using the high-resolution model for img2img (which is essentially Highres.fix). The suggested img2img denoise_strength is around 0.8. After that, you can get images with better layout and details.
 
 ## Device Compatibility
 
 ### NPU Acceleration Support
 
-Compatible with devices featuring:
+SD1.5 compatible with devices featuring:
 
 - **Snapdragon 8 Gen 1/8+ Gen 1**
 - **Snapdragon 8 Gen 2**
@@ -151,6 +151,11 @@ Compatible with devices featuring:
 - **Snapdragon 8 Elite**
 - **Snapdragon 8 Elite Gen 5/8 Gen 5**
 - Non-flagship chips with Hexagon V68 or above (e.g., Snapdragon 7 Gen 1, 8s Gen 3)
+
+SDXL compatible with devices featuring:
+
+- **Snapdragon 8 Elite**
+- **Snapdragon 8 Elite Gen 5**
 
 > **Note**: Other devices cannot download NPU models
 
@@ -165,13 +170,15 @@ The following models are built-in and can be downloaded directly in the app:
 
 <div align="center">
 
-| Model                | Type  | CPU/GPU | NPU | Clip Skip | Source                                                                      |
-| -------------------- | ----- | :-----: | :-: | :-------: | --------------------------------------------------------------------------- |
-| **AnythingV5**       | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/9409?modelVersionId=30163)             |
-| **ChilloutMix**      | SD1.5 |   ✅    | ✅  |     1     | [CivitAI](https://civitai.com/models/6424/chilloutmix?modelVersionId=11732) |
-| **Absolute Reality** | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/81458?modelVersionId=132760)           |
-| **QteaMix**          | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/50696/qteamix-q?modelVersionId=94654)  |
-| **CuteYukiMix**      | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/28169?modelVersionId=265102)           |
+| Model                | Type  | CPU/GPU | NPU | Clip Skip | Source                                                                          |
+| -------------------- | ----- | :-----: | :-: | :-------: | ------------------------------------------------------------------------------- |
+| **SDXL Base 1.0**    | SDXL  |   ❌    | ✅  |     -     | [HuggingFace](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0)  |
+| **Anything XL**      | SDXL  |   ❌    | ✅  |     -     | [CivitAI](https://civitai.com/models/9409/or-anything-xl?modelVersionId=384264) |
+| **AnythingV5**       | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/9409?modelVersionId=30163)                 |
+| **ChilloutMix**      | SD1.5 |   ✅    | ✅  |     1     | [CivitAI](https://civitai.com/models/6424/chilloutmix?modelVersionId=11732)     |
+| **Absolute Reality** | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/81458?modelVersionId=132760)               |
+| **QteaMix**          | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/50696/qteamix-q?modelVersionId=94654)      |
+| **CuteYukiMix**      | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/28169?modelVersionId=265102)               |
 
 </div>
 
