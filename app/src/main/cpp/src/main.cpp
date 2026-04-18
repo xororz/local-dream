@@ -61,11 +61,14 @@ bool use_safety_checker = false;
 bool use_mnn_clip = false;
 bool use_clip_v2 = false;
 bool upscaler_mode = false;
+bool sdxl_mode = false;
 float nsfw_threshold = 0.5f;
-std::string clipPath, unetPath, vaeDecoderPath, vaeEncoderPath,
+std::string clipPath, clip2Path, unetPath, vaeDecoderPath, vaeEncoderPath,
     safetyCheckerPath, tokenizerPath, patchPath, modelDir, upscalerPath;
 std::vector<float> pos_emb;
 std::vector<uint16_t> token_emb;  // Stored as FP16 to save memory
+std::vector<float> pos_emb_2;
+std::vector<uint16_t> token_emb_2;  // SDXL encoder 2 token embeddings (FP16)
 std::shared_ptr<tokenizers::Tokenizer> tokenizer;
 PromptProcessor promptProcessor;
 std::unique_ptr<QnnModel> clipApp = nullptr;
@@ -74,6 +77,7 @@ std::unique_ptr<QnnModel> vaeDecoderApp = nullptr;
 std::unique_ptr<QnnModel> vaeEncoderApp = nullptr;
 std::unique_ptr<QnnModel> upscalerApp = nullptr;
 MNN::Interpreter *clipInterpreter = nullptr;
+MNN::Interpreter *clip2Interpreter = nullptr;
 MNN::Interpreter *unetInterpreter = nullptr;
 MNN::Interpreter *vaeDecoderInterpreter = nullptr;
 MNN::Interpreter *vaeEncoderInterpreter = nullptr;
@@ -81,6 +85,7 @@ MNN::Interpreter *safetyCheckerInterpreter = nullptr;
 
 // MNN Session Pointers
 MNN::Session *clipSession = nullptr;
+MNN::Session *clip2Session = nullptr;
 MNN::Session *unetSession = nullptr;
 MNN::Session *vaeDecoderSession = nullptr;
 MNN::Session *vaeEncoderSession = nullptr;
@@ -406,6 +411,7 @@ void processCommandLine(int argc, char **argv) {
     OPT_CONVERT = 30,
     OPT_CONVERT_CLIP_SKIP_2 = 31,
     OPT_UPSCALER_MODE = 32,
+    OPT_SDXL = 33,
     OPT_BACKEND = 3,
     OPT_LOG_LEVEL = 10,
     OPT_VERSION = 13,
@@ -436,6 +442,7 @@ void processCommandLine(int argc, char **argv) {
       {"version", pal::no_argument, NULL, OPT_VERSION},
       {"patch", pal::required_argument, NULL, OPT_PATCH},
       {"upscaler_mode", pal::no_argument, NULL, OPT_UPSCALER_MODE},
+      {"sdxl", pal::no_argument, NULL, OPT_SDXL},
       {NULL, 0, NULL, 0}};
   std::string backendPathCmd, systemLibraryPathCmd;
   QnnLog_Level_t logLevel = QNN_LOG_LEVEL_ERROR;
@@ -454,71 +461,6 @@ void processCommandLine(int argc, char **argv) {
       case OPT_CLIP:
         clipPath = pal::g_optArg;
         modelDir = std::filesystem::path(clipPath).parent_path().string();
-
-        if (clipPath.length() >= 8 &&
-            clipPath.substr(clipPath.length() - 8) == "clip.mnn") {
-          std::filesystem::path clipPathObj(clipPath);
-          std::filesystem::path parentDir = clipPathObj.parent_path();
-          std::filesystem::path v2Path = parentDir / "clip_v2.mnn";
-
-          if (std::filesystem::exists(v2Path)) {
-            QNN_INFO("Found clip_v2.mnn, upgrading from %s to %s",
-                     clipPath.c_str(), v2Path.string().c_str());
-            clipPath = v2Path.string();
-            use_clip_v2 = true;
-
-            // pos_emb.bin token_emb.bin
-            std::filesystem::path posEmbPath = parentDir / "pos_emb.bin";
-            std::filesystem::path tokenEmbPath = parentDir / "token_emb.bin";
-
-            if (!std::filesystem::exists(posEmbPath))
-              showHelpAndExit("pos_emb.bin not found: " + posEmbPath.string());
-            if (!std::filesystem::exists(tokenEmbPath))
-              showHelpAndExit("token_emb.bin not found: " +
-                              tokenEmbPath.string());
-
-            std::ifstream posFile(posEmbPath, std::ios::binary);
-            posFile.seekg(0, std::ios::end);
-            size_t posSize = posFile.tellg() / sizeof(float);
-            posFile.seekg(0, std::ios::beg);
-            pos_emb.resize(posSize);
-            posFile.read(reinterpret_cast<char *>(pos_emb.data()),
-                         posSize * sizeof(float));
-            posFile.close();
-            QNN_INFO("Loaded pos_emb.bin: %zu floats", posSize);
-
-            std::ifstream tokenFile(tokenEmbPath, std::ios::binary);
-            tokenFile.seekg(0, std::ios::end);
-            size_t fileSize = tokenFile.tellg();
-            tokenFile.seekg(0, std::ios::beg);
-
-            const size_t SIZE_THRESHOLD = 100 * 1024 * 1024;  // 100MB
-
-            if (fileSize > SIZE_THRESHOLD) {
-              size_t tokenSize = fileSize / sizeof(float);
-              std::vector<float> tempBuffer(tokenSize);
-              tokenFile.read(reinterpret_cast<char *>(tempBuffer.data()),
-                             fileSize);
-
-              token_emb.resize(tokenSize);
-              for (size_t i = 0; i < tokenSize; i++) {
-                token_emb[i] = fp32_to_fp16(tempBuffer[i]);
-              }
-              QNN_INFO(
-                  "Loaded token_emb.bin: %zu floats (converted from FP32 to "
-                  "FP16)",
-                  tokenSize);
-            } else {
-              size_t tokenSize = fileSize / sizeof(uint16_t);
-              token_emb.resize(tokenSize);
-              tokenFile.read(reinterpret_cast<char *>(token_emb.data()),
-                             fileSize);
-              QNN_INFO("Loaded token_emb.bin: %zu elements (FP16 format)",
-                       tokenSize);
-            }
-            tokenFile.close();
-          }
-        }
         break;
       case OPT_UNET:
         unetPath = pal::g_optArg;
@@ -576,6 +518,11 @@ void processCommandLine(int argc, char **argv) {
         break;
       case OPT_UPSCALER_MODE:
         upscaler_mode = true;
+        break;
+      case OPT_SDXL:
+        sdxl_mode = true;
+        text_embedding_size = 768;
+        text_embedding_size_2 = 1280;
         break;
       default:
         showHelpAndExit("Invalid argument passed.");
@@ -641,6 +588,106 @@ void processCommandLine(int argc, char **argv) {
   if (vaeEncoderPath.empty())
     QNN_WARN("VAE Encoder path missing. img2img disabled unless --cpu");
 
+  // Post-CLI: load CLIP extras (pos_emb/token_emb) and auto-detect clip_v2 /
+  // clip2 based on flags.
+  auto loadTokenEmb = [](const std::filesystem::path &tokenEmbPath,
+                         std::vector<uint16_t> &dst, bool force_fp16) {
+    std::ifstream tokenFile(tokenEmbPath, std::ios::binary);
+    tokenFile.seekg(0, std::ios::end);
+    size_t fileSize = tokenFile.tellg();
+    tokenFile.seekg(0, std::ios::beg);
+
+    const size_t SIZE_THRESHOLD = 100 * 1024 * 1024;  // 100MB
+    if (!force_fp16 && fileSize > SIZE_THRESHOLD) {
+      size_t tokenSize = fileSize / sizeof(float);
+      std::vector<float> tempBuffer(tokenSize);
+      tokenFile.read(reinterpret_cast<char *>(tempBuffer.data()), fileSize);
+      dst.resize(tokenSize);
+      for (size_t i = 0; i < tokenSize; i++) {
+        dst[i] = fp32_to_fp16(tempBuffer[i]);
+      }
+      QNN_INFO("Loaded %s: %zu floats (converted FP32->FP16)",
+               tokenEmbPath.filename().string().c_str(), tokenSize);
+    } else {
+      size_t tokenSize = fileSize / sizeof(uint16_t);
+      dst.resize(tokenSize);
+      tokenFile.read(reinterpret_cast<char *>(dst.data()), fileSize);
+      QNN_INFO("Loaded %s: %zu elements (FP16)",
+               tokenEmbPath.filename().string().c_str(), tokenSize);
+    }
+    tokenFile.close();
+  };
+
+  auto loadPosEmb = [](const std::filesystem::path &posEmbPath,
+                       std::vector<float> &dst) {
+    std::ifstream posFile(posEmbPath, std::ios::binary);
+    posFile.seekg(0, std::ios::end);
+    size_t posSize = posFile.tellg() / sizeof(float);
+    posFile.seekg(0, std::ios::beg);
+    dst.resize(posSize);
+    posFile.read(reinterpret_cast<char *>(dst.data()), posSize * sizeof(float));
+    posFile.close();
+    QNN_INFO("Loaded %s: %zu floats",
+             posEmbPath.filename().string().c_str(), posSize);
+  };
+
+  if (sdxl_mode) {
+    // SDXL: expect clip.mnn, clip_2.mnn, pos_emb.bin, pos_emb_2.bin,
+    // token_emb.bin, token_emb_2.bin in the same dir as --clip.
+    std::filesystem::path clipPathObj(clipPath);
+    std::filesystem::path parentDir = clipPathObj.parent_path();
+
+    std::filesystem::path clip2PathFs = parentDir / "clip_2.mnn";
+    std::filesystem::path posEmbPath = parentDir / "pos_emb.bin";
+    std::filesystem::path posEmbPath2 = parentDir / "pos_emb_2.bin";
+    std::filesystem::path tokenEmbPath = parentDir / "token_emb.bin";
+    std::filesystem::path tokenEmbPath2 = parentDir / "token_emb_2.bin";
+
+    if (!std::filesystem::exists(clip2PathFs))
+      showHelpAndExit("clip_2.mnn not found: " + clip2PathFs.string());
+    if (!std::filesystem::exists(posEmbPath))
+      showHelpAndExit("pos_emb.bin not found: " + posEmbPath.string());
+    if (!std::filesystem::exists(posEmbPath2))
+      showHelpAndExit("pos_emb_2.bin not found: " + posEmbPath2.string());
+    if (!std::filesystem::exists(tokenEmbPath))
+      showHelpAndExit("token_emb.bin not found: " + tokenEmbPath.string());
+    if (!std::filesystem::exists(tokenEmbPath2))
+      showHelpAndExit("token_emb_2.bin not found: " + tokenEmbPath2.string());
+
+    clip2Path = clip2PathFs.string();
+    use_clip_v2 = true;  // SDXL always feeds pre-computed embeddings to CLIP
+
+    loadPosEmb(posEmbPath, pos_emb);
+    loadPosEmb(posEmbPath2, pos_emb_2);
+    // SDXL token_emb always FP16, skip threshold detection
+    loadTokenEmb(tokenEmbPath, token_emb, /*force_fp16=*/true);
+    loadTokenEmb(tokenEmbPath2, token_emb_2, /*force_fp16=*/true);
+  } else if (clipPath.length() >= 8 &&
+             clipPath.substr(clipPath.length() - 8) == "clip.mnn") {
+    // SD1.5: auto-upgrade to clip_v2.mnn if present alongside.
+    std::filesystem::path clipPathObj(clipPath);
+    std::filesystem::path parentDir = clipPathObj.parent_path();
+    std::filesystem::path v2Path = parentDir / "clip_v2.mnn";
+
+    if (std::filesystem::exists(v2Path)) {
+      QNN_INFO("Found clip_v2.mnn, upgrading from %s to %s", clipPath.c_str(),
+               v2Path.string().c_str());
+      clipPath = v2Path.string();
+      use_clip_v2 = true;
+
+      std::filesystem::path posEmbPath = parentDir / "pos_emb.bin";
+      std::filesystem::path tokenEmbPath = parentDir / "token_emb.bin";
+
+      if (!std::filesystem::exists(posEmbPath))
+        showHelpAndExit("pos_emb.bin not found: " + posEmbPath.string());
+      if (!std::filesystem::exists(tokenEmbPath))
+        showHelpAndExit("token_emb.bin not found: " + tokenEmbPath.string());
+
+      loadPosEmb(posEmbPath, pos_emb);
+      loadTokenEmb(tokenEmbPath, token_emb, /*force_fp16=*/false);
+    }
+  }
+
   if (use_safety_checker) {
     safetyCheckerInterpreter =
         MNN::Interpreter::createFromFile(safetyCheckerPath.c_str());
@@ -651,6 +698,18 @@ void processCommandLine(int argc, char **argv) {
   if (use_mnn_clip) {
     clipInterpreter = MNN::Interpreter::createFromFile(clipPath.c_str());
     if (!clipInterpreter) showHelpAndExit("Failed load CLIP MNN: " + clipPath);
+  }
+
+  if (sdxl_mode) {
+    // SDXL text encoders always run on MNN (CPU) regardless of backend.
+    if (!clipInterpreter) {
+      clipInterpreter = MNN::Interpreter::createFromFile(clipPath.c_str());
+      if (!clipInterpreter)
+        showHelpAndExit("Failed load SDXL CLIP1 MNN: " + clipPath);
+    }
+    clip2Interpreter = MNN::Interpreter::createFromFile(clip2Path.c_str());
+    if (!clip2Interpreter)
+      showHelpAndExit("Failed load SDXL CLIP2 MNN: " + clip2Path);
   }
 
   if (use_mnn) {
@@ -717,7 +776,7 @@ void processCommandLine(int argc, char **argv) {
     }
   }
 
-  if (!use_mnn_clip) {
+  if (!use_mnn_clip && !sdxl_mode) {
     clipApp = createQnnModel(clipPath, "clip");
     if (!clipApp) showHelpAndExit("Failed create QNN CLIP model.");
   }
@@ -741,8 +800,10 @@ void processCommandLine(int argc, char **argv) {
 
 // --- Text Processing ---
 struct ProcessedPrompt {
-  std::vector<int> ids;                    // CLIP
-  std::vector<float> weighted_embeddings;  // CLIP V2 (77*768)
+  std::vector<int> ids;                      // CLIP (pad 49407)
+  std::vector<int> ids_2;                    // SDXL encoder 2 (pad 0)
+  std::vector<float> weighted_embeddings;    // 77*768
+  std::vector<float> weighted_embeddings_2;  // SDXL: 77*1280
 };
 
 ProcessedPrompt processWeightedPrompt(const std::string &prompt_text,
@@ -751,8 +812,12 @@ ProcessedPrompt processWeightedPrompt(const std::string &prompt_text,
 
   auto tokens = promptProcessor.process(prompt_text);
 
-  // embedding (77 x 768)
-  std::vector<float> embeddings(max_len * 768, 0.0f);
+  const int dim1 = 768;
+  const int dim2 = text_embedding_size_2;
+
+  std::vector<float> embeddings(max_len * dim1, 0.0f);
+  std::vector<float> embeddings_2;
+  if (sdxl_mode) embeddings_2.assign(max_len * dim2, 0.0f);
   std::vector<int> ids;
   std::vector<float> weights;
 
@@ -763,15 +828,26 @@ ProcessedPrompt processWeightedPrompt(const std::string &prompt_text,
     if (current_pos >= max_len - 1) break;
 
     if (token.is_embedding) {
-      int emb_size = token.embedding_data.size();
-      int emb_tokens = emb_size / 768;
+      int emb_tokens = 0;
+      if (!token.embedding_data.empty())
+        emb_tokens = token.embedding_data.size() / dim1;
+      else if (sdxl_mode && !token.embedding_data_2.empty())
+        emb_tokens = token.embedding_data_2.size() / dim2;
 
       int pad_id = (text_embedding_size == 1024) ? 0 : 49407;
       for (int i = 0; i < emb_tokens && current_pos < max_len - 1; i++) {
         ids.push_back(pad_id);
-        for (int j = 0; j < 768; j++) {
-          embeddings[current_pos * 768 + j] =
-              token.embedding_data[i * 768 + j] * token.weight;
+        if (!token.embedding_data.empty()) {
+          for (int j = 0; j < dim1; j++) {
+            embeddings[current_pos * dim1 + j] =
+                token.embedding_data[i * dim1 + j] * token.weight;
+          }
+        }
+        if (sdxl_mode && !token.embedding_data_2.empty()) {
+          for (int j = 0; j < dim2; j++) {
+            embeddings_2[current_pos * dim2 + j] =
+                token.embedding_data_2[i * dim2 + j] * token.weight;
+          }
         }
         weights.push_back(token.weight);
         current_pos++;
@@ -803,33 +879,79 @@ ProcessedPrompt processWeightedPrompt(const std::string &prompt_text,
 
   result.ids = ids;
 
+  // SDXL encoder 2 uses pad id 0 instead of 49407 after the first EOS.
+  if (sdxl_mode) {
+    std::vector<int> ids2 = ids;
+    int eos_pos = -1;
+    for (int i = 1; i < max_len; i++) {
+      if (ids2[i] == 49407) {
+        eos_pos = i;
+        break;
+      }
+    }
+    if (eos_pos >= 0) {
+      for (int i = eos_pos + 1; i < max_len; i++) ids2[i] = 0;
+    }
+    result.ids_2 = ids2;
+  }
+
   if (use_clip_v2 && !token_emb.empty() && !pos_emb.empty()) {
     for (int i = 0; i < max_len; i++) {
       int token_id = ids[i];
-      float weight = (i < weights.size()) ? weights[i] : 1.0f;
+      float weight = (i < (int)weights.size()) ? weights[i] : 1.0f;
 
       bool has_emb = false;
-      for (int j = 0; j < 768; j++) {
-        if (embeddings[i * 768 + j] != 0.0f) {
+      for (int j = 0; j < dim1; j++) {
+        if (embeddings[i * dim1 + j] != 0.0f) {
           has_emb = true;
           break;
         }
       }
 
       if (!has_emb) {
-        for (int j = 0; j < 768; j++) {
-          float token_val = fp16_to_fp32(token_emb[token_id * 768 + j]);
-          embeddings[i * 768 + j] = token_val * weight + pos_emb[i * 768 + j];
+        for (int j = 0; j < dim1; j++) {
+          float token_val = fp16_to_fp32(token_emb[token_id * dim1 + j]);
+          embeddings[i * dim1 + j] =
+              token_val * weight + pos_emb[i * dim1 + j];
         }
       } else {
-        for (int j = 0; j < 768; j++) {
-          embeddings[i * 768 + j] += pos_emb[i * 768 + j];
+        for (int j = 0; j < dim1; j++) {
+          embeddings[i * dim1 + j] += pos_emb[i * dim1 + j];
+        }
+      }
+    }
+  }
+
+  if (sdxl_mode && !token_emb_2.empty() && !pos_emb_2.empty()) {
+    const std::vector<int> &ids2 = result.ids_2;
+    for (int i = 0; i < max_len; i++) {
+      int token_id = ids2[i];
+      float weight = (i < (int)weights.size()) ? weights[i] : 1.0f;
+
+      bool has_emb = false;
+      for (int j = 0; j < dim2; j++) {
+        if (embeddings_2[i * dim2 + j] != 0.0f) {
+          has_emb = true;
+          break;
+        }
+      }
+
+      if (!has_emb) {
+        for (int j = 0; j < dim2; j++) {
+          float token_val = fp16_to_fp32(token_emb_2[token_id * dim2 + j]);
+          embeddings_2[i * dim2 + j] =
+              token_val * weight + pos_emb_2[i * dim2 + j];
+        }
+      } else {
+        for (int j = 0; j < dim2; j++) {
+          embeddings_2[i * dim2 + j] += pos_emb_2[i * dim2 + j];
         }
       }
     }
   }
 
   result.weighted_embeddings = embeddings;
+  result.weighted_embeddings_2 = embeddings_2;
   return result;
 }
 
@@ -837,6 +959,8 @@ struct ProcessedPromptPair {
   std::vector<int> ids;                    // old (2*77)
   std::vector<float> negative_embeddings;  // new embedding (77*768)
   std::vector<float> positive_embeddings;  // new embedding (77*768)
+  std::vector<float> negative_embeddings_2;  // SDXL (77*1280)
+  std::vector<float> positive_embeddings_2;  // SDXL (77*1280)
 };
 
 ProcessedPromptPair processPromptPair(const std::string &positive,
@@ -855,6 +979,8 @@ ProcessedPromptPair processPromptPair(const std::string &positive,
 
   result.negative_embeddings = neg_result.weighted_embeddings;
   result.positive_embeddings = pos_result.weighted_embeddings;
+  result.negative_embeddings_2 = neg_result.weighted_embeddings_2;
+  result.positive_embeddings_2 = pos_result.weighted_embeddings_2;
 
   return result;
 }
@@ -1396,9 +1522,15 @@ GenerationResult generateImage(
   if (use_safety_checker && !safetyCheckerInterpreter)
     throw std::runtime_error("SafetyChecker missing");
   if (!use_mnn) {
-    if (!use_mnn_clip && !clipApp) throw std::runtime_error("QNN CLIP missing");
-    if (use_mnn_clip && !clipInterpreter)
-      throw std::runtime_error("MNN CLIP missing(hybrid)");
+    if (!sdxl_mode) {
+      if (!use_mnn_clip && !clipApp)
+        throw std::runtime_error("QNN CLIP missing");
+      if (use_mnn_clip && !clipInterpreter)
+        throw std::runtime_error("MNN CLIP missing(hybrid)");
+    } else {
+      if (!clipInterpreter || !clip2Interpreter)
+        throw std::runtime_error("SDXL MNN CLIP interpreters missing");
+    }
     if (!unetApp) throw std::runtime_error("QNN UNET missing");
     if (!vaeDecoderApp) throw std::runtime_error("QNN VAE Dec missing");
     if (request_img2img && !vaeEncoderApp)
@@ -1425,13 +1557,92 @@ GenerationResult generateImage(
     std::vector<int> clip_input_ids = processed.ids;  // old (2*77)
     auto parsed_input_text = tokenizer->Decode(clip_input_ids);
     QNN_INFO("Parsed Input Text: %s", parsed_input_text.c_str());
+
+    // Regular embedding buffer (SD1.5) reused in SDXL as encoder-1 output.
     std::vector<float> text_embedding_float(batch_size * 77 *
                                             text_embedding_size);
+
+    // SDXL-specific buffers.
+    const int sdxl_concat_dim =
+        text_embedding_size + text_embedding_size_2;  // 2048
+    std::vector<float> sdxl_encoder_hidden_states;  // [batch, 77, 2048]
+    std::vector<float> sdxl_text_embeds;            // [batch, 1280]
+    std::vector<float> sdxl_time_ids;               // [batch, 6]
+    if (sdxl_mode) {
+      sdxl_encoder_hidden_states.assign(batch_size * 77 * sdxl_concat_dim,
+                                        0.0f);
+      sdxl_text_embeds.assign(batch_size * text_embedding_size_2, 0.0f);
+      sdxl_time_ids.assign(batch_size * 6, 0.0f);
+      for (int b = 0; b < batch_size; b++) {
+        sdxl_time_ids[b * 6 + 0] = (float)output_height;  // original_size h
+        sdxl_time_ids[b * 6 + 1] = (float)output_width;   // original_size w
+        sdxl_time_ids[b * 6 + 2] = 0.0f;                  // crop_top
+        sdxl_time_ids[b * 6 + 3] = 0.0f;                  // crop_left
+        sdxl_time_ids[b * 6 + 4] = (float)output_height;  // target_size h
+        sdxl_time_ids[b * 6 + 5] = (float)output_width;   // target_size w
+      }
+    }
+
     auto clip_start = std::chrono::high_resolution_clock::now();
     int32_t *input_ids_ptr = clip_input_ids.data();
     float *embed_ptr = text_embedding_float.data();
 
-    if (use_mnn || use_mnn_clip) {
+    if (sdxl_mode) {
+      if (!clipInterpreter || !clip2Interpreter)
+        throw std::runtime_error("SDXL CLIP interpreters not initialized!");
+
+      auto run_sdxl_clip =
+          [&](const std::vector<float> &emb1, const std::vector<float> &emb2,
+              float *out_hidden_concat /*77*2048*/, float *out_pooled /*1280*/) {
+            // Encoder 1 (CLIP-L): 77x768 -> last_hidden_state 77x768
+            auto in1 =
+                clipInterpreter->getSessionInput(clipSession, "input_embedding");
+            memcpy(in1->host<float>(), emb1.data(),
+                   77 * text_embedding_size * sizeof(float));
+            clipInterpreter->runSession(clipSession);
+            auto out1 = clipInterpreter->getSessionOutput(clipSession,
+                                                          "last_hidden_state");
+            const float *out1_data = out1->host<float>();
+
+            // Encoder 2 (CLIP-G): 77x1280 -> last_hidden_state 77x1280 +
+            // pooled_output 1x1280
+            auto in2 = clip2Interpreter->getSessionInput(clip2Session,
+                                                        "input_embedding");
+            memcpy(in2->host<float>(), emb2.data(),
+                   77 * text_embedding_size_2 * sizeof(float));
+            clip2Interpreter->runSession(clip2Session);
+            auto out2_hidden = clip2Interpreter->getSessionOutput(
+                clip2Session, "last_hidden_state");
+            auto out2_pool = clip2Interpreter->getSessionOutput(
+                clip2Session, "pooled_output");
+            const float *out2_hidden_data = out2_hidden->host<float>();
+            const float *out2_pool_data = out2_pool->host<float>();
+
+            // Concat along feature dim: [77, 768] + [77, 1280] = [77, 2048]
+            for (int t = 0; t < 77; t++) {
+              memcpy(out_hidden_concat + t * sdxl_concat_dim,
+                     out1_data + t * text_embedding_size,
+                     text_embedding_size * sizeof(float));
+              memcpy(out_hidden_concat + t * sdxl_concat_dim +
+                         text_embedding_size,
+                     out2_hidden_data + t * text_embedding_size_2,
+                     text_embedding_size_2 * sizeof(float));
+            }
+            memcpy(out_pooled, out2_pool_data,
+                   text_embedding_size_2 * sizeof(float));
+          };
+
+      // negative (batch idx 0)
+      run_sdxl_clip(processed.negative_embeddings,
+                    processed.negative_embeddings_2,
+                    sdxl_encoder_hidden_states.data(),
+                    sdxl_text_embeds.data());
+      // positive (batch idx 1)
+      run_sdxl_clip(processed.positive_embeddings,
+                    processed.positive_embeddings_2,
+                    sdxl_encoder_hidden_states.data() + 77 * sdxl_concat_dim,
+                    sdxl_text_embeds.data() + text_embedding_size_2);
+    } else if (use_mnn || use_mnn_clip) {
       MNN::Interpreter *currentClipInterpreter = nullptr;
       MNN::Session *currentClipSession = nullptr;
       bool dynamicCreated = false;
@@ -1554,6 +1765,7 @@ GenerationResult generateImage(
     if (ponyv55) scheduler->set_prediction_type("v_prediction");
     scheduler->set_timesteps(steps);
     xt::xarray<float> timesteps = scheduler->get_timesteps();
+    const float vae_scale = sdxl_mode ? 0.13025f : 0.18215f;
     std::vector<int> shape = {1, 4, sample_height, sample_width};
     std::vector<int> shape_batch2 = {batch_size, 4, sample_height,
                                      sample_width};
@@ -1575,7 +1787,7 @@ GenerationResult generateImage(
       original_image = xt::adapt(img_data, img_shape);
 
       bool need_vae_enc_tiling = ((output_width > 512 || output_height > 512) &&
-                                  !use_mnn && vaeEncoderApp);
+                                  !use_mnn && vaeEncoderApp && !sdxl_mode);
 
       xt::xarray<float> img_lat_scaled;
 
@@ -1650,17 +1862,24 @@ GenerationResult generateImage(
         } else {
           if (!vaeEncoderApp)
             throw std::runtime_error("Global vaeEncoderApp not init!");
-          if (StatusCode::SUCCESS !=
-              vaeEncoderApp->executeVaeEncoderGraphs(
-                  img_data.data(), vae_enc_mean.data(), vae_enc_std.data()))
-            throw std::runtime_error("QNN VAE enc exec failed");
+          if (sdxl_mode) {
+            if (StatusCode::SUCCESS !=
+                vaeEncoderApp->executeVaeEncoderGraphsSDXL(
+                    img_data.data(), vae_enc_mean.data(), vae_enc_std.data()))
+              throw std::runtime_error("QNN VAE enc SDXL exec failed");
+          } else {
+            if (StatusCode::SUCCESS !=
+                vaeEncoderApp->executeVaeEncoderGraphs(
+                    img_data.data(), vae_enc_mean.data(), vae_enc_std.data()))
+              throw std::runtime_error("QNN VAE enc exec failed");
+          }
         }
 
         auto mean = xt::adapt(vae_enc_mean, shape);
         auto std_dev = xt::adapt(vae_enc_std, shape);
         xt::xarray<float> noise_0 = xt::random::randn<float>(shape);
         xt::xarray<float> img_lat = xt::eval(mean + std_dev * noise_0);
-        img_lat_scaled = xt::eval(0.18215 * img_lat);
+        img_lat_scaled = xt::eval(vae_scale * img_lat);
 
       } else {
         std::cout << "Using VAE encoder tiling for " << output_width << "x"
@@ -1735,7 +1954,7 @@ GenerationResult generateImage(
             sample_width, vae_enc_latent_tile_size, latent_overlap_x,
             latent_overlap_y);
 
-        img_lat_scaled = xt::eval(0.18215 * img_lat);
+        img_lat_scaled = xt::eval(vae_scale * img_lat);
 
         std::cout << "VAE encoder tiling completed: "
                   << encoded_tiles_mean_std.size()
@@ -1825,12 +2044,12 @@ GenerationResult generateImage(
         try {
           // Decode current latents for preview
           xt::xarray<float> preview_latents =
-              xt::eval((1.0 / 0.18215) * latents);
+              xt::eval((1.0 / vae_scale) * latents);
 
           xt::xarray<float> pixels;
           bool preview_success = false;
 
-          if (output_width > 512 || output_height > 512) {
+          if ((output_width > 512 || output_height > 512) && !sdxl_mode) {
             // Use tiling for QNN large resolution preview
             auto [output_positions, latent_positions, overlap_x, overlap_y,
                   latent_overlap_x, latent_overlap_y] =
@@ -1891,14 +2110,18 @@ GenerationResult generateImage(
               preview_success = true;
             }
           } else {
-            // Single inference for QNN <= 512
+            // Single inference for QNN <= 512 (or SDXL @ 1024)
             std::vector<float> vae_dec_in_vec(preview_latents.begin(),
                                               preview_latents.end());
             std::vector<float> vae_dec_out_pixels(1 * 3 * output_width *
                                                   output_height);
-            if (StatusCode::SUCCESS ==
-                vaeDecoderApp->executeVaeDecoderGraphs(
-                    vae_dec_in_vec.data(), vae_dec_out_pixels.data())) {
+            StatusCode vae_dec_status =
+                sdxl_mode
+                    ? vaeDecoderApp->executeVaeDecoderGraphsSDXL(
+                          vae_dec_in_vec.data(), vae_dec_out_pixels.data())
+                    : vaeDecoderApp->executeVaeDecoderGraphs(
+                          vae_dec_in_vec.data(), vae_dec_out_pixels.data());
+            if (StatusCode::SUCCESS == vae_dec_status) {
               std::vector<int> pixel_shape = {1, 3, output_height,
                                               output_width};
               pixels = xt::adapt(vae_dec_out_pixels, pixel_shape);
@@ -1983,21 +2206,46 @@ GenerationResult generateImage(
           throw std::runtime_error("Global unetApp not initialized!");
 
         float *latents_in_ptr = latents_in_vec.data();
-        float *embed_ptr = text_embedding_float.data();
         float *latents_out_ptr = unet_out_latents.data();
 
-        if (StatusCode::SUCCESS !=
-            unetApp->executeUnetGraphs(latents_in_ptr,
-                                       static_cast<int>(current_ts), embed_ptr,
-                                       latents_out_ptr))
-          throw std::runtime_error("QNN UNET exec failed (uncond)");
+        if (sdxl_mode) {
+          float *hidden_ptr = sdxl_encoder_hidden_states.data();
+          float *pooled_ptr = sdxl_text_embeds.data();
+          float *time_ids_ptr = sdxl_time_ids.data();
+          const int hidden_stride = 77 * sdxl_concat_dim;
+          const int pooled_stride = text_embedding_size_2;
+          const int time_ids_stride = 6;
 
-        if (StatusCode::SUCCESS !=
-            unetApp->executeUnetGraphs(latents_in_ptr + single_latent_size,
-                                       static_cast<int>(current_ts),
-                                       embed_ptr + 77 * text_embedding_size,
-                                       latents_out_ptr + single_latent_size))
-          throw std::runtime_error("QNN UNET exec failed (cond)");
+          if (StatusCode::SUCCESS !=
+              unetApp->executeUnetGraphsSDXL(
+                  latents_in_ptr, static_cast<int>(current_ts), hidden_ptr,
+                  pooled_ptr, time_ids_ptr, latents_out_ptr))
+            throw std::runtime_error("QNN UNET SDXL exec failed (uncond)");
+
+          if (StatusCode::SUCCESS !=
+              unetApp->executeUnetGraphsSDXL(
+                  latents_in_ptr + single_latent_size,
+                  static_cast<int>(current_ts), hidden_ptr + hidden_stride,
+                  pooled_ptr + pooled_stride, time_ids_ptr + time_ids_stride,
+                  latents_out_ptr + single_latent_size))
+            throw std::runtime_error("QNN UNET SDXL exec failed (cond)");
+        } else {
+          float *embed_ptr = text_embedding_float.data();
+
+          if (StatusCode::SUCCESS !=
+              unetApp->executeUnetGraphs(latents_in_ptr,
+                                         static_cast<int>(current_ts),
+                                         embed_ptr, latents_out_ptr))
+            throw std::runtime_error("QNN UNET exec failed (uncond)");
+
+          if (StatusCode::SUCCESS !=
+              unetApp->executeUnetGraphs(
+                  latents_in_ptr + single_latent_size,
+                  static_cast<int>(current_ts),
+                  embed_ptr + 77 * text_embedding_size,
+                  latents_out_ptr + single_latent_size))
+            throw std::runtime_error("QNN UNET exec failed (cond)");
+        }
       }
 
       auto step_end_time = std::chrono::high_resolution_clock::now();
@@ -2035,13 +2283,13 @@ GenerationResult generateImage(
     auto vae_dec_start = std::chrono::high_resolution_clock::now();
 
     bool need_vae_tiling =
-        ((output_width > 512 || output_height > 512) && !use_mnn);
+        ((output_width > 512 || output_height > 512) && !use_mnn && !sdxl_mode);
     if (need_vae_tiling) {
       std::cout << "Using VAE decoder tiling for " << output_width << "x"
                 << output_height << " output..." << std::endl;
     }
 
-    latents = xt::eval((1.0 / 0.18215) * latents);
+    latents = xt::eval((1.0 / vae_scale) * latents);
 
     xt::xarray<float> pixels;
 
@@ -2117,10 +2365,17 @@ GenerationResult generateImage(
         if (!vaeDecoderApp)
           throw std::runtime_error("Global vaeDecoderApp not init!");
 
-        if (StatusCode::SUCCESS !=
-            vaeDecoderApp->executeVaeDecoderGraphs(vae_dec_in_vec.data(),
-                                                   vae_dec_out_pixels.data()))
-          throw std::runtime_error("QNN VAE dec exec failed");
+        if (sdxl_mode) {
+          if (StatusCode::SUCCESS !=
+              vaeDecoderApp->executeVaeDecoderGraphsSDXL(
+                  vae_dec_in_vec.data(), vae_dec_out_pixels.data()))
+            throw std::runtime_error("QNN VAE dec SDXL exec failed");
+        } else {
+          if (StatusCode::SUCCESS !=
+              vaeDecoderApp->executeVaeDecoderGraphs(
+                  vae_dec_in_vec.data(), vae_dec_out_pixels.data()))
+            throw std::runtime_error("QNN VAE dec exec failed");
+        }
       }
 
       std::vector<int> pixel_shape = {1, 3, output_height, output_width};
@@ -2308,7 +2563,7 @@ int main(int argc, char **argv) {
     MNN::ScheduleConfig cfg_mnn_clip = cfg_common;
     cfg_mnn_clip.numThread = 4;
 
-    if (use_mnn_clip && clipInterpreter) {
+    if (use_mnn_clip && clipInterpreter && !sdxl_mode) {
       clipSession = clipInterpreter->createSession(cfg_mnn_clip);
       if (!clipSession)
         QNN_ERROR("Failed create persistent MNN CLIP session (hybrid)!");
@@ -2325,6 +2580,27 @@ int main(int argc, char **argv) {
         }
         clipInterpreter->resizeSession(clipSession);
         clipInterpreter->releaseModel();
+      }
+    }
+
+    if (sdxl_mode && clipInterpreter && clip2Interpreter) {
+      clipSession = clipInterpreter->createSession(cfg_mnn_clip);
+      clip2Session = clip2Interpreter->createSession(cfg_mnn_clip);
+      if (!clipSession || !clip2Session) {
+        QNN_ERROR("Failed create persistent SDXL MNN CLIP sessions!");
+      } else {
+        QNN_INFO("Persistent SDXL MNN CLIP1/CLIP2 sessions created.");
+        auto input1 =
+            clipInterpreter->getSessionInput(clipSession, "input_embedding");
+        clipInterpreter->resizeTensor(input1, {1, 77, text_embedding_size});
+        clipInterpreter->resizeSession(clipSession);
+        clipInterpreter->releaseModel();
+
+        auto input2 =
+            clip2Interpreter->getSessionInput(clip2Session, "input_embedding");
+        clip2Interpreter->resizeTensor(input2, {1, 77, text_embedding_size_2});
+        clip2Interpreter->resizeSession(clip2Session);
+        clip2Interpreter->releaseModel();
       }
     }
 
@@ -2411,6 +2687,10 @@ int main(int argc, char **argv) {
         int size = json.value("size", 512);
         req_width = size;
         req_height = size;
+      }
+      if (sdxl_mode) {
+        req_width = 1024;
+        req_height = 1024;
       }
       denoise_strength = json.value("denoise_strength", 0.6f);
       request_img2img = false;
@@ -2755,12 +3035,15 @@ int main(int argc, char **argv) {
   // --- Cleanup ---
   if (clipSession) clipInterpreter->releaseSession(clipSession);
   clipSession = nullptr;
+  if (clip2Session) clip2Interpreter->releaseSession(clip2Session);
+  clip2Session = nullptr;
   if (unetSession) unetInterpreter->releaseSession(unetSession);
   unetSession = nullptr;
   if (safetyCheckerSession)
     safetyCheckerInterpreter->releaseSession(safetyCheckerSession);
   safetyCheckerSession = nullptr;
   delete clipInterpreter;
+  delete clip2Interpreter;
   delete unetInterpreter;
   delete vaeDecoderInterpreter;
   delete vaeEncoderInterpreter;

@@ -16,12 +16,14 @@ struct PromptToken {
   std::string text;
   float weight;
   bool is_embedding;
-  std::vector<float> embedding_data;
+  std::vector<float> embedding_data;     // 768-dim (SD1.5 / SDXL encoder 1)
+  std::vector<float> embedding_data_2;   // 1280-dim (SDXL encoder 2)
 };
 
 class PromptProcessor {
  private:
-  std::map<std::string, std::vector<float>> embeddings_;
+  std::map<std::string, std::vector<float>> embeddings_;    // last-dim 768
+  std::map<std::string, std::vector<float>> embeddings_2_;  // last-dim 1280
   std::string embeddings_dir_;
 
   static std::string toLowerCase(const std::string &str) {
@@ -220,11 +222,18 @@ class PromptProcessor {
       if (!node.text.empty()) {
         std::string text_lower = toLowerCase(node.text);
 
-        if (embeddings_.find(text_lower) != embeddings_.end()) {
-          tokens.push_back(
-              {node.text, current_weight, true, embeddings_[text_lower]});
+        auto it1 = embeddings_.find(text_lower);
+        auto it2 = embeddings_2_.find(text_lower);
+        if (it1 != embeddings_.end() || it2 != embeddings_2_.end()) {
+          PromptToken t;
+          t.text = node.text;
+          t.weight = current_weight;
+          t.is_embedding = true;
+          if (it1 != embeddings_.end()) t.embedding_data = it1->second;
+          if (it2 != embeddings_2_.end()) t.embedding_data_2 = it2->second;
+          tokens.push_back(std::move(t));
         } else {
-          tokens.push_back({node.text, current_weight, false, {}});
+          tokens.push_back({node.text, current_weight, false, {}, {}});
         }
       }
     }
@@ -236,6 +245,7 @@ class PromptProcessor {
   void loadEmbeddings(const std::string &embeddings_dir) {
     embeddings_dir_ = embeddings_dir;
     embeddings_.clear();
+    embeddings_2_.clear();
 
     if (!std::filesystem::exists(embeddings_dir)) {
       return;
@@ -250,7 +260,22 @@ class PromptProcessor {
           std::string name_lower = toLowerCase(name);
 
           auto tensor_names = reader.get_tensor_names();
-          if (!tensor_names.empty()) {
+          bool has_768 = false, has_1280 = false;
+          for (const auto &tn : tensor_names) {
+            auto shape = reader.get_tensor_shape(tn);
+            if (shape.empty()) continue;
+            int last_dim = shape.back();
+            if (last_dim == 768 && !has_768) {
+              reader.read(tn, true);
+              embeddings_[name_lower] = reader.data;
+              has_768 = true;
+            } else if (last_dim == 1280 && !has_1280) {
+              reader.read(tn, true);
+              embeddings_2_[name_lower] = reader.data;
+              has_1280 = true;
+            }
+          }
+          if (!has_768 && !has_1280 && !tensor_names.empty()) {
             reader.read(tensor_names[0], true);
             embeddings_[name_lower] = reader.data;
           }
@@ -272,8 +297,12 @@ class PromptProcessor {
   }
 
   size_t getEmbeddingCount() const { return embeddings_.size(); }
+  size_t getEmbedding2Count() const { return embeddings_2_.size(); }
 
   bool hasEmbedding(const std::string &name) const {
     return embeddings_.find(toLowerCase(name)) != embeddings_.end();
+  }
+  bool hasEmbedding2(const std::string &name) const {
+    return embeddings_2_.find(toLowerCase(name)) != embeddings_2_.end();
   }
 };

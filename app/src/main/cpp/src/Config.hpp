@@ -6,6 +6,7 @@
 inline int sample_width = 64;
 inline int sample_height = 64;
 inline int text_embedding_size = 768;
+inline int text_embedding_size_2 = 1280;
 inline int output_width = 512;
 inline int output_height = 512;
 

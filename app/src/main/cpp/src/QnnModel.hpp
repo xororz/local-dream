@@ -455,6 +455,222 @@ class QnnModel : public QnnSampleApp {
     return returnStatus;
   }
 
+  StatusCode executeUnetGraphsSDXL(float *sample, int timestep,
+                                   float *encoder_hidden_states,
+                                   float *text_embeds, float *time_ids,
+                                   float *out_sample) {
+    auto returnStatus = StatusCode::SUCCESS;
+
+    size_t graphIdx = 0;
+    QNN_DEBUG("Starting sdxl unet execution for graphIdx: %d", graphIdx);
+
+    if (inputs == nullptr || outputs == nullptr) {
+      if (qnn::tools::iotensor::StatusCode::SUCCESS !=
+          m_ioTensor.setupInputAndOutputTensors(&inputs, &outputs,
+                                                (*m_graphsInfo)[graphIdx])) {
+        QNN_ERROR(
+            "Error in setting up Input and output Tensors for graphIdx: %d",
+            graphIdx);
+        returnStatus = StatusCode::FAILURE;
+        return returnStatus;
+      }
+    }
+    auto graphInfo = (*m_graphsInfo)[graphIdx];
+
+    if (graphInfo.numInputTensors != 5) {
+      QNN_ERROR("Expecting 5 input tensors for sdxl unet, got %d",
+                graphInfo.numInputTensors);
+      returnStatus = StatusCode::FAILURE;
+      return returnStatus;
+    }
+
+    // sample (fp32, 1x4xHxW)
+    {
+      int elementCount = 1 * 4 * sample_width * sample_height;
+      memcpy(static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[0]).data),
+             sample, elementCount * sizeof(float));
+    }
+
+    // timestep (int32, 1)
+    {
+      int32_t *ts =
+          static_cast<int32_t *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[2]).data);
+      ts[0] = timestep;
+    }
+
+    // encoder_hidden_states (fp32, 1x77x2048)
+    {
+      int elementCount = 1 * 77 * (text_embedding_size + text_embedding_size_2);
+      memcpy(static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[1]).data),
+             encoder_hidden_states, elementCount * sizeof(float));
+    }
+
+    // text_embeds (fp32, 1x1280)
+    {
+      int elementCount = 1 * text_embedding_size_2;
+      memcpy(static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[4]).data),
+             text_embeds, elementCount * sizeof(float));
+    }
+
+    // time_ids (fp32, 1x6)
+    {
+      int elementCount = 1 * 6;
+      memcpy(static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[3]).data),
+             time_ids, elementCount * sizeof(float));
+    }
+
+    QNN_DEBUG("Executing sdxl unet graph: %d", graphIdx);
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    auto executeStatus = m_qnnFunctionPointers.qnnInterface.graphExecute(
+        graphInfo.graph, inputs, graphInfo.numInputTensors, outputs,
+        graphInfo.numOutputTensors, m_profileBackendHandle, nullptr);
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    int duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       end_time - start_time)
+                       .count();
+    QNN_INFO("sdxl unet graph execution time: %d ms", duration);
+
+    if (QNN_GRAPH_NO_ERROR != executeStatus) {
+      returnStatus = StatusCode::FAILURE;
+      QNN_ERROR("sdxl unet graph execution failed!");
+      return returnStatus;
+    }
+
+    // out_sample (fp32, 1x4xHxW)
+    int elementCount = 1 * 4 * sample_width * sample_height;
+    memcpy(out_sample,
+           static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(outputs[0]).data),
+           elementCount * sizeof(float));
+
+    return returnStatus;
+  }
+
+  StatusCode executeVaeEncoderGraphsSDXL(float *pixel_values, float *mean,
+                                         float *std) {
+    auto returnStatus = StatusCode::SUCCESS;
+
+    size_t graphIdx = 0;
+    QNN_DEBUG("Starting sdxl vae encoder execution for graphIdx: %d", graphIdx);
+
+    if (inputs == nullptr || outputs == nullptr) {
+      if (qnn::tools::iotensor::StatusCode::SUCCESS !=
+          m_ioTensor.setupInputAndOutputTensors(&inputs, &outputs,
+                                                (*m_graphsInfo)[graphIdx])) {
+        QNN_ERROR(
+            "Error in setting up Input and output Tensors for graphIdx: %d",
+            graphIdx);
+        returnStatus = StatusCode::FAILURE;
+        return returnStatus;
+      }
+    }
+    auto graphInfo = (*m_graphsInfo)[graphIdx];
+
+    if (graphInfo.numInputTensors != 1) {
+      QNN_ERROR("Expecting 1 input tensor for sdxl vae encoder, got %d",
+                graphInfo.numInputTensors);
+      returnStatus = StatusCode::FAILURE;
+      return returnStatus;
+    }
+
+    // pixel_values (fp32, 1x3xHxW)
+    {
+      int elementCount = 1 * 3 * output_width * output_height;
+      memcpy(static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[0]).data),
+             pixel_values, elementCount * sizeof(float));
+    }
+
+    QNN_DEBUG("Executing sdxl vae encoder graph: %d", graphIdx);
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    auto executeStatus = m_qnnFunctionPointers.qnnInterface.graphExecute(
+        graphInfo.graph, inputs, graphInfo.numInputTensors, outputs,
+        graphInfo.numOutputTensors, m_profileBackendHandle, nullptr);
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    int duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       end_time - start_time)
+                       .count();
+    QNN_INFO("sdxl vae encoder graph execution time: %d ms", duration);
+
+    if (QNN_GRAPH_NO_ERROR != executeStatus) {
+      returnStatus = StatusCode::FAILURE;
+      QNN_ERROR("sdxl vae encoder graph execution failed!");
+      return returnStatus;
+    }
+
+    int elementCount = 1 * 4 * sample_width * sample_height;
+    memcpy(mean,
+           static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(outputs[0]).data),
+           elementCount * sizeof(float));
+    memcpy(std,
+           static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(outputs[1]).data),
+           elementCount * sizeof(float));
+
+    return returnStatus;
+  }
+
+  StatusCode executeVaeDecoderGraphsSDXL(float *latents, float *pixel_values) {
+    auto returnStatus = StatusCode::SUCCESS;
+
+    size_t graphIdx = 0;
+    QNN_DEBUG("Starting sdxl vae decoder execution for graphIdx: %d", graphIdx);
+
+    if (inputs == nullptr || outputs == nullptr) {
+      if (qnn::tools::iotensor::StatusCode::SUCCESS !=
+          m_ioTensor.setupInputAndOutputTensors(&inputs, &outputs,
+                                                (*m_graphsInfo)[graphIdx])) {
+        QNN_ERROR(
+            "Error in setting up Input and output Tensors for graphIdx: %d",
+            graphIdx);
+        returnStatus = StatusCode::FAILURE;
+        return returnStatus;
+      }
+    }
+    auto graphInfo = (*m_graphsInfo)[graphIdx];
+
+    if (graphInfo.numInputTensors != 1) {
+      QNN_ERROR("Expecting 1 input tensor for sdxl vae decoder, got %d",
+                graphInfo.numInputTensors);
+      returnStatus = StatusCode::FAILURE;
+      return returnStatus;
+    }
+
+    // latents (fp32, 1x4xHxW)
+    {
+      int elementCount = 1 * 4 * sample_width * sample_height;
+      memcpy(static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(inputs[0]).data),
+             latents, elementCount * sizeof(float));
+    }
+
+    QNN_DEBUG("Executing sdxl vae decoder graph: %d", graphIdx);
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    auto executeStatus = m_qnnFunctionPointers.qnnInterface.graphExecute(
+        graphInfo.graph, inputs, graphInfo.numInputTensors, outputs,
+        graphInfo.numOutputTensors, m_profileBackendHandle, nullptr);
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    int duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       end_time - start_time)
+                       .count();
+    QNN_INFO("sdxl vae decoder graph execution time: %d ms", duration);
+
+    if (QNN_GRAPH_NO_ERROR != executeStatus) {
+      returnStatus = StatusCode::FAILURE;
+      QNN_ERROR("sdxl vae decoder graph execution failed!");
+      return returnStatus;
+    }
+
+    int elementCount = 1 * 3 * output_width * output_height;
+    memcpy(pixel_values,
+           static_cast<float *>(QNN_TENSOR_GET_CLIENT_BUF(outputs[0]).data),
+           elementCount * sizeof(float));
+
+    return returnStatus;
+  }
+
   StatusCode executeUpscalerGraphs(float *input_image, float *output_image) {
     auto returnStatus = StatusCode::SUCCESS;
 
