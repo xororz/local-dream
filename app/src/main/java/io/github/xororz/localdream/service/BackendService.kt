@@ -242,7 +242,7 @@ class BackendService : Service() {
                 "--port", "8081",
                 "--text_embedding_size", model.textEmbeddingSize.toString()
             )
-            if (width != 512 || height != 512) {
+            if (!model.isSdxl && (width != 512 || height != 512)) {
                 val patchFile = if (width == height) {
                     val squarePatch = File(modelsDir, "${width}.patch")
                     if (squarePatch.exists()) {
@@ -299,6 +299,13 @@ class BackendService : Service() {
                     "--safety_checker",
                     File(filesDir, "safety_checker.mnn").absolutePath
                 )
+            }
+            if (model.isSdxl) {
+                command = command + "--sdxl"
+                val lowRam = preferences.getBoolean("sdxl_lowram", true)
+                if (lowRam) {
+                    command = command + "--lowram"
+                }
             }
             val env = mutableMapOf<String, String>()
 

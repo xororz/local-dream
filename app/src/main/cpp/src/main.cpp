@@ -62,6 +62,7 @@ bool use_mnn_clip = false;
 bool use_clip_v2 = false;
 bool upscaler_mode = false;
 bool sdxl_mode = false;
+bool lowram_mode = false;
 float nsfw_threshold = 0.5f;
 std::string clipPath, clip2Path, unetPath, vaeDecoderPath, vaeEncoderPath,
     safetyCheckerPath, tokenizerPath, patchPath, modelDir, upscalerPath;
@@ -412,6 +413,7 @@ void processCommandLine(int argc, char **argv) {
     OPT_CONVERT_CLIP_SKIP_2 = 31,
     OPT_UPSCALER_MODE = 32,
     OPT_SDXL = 33,
+    OPT_LOWRAM = 34,
     OPT_BACKEND = 3,
     OPT_LOG_LEVEL = 10,
     OPT_VERSION = 13,
@@ -443,6 +445,7 @@ void processCommandLine(int argc, char **argv) {
       {"patch", pal::required_argument, NULL, OPT_PATCH},
       {"upscaler_mode", pal::no_argument, NULL, OPT_UPSCALER_MODE},
       {"sdxl", pal::no_argument, NULL, OPT_SDXL},
+      {"lowram", pal::no_argument, NULL, OPT_LOWRAM},
       {NULL, 0, NULL, 0}};
   std::string backendPathCmd, systemLibraryPathCmd;
   QnnLog_Level_t logLevel = QNN_LOG_LEVEL_ERROR;
@@ -523,6 +526,9 @@ void processCommandLine(int argc, char **argv) {
         sdxl_mode = true;
         text_embedding_size = 768;
         text_embedding_size_2 = 1280;
+        break;
+      case OPT_LOWRAM:
+        lowram_mode = true;
         break;
       default:
         showHelpAndExit("Invalid argument passed.");
@@ -700,7 +706,7 @@ void processCommandLine(int argc, char **argv) {
     if (!clipInterpreter) showHelpAndExit("Failed load CLIP MNN: " + clipPath);
   }
 
-  if (sdxl_mode) {
+  if (sdxl_mode && !lowram_mode) {
     // SDXL text encoders always run on MNN (CPU) regardless of backend.
     if (!clipInterpreter) {
       clipInterpreter = MNN::Interpreter::createFromFile(clipPath.c_str());
@@ -781,22 +787,154 @@ void processCommandLine(int argc, char **argv) {
     if (!clipApp) showHelpAndExit("Failed create QNN CLIP model.");
   }
 
-  unetApp = createQnnModel(unetPath, "unet");
-  if (!unetApp) showHelpAndExit("Failed create QNN UNET model.");
+  bool sdxl_lowram = sdxl_mode && lowram_mode;
 
-  vaeDecoderApp = createQnnModel(vaeDecoderPath, "vae_decoder");
-  if (!vaeDecoderApp) showHelpAndExit("Failed create QNN VAE Decoder model.");
+  if (!sdxl_lowram) {
+    unetApp = createQnnModel(unetPath, "unet");
+    if (!unetApp) showHelpAndExit("Failed create QNN UNET model.");
 
-  if (!vaeEncoderPath.empty()) {
-    vaeEncoderApp = createQnnModel(vaeEncoderPath, "vae_encoder");
-    if (!vaeEncoderApp) QNN_WARN("Failed create QNN VAE Enc model.");
-  } else
-    QNN_WARN("VAE Enc QNN path missing.");
+    vaeDecoderApp = createQnnModel(vaeDecoderPath, "vae_decoder");
+    if (!vaeDecoderApp) showHelpAndExit("Failed create QNN VAE Decoder model.");
+
+    if (!vaeEncoderPath.empty()) {
+      vaeEncoderApp = createQnnModel(vaeEncoderPath, "vae_encoder");
+      if (!vaeEncoderApp) QNN_WARN("Failed create QNN VAE Enc model.");
+    } else
+      QNN_WARN("VAE Enc QNN path missing.");
+  } else {
+    QNN_INFO(
+        "[lowram] SDXL low-RAM mode: skipping pre-load of UNET/VAE QNN models");
+  }
 }
 
 }  // namespace sample_app
 }  // namespace tools
 }  // namespace qnn
+
+// --- SDXL low-RAM lazy load/release helpers ---
+static void loadSdxlClipMnnIfNeeded() {
+  if (!clipInterpreter) {
+    clipInterpreter = MNN::Interpreter::createFromFile(clipPath.c_str());
+    if (!clipInterpreter)
+      throw std::runtime_error("[lowram] Failed load SDXL CLIP1 MNN");
+  }
+  if (!clip2Interpreter) {
+    clip2Interpreter = MNN::Interpreter::createFromFile(clip2Path.c_str());
+    if (!clip2Interpreter)
+      throw std::runtime_error("[lowram] Failed load SDXL CLIP2 MNN");
+  }
+  MNN::ScheduleConfig cfg;
+  cfg.type = MNN_FORWARD_CPU;
+  cfg.numThread = 4;
+  MNN::BackendConfig bk;
+  bk.memory = MNN::BackendConfig::Memory_Low;
+  bk.power = MNN::BackendConfig::Power_High;
+  cfg.backendConfig = &bk;
+  if (!clipSession) {
+    clipSession = clipInterpreter->createSession(cfg);
+    if (!clipSession)
+      throw std::runtime_error("[lowram] Failed create SDXL CLIP1 session");
+    auto in1 = clipInterpreter->getSessionInput(clipSession, "input_embedding");
+    clipInterpreter->resizeTensor(in1, {1, 77, text_embedding_size});
+    clipInterpreter->resizeSession(clipSession);
+    clipInterpreter->releaseModel();
+  }
+  if (!clip2Session) {
+    clip2Session = clip2Interpreter->createSession(cfg);
+    if (!clip2Session)
+      throw std::runtime_error("[lowram] Failed create SDXL CLIP2 session");
+    auto in2 =
+        clip2Interpreter->getSessionInput(clip2Session, "input_embedding");
+    clip2Interpreter->resizeTensor(in2, {1, 77, text_embedding_size_2});
+    clip2Interpreter->resizeSession(clip2Session);
+    clip2Interpreter->releaseModel();
+  }
+  QNN_INFO("[lowram] SDXL CLIP MNN loaded");
+}
+
+static void releaseSdxlClipMnn() {
+  if (clipSession && clipInterpreter) {
+    clipInterpreter->releaseSession(clipSession);
+  }
+  clipSession = nullptr;
+  if (clip2Session && clip2Interpreter) {
+    clip2Interpreter->releaseSession(clip2Session);
+  }
+  clip2Session = nullptr;
+  if (clipInterpreter) {
+    delete clipInterpreter;
+    clipInterpreter = nullptr;
+  }
+  if (clip2Interpreter) {
+    delete clip2Interpreter;
+    clip2Interpreter = nullptr;
+  }
+  QNN_INFO("[lowram] SDXL CLIP MNN released");
+}
+
+static void loadSdxlQnnUnetIfNeeded() {
+  if (unetApp) return;
+  unetApp = createQnnModel(unetPath, "unet");
+  if (!unetApp) throw std::runtime_error("[lowram] Failed create SDXL UNET");
+  if (qnn::tools::sample_app::initializeQnnApp("UNET", unetApp) !=
+      EXIT_SUCCESS) {
+    unetApp.reset();
+    throw std::runtime_error("[lowram] Failed init SDXL UNET");
+  }
+  QNN_INFO("[lowram] SDXL UNET loaded");
+}
+
+static void releaseSdxlQnnUnet() {
+  if (!unetApp) return;
+  unetApp->freeContext();
+  unetApp->freeDevice();
+  unetApp.reset();
+  QNN_INFO("[lowram] SDXL UNET released");
+}
+
+static void loadSdxlQnnVaeDecoderIfNeeded() {
+  if (vaeDecoderApp) return;
+  vaeDecoderApp = createQnnModel(vaeDecoderPath, "vae_decoder");
+  if (!vaeDecoderApp)
+    throw std::runtime_error("[lowram] Failed create SDXL VAE Decoder");
+  if (qnn::tools::sample_app::initializeQnnApp("VAEDecoder", vaeDecoderApp) !=
+      EXIT_SUCCESS) {
+    vaeDecoderApp.reset();
+    throw std::runtime_error("[lowram] Failed init SDXL VAE Decoder");
+  }
+  QNN_INFO("[lowram] SDXL VAE Decoder loaded");
+}
+
+static void releaseSdxlQnnVaeDecoder() {
+  if (!vaeDecoderApp) return;
+  vaeDecoderApp->freeContext();
+  vaeDecoderApp->freeDevice();
+  vaeDecoderApp.reset();
+  QNN_INFO("[lowram] SDXL VAE Decoder released");
+}
+
+static void loadSdxlQnnVaeEncoderIfNeeded() {
+  if (vaeEncoderApp) return;
+  if (vaeEncoderPath.empty())
+    throw std::runtime_error("[lowram] SDXL VAE Encoder path missing");
+  vaeEncoderApp = createQnnModel(vaeEncoderPath, "vae_encoder");
+  if (!vaeEncoderApp)
+    throw std::runtime_error("[lowram] Failed create SDXL VAE Encoder");
+  if (qnn::tools::sample_app::initializeQnnApp("VAEEncoder", vaeEncoderApp) !=
+      EXIT_SUCCESS) {
+    vaeEncoderApp.reset();
+    throw std::runtime_error("[lowram] Failed init SDXL VAE Encoder");
+  }
+  QNN_INFO("[lowram] SDXL VAE Encoder loaded");
+}
+
+static void releaseSdxlQnnVaeEncoder() {
+  if (!vaeEncoderApp) return;
+  vaeEncoderApp->freeContext();
+  vaeEncoderApp->freeDevice();
+  vaeEncoderApp.reset();
+  QNN_INFO("[lowram] SDXL VAE Encoder released");
+}
 
 // --- Text Processing ---
 struct ProcessedPrompt {
@@ -1521,20 +1659,23 @@ GenerationResult generateImage(
   if (prompt.empty()) throw std::invalid_argument("Global prompt empty");
   if (use_safety_checker && !safetyCheckerInterpreter)
     throw std::runtime_error("SafetyChecker missing");
+  bool sdxl_lowram = sdxl_mode && lowram_mode;
   if (!use_mnn) {
     if (!sdxl_mode) {
       if (!use_mnn_clip && !clipApp)
         throw std::runtime_error("QNN CLIP missing");
       if (use_mnn_clip && !clipInterpreter)
         throw std::runtime_error("MNN CLIP missing(hybrid)");
-    } else {
+    } else if (!sdxl_lowram) {
       if (!clipInterpreter || !clip2Interpreter)
         throw std::runtime_error("SDXL MNN CLIP interpreters missing");
     }
-    if (!unetApp) throw std::runtime_error("QNN UNET missing");
-    if (!vaeDecoderApp) throw std::runtime_error("QNN VAE Dec missing");
-    if (request_img2img && !vaeEncoderApp)
-      throw std::runtime_error("QNN VAE Enc missing");
+    if (!sdxl_lowram) {
+      if (!unetApp) throw std::runtime_error("QNN UNET missing");
+      if (!vaeDecoderApp) throw std::runtime_error("QNN VAE Dec missing");
+      if (request_img2img && !vaeEncoderApp)
+        throw std::runtime_error("QNN VAE Enc missing");
+    }
   }
   if (request_img2img && img_data.size() != 3 * output_width * output_height)
     throw std::invalid_argument("Invalid global img_data");
@@ -1588,6 +1729,7 @@ GenerationResult generateImage(
     float *embed_ptr = text_embedding_float.data();
 
     if (sdxl_mode) {
+      if (sdxl_lowram) loadSdxlClipMnnIfNeeded();
       if (!clipInterpreter || !clip2Interpreter)
         throw std::runtime_error("SDXL CLIP interpreters not initialized!");
 
@@ -1642,6 +1784,7 @@ GenerationResult generateImage(
                     processed.positive_embeddings_2,
                     sdxl_encoder_hidden_states.data() + 77 * sdxl_concat_dim,
                     sdxl_text_embeds.data() + text_embedding_size_2);
+      if (sdxl_lowram) releaseSdxlClipMnn();
     } else if (use_mnn || use_mnn_clip) {
       MNN::Interpreter *currentClipInterpreter = nullptr;
       MNN::Session *currentClipSession = nullptr;
@@ -1860,6 +2003,7 @@ GenerationResult generateImage(
           currentVaeEncoderInterpreter->releaseSession(currentVaeEncSession);
           delete currentVaeEncoderInterpreter;
         } else {
+          if (sdxl_lowram) loadSdxlQnnVaeEncoderIfNeeded();
           if (!vaeEncoderApp)
             throw std::runtime_error("Global vaeEncoderApp not init!");
           if (sdxl_mode) {
@@ -1873,6 +2017,7 @@ GenerationResult generateImage(
                     img_data.data(), vae_enc_mean.data(), vae_enc_std.data()))
               throw std::runtime_error("QNN VAE enc exec failed");
           }
+          if (sdxl_lowram) releaseSdxlQnnVaeEncoder();
         }
 
         auto mean = xt::adapt(vae_enc_mean, shape);
@@ -2038,8 +2183,10 @@ GenerationResult generateImage(
       currentUnetInterpreter->releaseModel();
     }
 
+    if (sdxl_lowram) loadSdxlQnnUnetIfNeeded();
+
     for (int i = start_step; i < timesteps.size(); ++i) {
-      if (show_diffusion_process && !use_mnn &&
+      if (show_diffusion_process && !use_mnn && !sdxl_lowram &&
           (i - start_step) % show_diffusion_stride == 0) {
         try {
           // Decode current latents for preview
@@ -2279,6 +2426,8 @@ GenerationResult generateImage(
       if (currentUnetInterpreter) delete currentUnetInterpreter;
     }
 
+    if (sdxl_lowram) releaseSdxlQnnUnet();
+
     // --- VAE Decode ---
     auto vae_dec_start = std::chrono::high_resolution_clock::now();
 
@@ -2362,6 +2511,7 @@ GenerationResult generateImage(
         currentVaeDecoderInterpreter->releaseSession(currentVaeDecSession);
         delete currentVaeDecoderInterpreter;
       } else {
+        if (sdxl_lowram) loadSdxlQnnVaeDecoderIfNeeded();
         if (!vaeDecoderApp)
           throw std::runtime_error("Global vaeDecoderApp not init!");
 
@@ -2376,6 +2526,7 @@ GenerationResult generateImage(
                   vae_dec_in_vec.data(), vae_dec_out_pixels.data()))
             throw std::runtime_error("QNN VAE dec exec failed");
         }
+        if (sdxl_lowram) releaseSdxlQnnVaeDecoder();
       }
 
       std::vector<int> pixel_shape = {1, 3, output_height, output_width};
@@ -2583,7 +2734,7 @@ int main(int argc, char **argv) {
       }
     }
 
-    if (sdxl_mode && clipInterpreter && clip2Interpreter) {
+    if (sdxl_mode && !lowram_mode && clipInterpreter && clip2Interpreter) {
       clipSession = clipInterpreter->createSession(cfg_mnn_clip);
       clip2Session = clip2Interpreter->createSession(cfg_mnn_clip);
       if (!clipSession || !clip2Session) {
