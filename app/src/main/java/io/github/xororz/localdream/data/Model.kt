@@ -346,21 +346,28 @@ class ModelRepository(private val context: Context) {
 
         if (modelsDir.exists() && modelsDir.isDirectory) {
             modelsDir.listFiles()?.forEach { dir ->
-                if (dir.isDirectory) {
-                    val finishedFile = File(dir, "finished")
-                    val npuCustomFile = File(dir, "npucustom")
-                    val sdxlFile = File(dir, "SDXL")
+                if (!dir.isDirectory) return@forEach
 
-                    if (sdxlFile.exists()) {
-                        val customModel = createCustomModel(dir, isNpu = true, isSdxl = true)
-                        customModels.add(customModel)
-                    } else if (finishedFile.exists()) {
-                        val customModel = createCustomModel(dir, isNpu = false)
-                        customModels.add(customModel)
-                    } else if (npuCustomFile.exists()) {
-                        val customModel = createCustomModel(dir, isNpu = true)
-                        customModels.add(customModel)
-                    }
+                val modelId = dir.name
+                if (modelId in RESERVED_MODEL_IDS) {
+                    Log.w(
+                        "ModelRepository",
+                        "skip custom model '$modelId': id conflicts with a built-in model"
+                    )
+                    return@forEach
+                }
+
+                val finishedFile = File(dir, "finished")
+                val npuCustomFile = File(dir, "npucustom")
+                val sdxlFile = File(dir, "SDXL")
+
+                when {
+                    sdxlFile.exists() ->
+                        customModels.add(createCustomModel(dir, isNpu = true, isSdxl = true))
+                    finishedFile.exists() ->
+                        customModels.add(createCustomModel(dir, isNpu = false))
+                    npuCustomFile.exists() ->
+                        customModels.add(createCustomModel(dir, isNpu = true))
                 }
             }
         }
@@ -701,5 +708,23 @@ class ModelRepository(private val context: Context) {
 
     fun refreshAllModels() {
         models = initializeModels()
+    }
+
+    companion object {
+        // IDs reserved by built-in models and upscalers. Custom model
+        // directories that match one of these would collide with the built-in
+        // entry on disk and in the UI list, so they are skipped during scan.
+        // Keep in sync with the create*Model() functions and UpscalerRepository.
+        private val RESERVED_MODEL_IDS = setOf(
+            // SDXL (NPU)
+            "sdxl_base", "anythingxl",
+            // SD 1.5 NPU
+            "anythingv5", "qteamix", "cuteyukimix", "absolutereality", "chilloutmix",
+            // SD 1.5 CPU
+            "anythingv5cpu", "qteamixcpu", "cuteyukimixcpu",
+            "absoluterealitycpu", "chilloutmixcpu",
+            // Upscalers (share the same models dir)
+            "upscaler_anime", "upscaler_realistic"
+        )
     }
 }
