@@ -49,6 +49,7 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Size
+import io.github.xororz.localdream.BuildConfig
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.DownloadProgress
 import io.github.xororz.localdream.data.UpscalerRepository
@@ -105,8 +106,9 @@ fun UpscaleScreen(
                     if (bitmap != null) {
                         val totalPixels = bitmap.width.toLong() * bitmap.height.toLong()
                         val maxPixels = 2048L * 2048L
+                        val enforceMaxPixels = BuildConfig.FLAVOR == "filter"
 
-                        if (totalPixels > maxPixels) {
+                        if (enforceMaxPixels && totalPixels > maxPixels) {
                             withContext(Dispatchers.Main) {
                                 errorMessage = context.getString(
                                     R.string.image_resolution_too_large,
