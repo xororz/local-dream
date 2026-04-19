@@ -2797,9 +2797,9 @@ int main(int argc, char **argv) {
           modelPath.parent_path().parent_path() / "embeddings";
       if (std::filesystem::exists(embeddingsPath)) {
         try {
-          promptProcessor.loadEmbeddings(embeddingsPath.string());
-          QNN_INFO("Loaded %zu embeddings from %s",
-                   promptProcessor.getEmbeddingCount(),
+          promptProcessor.loadEmbeddings(embeddingsPath.string(), sdxl_mode);
+          QNN_INFO("Loaded %zu embeddings (SDXL=%d) from %s",
+                   promptProcessor.getEmbeddingCount(), sdxl_mode ? 1 : 0,
                    embeddingsPath.string().c_str());
         } catch (const std::exception &e) {
           QNN_WARN("Failed to load embeddings: %s", e.what());

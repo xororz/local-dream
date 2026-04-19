@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "Logger.hpp"
 #include "SafeTensorReader.hpp"
 
 struct PromptToken {
@@ -25,6 +26,7 @@ class PromptProcessor {
   std::map<std::string, std::vector<float>> embeddings_;    // last-dim 768
   std::map<std::string, std::vector<float>> embeddings_2_;  // last-dim 1280
   std::string embeddings_dir_;
+  bool sdxl_mode_ = false;
 
   static std::string toLowerCase(const std::string &str) {
     std::string result = str;
@@ -224,13 +226,19 @@ class PromptProcessor {
 
         auto it1 = embeddings_.find(text_lower);
         auto it2 = embeddings_2_.find(text_lower);
-        if (it1 != embeddings_.end() || it2 != embeddings_2_.end()) {
+        bool found1 = it1 != embeddings_.end();
+        bool found2 = it2 != embeddings_2_.end();
+        // For SDXL the loader keeps both maps in sync; for SD1.5 only
+        // embeddings_ is populated. If a token only matches embeddings_2_
+        // the data isn't usable in the current mode, so fall through to
+        // text tokenization instead of silently dropping the word.
+        if (found1 || (sdxl_mode_ && found2)) {
           PromptToken t;
           t.text = node.text;
           t.weight = current_weight;
           t.is_embedding = true;
-          if (it1 != embeddings_.end()) t.embedding_data = it1->second;
-          if (it2 != embeddings_2_.end()) t.embedding_data_2 = it2->second;
+          if (found1) t.embedding_data = it1->second;
+          if (found2) t.embedding_data_2 = it2->second;
           tokens.push_back(std::move(t));
         } else {
           tokens.push_back({node.text, current_weight, false, {}, {}});
@@ -242,8 +250,9 @@ class PromptProcessor {
  public:
   PromptProcessor() = default;
 
-  void loadEmbeddings(const std::string &embeddings_dir) {
+  void loadEmbeddings(const std::string &embeddings_dir, bool sdxl_mode) {
     embeddings_dir_ = embeddings_dir;
+    sdxl_mode_ = sdxl_mode;
     embeddings_.clear();
     embeddings_2_.clear();
 
@@ -253,35 +262,70 @@ class PromptProcessor {
 
     for (const auto &entry :
          std::filesystem::directory_iterator(embeddings_dir)) {
-      if (entry.path().extension() == ".safetensors") {
-        try {
-          SafeTensorReader reader(entry.path().string());
-          std::string name = entry.path().stem().string();
-          std::string name_lower = toLowerCase(name);
+      if (entry.path().extension() != ".safetensors") continue;
 
-          auto tensor_names = reader.get_tensor_names();
-          bool has_768 = false, has_1280 = false;
-          for (const auto &tn : tensor_names) {
-            auto shape = reader.get_tensor_shape(tn);
-            if (shape.empty()) continue;
-            int last_dim = shape.back();
-            if (last_dim == 768 && !has_768) {
-              reader.read(tn, true);
-              embeddings_[name_lower] = reader.data;
-              has_768 = true;
-            } else if (last_dim == 1280 && !has_1280) {
-              reader.read(tn, true);
-              embeddings_2_[name_lower] = reader.data;
-              has_1280 = true;
-            }
+      try {
+        SafeTensorReader reader(entry.path().string());
+        std::string name = entry.path().stem().string();
+        std::string name_lower = toLowerCase(name);
+
+        auto tensor_names = reader.get_tensor_names();
+
+        // Prefer well-known SDXL TI key names (clip_l / clip_g) over blind
+        // dimension matching. Falls back to first matching shape if naming
+        // is non-standard.
+        std::string key_768, key_1280;
+        for (const auto &tn : tensor_names) {
+          std::string tn_lower = toLowerCase(tn);
+          auto shape = reader.get_tensor_shape(tn);
+          if (shape.empty()) continue;
+          int last_dim = shape.back();
+          if (last_dim == 768 && key_768.empty() &&
+              (tn_lower.find("clip_l") != std::string::npos ||
+               tn_lower.find("emb_params") != std::string::npos ||
+               tn_lower.find("string_to_param") != std::string::npos)) {
+            key_768 = tn;
           }
-          if (!has_768 && !has_1280 && !tensor_names.empty()) {
-            reader.read(tensor_names[0], true);
-            embeddings_[name_lower] = reader.data;
+          if (last_dim == 1280 && key_1280.empty() &&
+              tn_lower.find("clip_g") != std::string::npos) {
+            key_1280 = tn;
           }
-        } catch (const std::exception &e) {
-          // could not load this embedding
         }
+        for (const auto &tn : tensor_names) {
+          auto shape = reader.get_tensor_shape(tn);
+          if (shape.empty()) continue;
+          int last_dim = shape.back();
+          if (last_dim == 768 && key_768.empty()) key_768 = tn;
+          if (last_dim == 1280 && key_1280.empty()) key_1280 = tn;
+        }
+
+        if (sdxl_mode) {
+          // SDXL TIs always carry both 768 (clip_l) and 1280 (clip_g).
+          // Files missing either side would pollute the corresponding
+          // encoder slot with a pad token, so skip them.
+          if (key_768.empty() || key_1280.empty()) {
+            QNN_WARN(
+                "Skip embedding '%s': SDXL requires both 768 and 1280 dim "
+                "tensors",
+                name.c_str());
+            continue;
+          }
+          reader.read(key_1280, true);
+          embeddings_2_[name_lower] = reader.data;
+          reader.read(key_768, true);
+          embeddings_[name_lower] = reader.data;
+        } else {
+          if (key_768.empty()) {
+            QNN_WARN("Skip embedding '%s': SD1.5 requires a 768-dim tensor",
+                     name.c_str());
+            continue;
+          }
+          reader.read(key_768, true);
+          embeddings_[name_lower] = reader.data;
+        }
+      } catch (const std::exception &e) {
+        QNN_WARN("Failed to load embedding %s: %s",
+                 entry.path().string().c_str(), e.what());
       }
     }
   }
