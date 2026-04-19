@@ -186,6 +186,7 @@
     <string name="custom_npu_model">自定义NPU模型</string>
     <string name="custom_model_name">模型名称</string>
     <string name="custom_model_name_hint">输入模型名称</string>
+    <string name="custom_model_id_reserved">该名称与内置模型冲突，请使用其他名称</string>
     <string name="select_model_file">选择模型文件</string>
     <string name="select_zip_file">选择ZIP文件</string>
     <string name="zip_file_selected">ZIP文件已选择</string>

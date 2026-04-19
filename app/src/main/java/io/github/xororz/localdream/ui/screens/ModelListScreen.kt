@@ -2155,6 +2155,8 @@ fun CustomNpuModelDialog(
 ) {
     var modelName by remember { mutableStateOf("") }
     var selectedZipUri by remember { mutableStateOf<Uri?>(null) }
+    val isIdReserved = modelName.isNotBlank() &&
+            ModelRepository.isReservedModelId(modelName.replace(" ", ""))
 
     val zipPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -2194,7 +2196,11 @@ fun CustomNpuModelDialog(
                     label = { Text(stringResource(R.string.custom_model_name)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    placeholder = { Text(stringResource(R.string.custom_model_name_hint)) }
+                    placeholder = { Text(stringResource(R.string.custom_model_name_hint)) },
+                    isError = isIdReserved,
+                    supportingText = if (isIdReserved) {
+                        { Text(stringResource(R.string.custom_model_id_reserved)) }
+                    } else null
                 )
 
                 OutlinedButton(
@@ -2227,11 +2233,11 @@ fun CustomNpuModelDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (modelName.isNotBlank() && selectedZipUri != null) {
+                    if (modelName.isNotBlank() && selectedZipUri != null && !isIdReserved) {
                         onModelAdded(modelName, selectedZipUri!!)
                     }
                 },
-                enabled = modelName.isNotBlank() && selectedZipUri != null
+                enabled = modelName.isNotBlank() && selectedZipUri != null && !isIdReserved
             ) {
                 Text(stringResource(R.string.add_model))
             }
@@ -2254,6 +2260,8 @@ fun CustomModelDialog(
     var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
     var clipSkip by remember { mutableStateOf(1) }
     var selectedLoraFiles by remember { mutableStateOf<List<LoRAFile>>(emptyList()) }
+    val isIdReserved = modelName.isNotBlank() &&
+            ModelRepository.isReservedModelId(modelName.replace(" ", ""))
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -2301,7 +2309,11 @@ fun CustomModelDialog(
                     label = { Text(stringResource(R.string.custom_model_name)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    placeholder = { Text(stringResource(R.string.custom_model_name_hint)) }
+                    placeholder = { Text(stringResource(R.string.custom_model_name_hint)) },
+                    isError = isIdReserved,
+                    supportingText = if (isIdReserved) {
+                        { Text(stringResource(R.string.custom_model_id_reserved)) }
+                    } else null
                 )
 
                 Column(
@@ -2477,11 +2489,11 @@ fun CustomModelDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (modelName.isNotBlank() && selectedFileUri != null) {
+                    if (modelName.isNotBlank() && selectedFileUri != null && !isIdReserved) {
                         onModelAdded(modelName, selectedFileUri!!, clipSkip, selectedLoraFiles)
                     }
                 },
-                enabled = modelName.isNotBlank() && selectedFileUri != null
+                enabled = modelName.isNotBlank() && selectedFileUri != null && !isIdReserved
             ) {
                 Text(stringResource(R.string.add_model))
             }

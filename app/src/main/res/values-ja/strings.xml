@@ -160,6 +160,7 @@
     <string name="custom_npu_model">カスタムNPUモデル</string>
     <string name="custom_model_name">モデル名</string>
     <string name="custom_model_name_hint">モデル名を入力</string>
+    <string name="custom_model_id_reserved">この名前は組み込みモデルと競合します。別の名前を使用してください。</string>
     <string name="select_model_file">モデルファイルを選択</string>
     <string name="select_zip_file">ZIPファイルを選択</string>
     <string name="zip_file_selected">ZIPファイルを選択</string>

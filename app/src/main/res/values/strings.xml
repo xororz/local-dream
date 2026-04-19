@@ -186,6 +186,7 @@
     <string name="custom_npu_model">Custom NPU Model</string>
     <string name="custom_model_name">Model Name</string>
     <string name="custom_model_name_hint">Enter model name</string>
+    <string name="custom_model_id_reserved">This name conflicts with a built-in model. Please choose a different one.</string>
     <string name="select_model_file">Select Model File</string>
     <string name="select_zip_file">Select ZIP File</string>
     <string name="zip_file_selected">ZIP File Selected</string>
