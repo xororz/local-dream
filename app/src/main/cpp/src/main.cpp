@@ -1802,6 +1802,7 @@ GenerationResult generateImage(
 
         auto run_sdxl_clip = [&](const std::vector<float> &emb1,
                                  const std::vector<float> &emb2,
+                                 const int *ids77,
                                  float *out_hidden_concat /*77*2048*/,
                                  float *out_pooled /*1280*/) {
           // Encoder 1 (CLIP-L): 77x768 -> last_hidden_state 77x768
@@ -1815,7 +1816,8 @@ GenerationResult generateImage(
           const float *out1_data = out1->host<float>();
 
           // Encoder 2 (CLIP-G): 77x1280 -> last_hidden_state 77x1280 +
-          // pooled_output 1x1280
+          // pooled_output 77x1280 (exported without pooling; we select
+          // the EOS row here as the true pooled embedding).
           auto in2 = clip2Interpreter->getSessionInput(clip2Session,
                                                        "input_embedding");
           memcpy(in2->host<float>(), emb2.data(),
@@ -1838,17 +1840,27 @@ GenerationResult generateImage(
                 out2_hidden_data + t * text_embedding_size_2,
                 text_embedding_size_2 * sizeof(float));
           }
-          memcpy(out_pooled, out2_pool_data,
+          // Pool by picking the EOS (49407) row; fall back to last row (76).
+          int eos_pos = 76;
+          for (int i = 0; i < 77; i++) {
+            if (ids77[i] == 49407) {
+              eos_pos = i;
+              break;
+            }
+          }
+          memcpy(out_pooled, out2_pool_data + eos_pos * text_embedding_size_2,
                  text_embedding_size_2 * sizeof(float));
         };
 
         // negative (batch idx 0)
-        run_sdxl_clip(
-            processed.negative_embeddings, processed.negative_embeddings_2,
-            sdxl_encoder_hidden_states.data(), sdxl_text_embeds.data());
+        run_sdxl_clip(processed.negative_embeddings,
+                      processed.negative_embeddings_2, processed.ids.data(),
+                      sdxl_encoder_hidden_states.data(),
+                      sdxl_text_embeds.data());
         // positive (batch idx 1)
         run_sdxl_clip(processed.positive_embeddings,
                       processed.positive_embeddings_2,
+                      processed.ids.data() + 77,
                       sdxl_encoder_hidden_states.data() + 77 * sdxl_concat_dim,
                       sdxl_text_embeds.data() + text_embedding_size_2);
         if (sdxl_lowram) releaseSdxlClipMnn();
