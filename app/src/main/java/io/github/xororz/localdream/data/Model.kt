@@ -168,8 +168,12 @@ data class Model(
         }
 
         fun isQualcommDevice(): Boolean {
-            val soc = getDeviceSoc()
-            return soc.startsWith("SM") || soc.startsWith("QCS") || soc.startsWith("QCM")
+            val soc = getDeviceSoc().uppercase()
+            val prefixes = listOf(
+                "SM", "QCS", "QCM", "CQ", "IPQ", "SXR", "AIC", "SSG",
+                "SC", "SA", "SDM", "MSM", "QRB", "X1E", "X1P"
+            )
+            return prefixes.any { soc.startsWith(it) }
         }
 
         fun getChipsetSuffix(soc: String): String? {
@@ -425,7 +429,7 @@ class ModelRepository(private val context: Context) {
     }
 
     private fun isSdxlCapableSoc(soc: String): Boolean {
-        return soc in setOf("SM8750", "SM8750P", "SM8850", "SM8850P")
+        return soc in setOf("SM8750", "SM8750P", "SM8850", "SM8850P", "SM8845")
     }
 
     private fun createSDXLBaseModel(): Model {

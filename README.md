@@ -16,7 +16,7 @@ This project is **now open sourced and completely free**. Hope you enjoy it!
 If you like it, please consider [sponsor](https://github.com/xororz/local-dream?tab=readme-ov-file#-support-this-project) this project.
 
 > [!NOTE]
-> Currently focus on SD1.5 and SDXL models. SD2.1 models are no longer maintained due to poor quality and not popular. SDXL models are only available for Snapdragon 8 Elite and Snapdragon 8 Elite Gen 5.
+> Currently focus on SD1.5 and SDXL models. SD2.1 models are no longer maintained due to poor quality and not popular. SDXL models are only available for Snapdragon 8 Elite and Snapdragon 8 Elite Gen 5/ 8 Gen 5.
 >
 > Most users don't get how to properly use highres mode for SD1.5. Please check [here](#npu-high-resolution-support).
 >
@@ -155,7 +155,7 @@ SD1.5 compatible with devices featuring:
 SDXL compatible with devices featuring:
 
 - **Snapdragon 8 Elite**
-- **Snapdragon 8 Elite Gen 5**
+- **Snapdragon 8 Elite Gen 5/8 Gen 5**
 
 > **Note**: Other devices cannot download NPU models
 
