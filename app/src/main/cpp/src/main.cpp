@@ -95,6 +95,18 @@ MNN::Session *safetyCheckerSession = nullptr;
 
 std::string prompt;
 std::string negative_prompt;
+
+// CLIP output cache: if prompt + negative_prompt are identical to the previous
+// request, reuse the cached text-encoder outputs and skip CLIP inference
+// entirely. Buffers below are kept per-pipeline so SD1.5 and SDXL are handled
+// uniformly.
+bool clip_cache_valid = false;
+std::string cached_prompt;
+std::string cached_negative_prompt;
+std::vector<float> cached_text_embedding_float;        // SD1.5 encoder output
+std::vector<float> cached_sdxl_encoder_hidden_states;  // SDXL concat hidden
+std::vector<float> cached_sdxl_text_embeds;            // SDXL pooled
+
 int steps;
 float cfg;
 unsigned seed;
@@ -1714,13 +1726,6 @@ GenerationResult generateImage(
     const int batch_size = 2;
 
     // --- CLIP ---
-    ProcessedPromptPair processed =
-        processPromptPair(prompt, negative_prompt, 77);
-
-    std::vector<int> clip_input_ids = processed.ids;  // old (2*77)
-    auto parsed_input_text = tokenizer->Decode(clip_input_ids);
-    QNN_INFO("Parsed Input Text: %s", parsed_input_text.c_str());
-
     // Regular embedding buffer (SD1.5) reused in SDXL as encoder-1 output.
     std::vector<float> text_embedding_float(batch_size * 77 *
                                             text_embedding_size);
@@ -1747,164 +1752,225 @@ GenerationResult generateImage(
     }
 
     auto clip_start = std::chrono::high_resolution_clock::now();
-    int32_t *input_ids_ptr = clip_input_ids.data();
-    float *embed_ptr = text_embedding_float.data();
 
-    if (sdxl_mode) {
-      if (sdxl_lowram) loadSdxlClipMnnIfNeeded();
-      if (!clipInterpreter || !clip2Interpreter)
-        throw std::runtime_error("SDXL CLIP interpreters not initialized!");
+    // Try to reuse the previous CLIP outputs when the prompt pair is
+    // unchanged. This also skips lowram CLIP (de)allocation in SDXL.
+    const size_t sd_embed_size = (size_t)batch_size * 77 * text_embedding_size;
+    const size_t sdxl_hidden_size = (size_t)batch_size * 77 * sdxl_concat_dim;
+    const size_t sdxl_pooled_size = (size_t)batch_size * text_embedding_size_2;
 
-      auto run_sdxl_clip = [&](const std::vector<float> &emb1,
-                               const std::vector<float> &emb2,
-                               float *out_hidden_concat /*77*2048*/,
-                               float *out_pooled /*1280*/) {
-        // Encoder 1 (CLIP-L): 77x768 -> last_hidden_state 77x768
-        auto in1 =
-            clipInterpreter->getSessionInput(clipSession, "input_embedding");
-        memcpy(in1->host<float>(), emb1.data(),
-               77 * text_embedding_size * sizeof(float));
-        clipInterpreter->runSession(clipSession);
-        auto out1 =
-            clipInterpreter->getSessionOutput(clipSession, "last_hidden_state");
-        const float *out1_data = out1->host<float>();
-
-        // Encoder 2 (CLIP-G): 77x1280 -> last_hidden_state 77x1280 +
-        // pooled_output 1x1280
-        auto in2 =
-            clip2Interpreter->getSessionInput(clip2Session, "input_embedding");
-        memcpy(in2->host<float>(), emb2.data(),
-               77 * text_embedding_size_2 * sizeof(float));
-        clip2Interpreter->runSession(clip2Session);
-        auto out2_hidden = clip2Interpreter->getSessionOutput(
-            clip2Session, "last_hidden_state");
-        auto out2_pool =
-            clip2Interpreter->getSessionOutput(clip2Session, "pooled_output");
-        const float *out2_hidden_data = out2_hidden->host<float>();
-        const float *out2_pool_data = out2_pool->host<float>();
-
-        // Concat along feature dim: [77, 768] + [77, 1280] = [77, 2048]
-        for (int t = 0; t < 77; t++) {
-          memcpy(out_hidden_concat + t * sdxl_concat_dim,
-                 out1_data + t * text_embedding_size,
-                 text_embedding_size * sizeof(float));
-          memcpy(out_hidden_concat + t * sdxl_concat_dim + text_embedding_size,
-                 out2_hidden_data + t * text_embedding_size_2,
-                 text_embedding_size_2 * sizeof(float));
+    bool clip_cache_hit = false;
+    if (clip_cache_valid && cached_prompt == prompt &&
+        cached_negative_prompt == negative_prompt) {
+      if (sdxl_mode) {
+        if (cached_sdxl_encoder_hidden_states.size() == sdxl_hidden_size &&
+            cached_sdxl_text_embeds.size() == sdxl_pooled_size) {
+          memcpy(sdxl_encoder_hidden_states.data(),
+                 cached_sdxl_encoder_hidden_states.data(),
+                 sdxl_hidden_size * sizeof(float));
+          memcpy(sdxl_text_embeds.data(), cached_sdxl_text_embeds.data(),
+                 sdxl_pooled_size * sizeof(float));
+          clip_cache_hit = true;
         }
-        memcpy(out_pooled, out2_pool_data,
-               text_embedding_size_2 * sizeof(float));
-      };
-
-      // negative (batch idx 0)
-      run_sdxl_clip(processed.negative_embeddings,
-                    processed.negative_embeddings_2,
-                    sdxl_encoder_hidden_states.data(), sdxl_text_embeds.data());
-      // positive (batch idx 1)
-      run_sdxl_clip(processed.positive_embeddings,
-                    processed.positive_embeddings_2,
-                    sdxl_encoder_hidden_states.data() + 77 * sdxl_concat_dim,
-                    sdxl_text_embeds.data() + text_embedding_size_2);
-      if (sdxl_lowram) releaseSdxlClipMnn();
-    } else if (use_mnn || use_mnn_clip) {
-      MNN::Interpreter *currentClipInterpreter = nullptr;
-      MNN::Session *currentClipSession = nullptr;
-      bool dynamicCreated = false;
-
-      if (use_mnn_clip) {
-        currentClipInterpreter = clipInterpreter;
-        currentClipSession = clipSession;
-        if (!currentClipInterpreter)
-          throw std::runtime_error(
-              "Global clipInterpreter (hybrid) not initialized!");
       } else {
-        currentClipInterpreter =
-            MNN::Interpreter::createFromFile(clipPath.c_str());
-        if (!currentClipInterpreter)
-          throw std::runtime_error(
-              "Failed to create temporary MNN CLIP interpreter!");
-        dynamicCreated = true;
+        if (cached_text_embedding_float.size() == sd_embed_size) {
+          memcpy(text_embedding_float.data(),
+                 cached_text_embedding_float.data(),
+                 sd_embed_size * sizeof(float));
+          clip_cache_hit = true;
+        }
       }
+    }
 
-      bool sessionCreated = false;
-      if (!currentClipSession) {
-        MNN::ScheduleConfig cfg_clip;
-        cfg_clip.type = MNN_FORWARD_CPU;
-        cfg_clip.numThread = 4;
-        MNN::BackendConfig bkCfg_clip;
-        bkCfg_clip.memory = MNN::BackendConfig::Memory_Low;
-        bkCfg_clip.power = MNN::BackendConfig::Power_High;
-        cfg_clip.backendConfig = &bkCfg_clip;
-        currentClipSession = currentClipInterpreter->createSession(cfg_clip);
-        if (!currentClipSession)
-          throw std::runtime_error(
-              "Failed to create temporary MNN CLIP session!");
-        sessionCreated = true;
-      }
-
-      if (use_clip_v2) {
-        auto input = currentClipInterpreter->getSessionInput(currentClipSession,
-                                                             "input_embedding");
-        currentClipInterpreter->resizeTensor(input, {1, 77, 768});
-        currentClipInterpreter->resizeSession(currentClipSession);
-
-        if (dynamicCreated) currentClipInterpreter->releaseModel();
-
-        memcpy(input->host<float>(), processed.negative_embeddings.data(),
-               77 * 768 * sizeof(float));
-        currentClipInterpreter->runSession(currentClipSession);
-        auto out = currentClipInterpreter->getSessionOutput(
-            currentClipSession, "last_hidden_state");
-        memcpy(embed_ptr, out->host<float>(),
-               77 * text_embedding_size * sizeof(float));
-
-        memcpy(input->host<float>(), processed.positive_embeddings.data(),
-               77 * 768 * sizeof(float));
-        currentClipInterpreter->runSession(currentClipSession);
-        out = currentClipInterpreter->getSessionOutput(currentClipSession,
-                                                       "last_hidden_state");
-        memcpy(embed_ptr + 77 * text_embedding_size, out->host<float>(),
-               77 * text_embedding_size * sizeof(float));
-
-        if (sessionCreated)
-          currentClipInterpreter->releaseSession(currentClipSession);
-        if (dynamicCreated) delete currentClipInterpreter;
-
-      } else {
-        auto input = currentClipInterpreter->getSessionInput(currentClipSession,
-                                                             "input_ids");
-        currentClipInterpreter->resizeTensor(input, {1, 77});
-        currentClipInterpreter->resizeSession(currentClipSession);
-
-        if (dynamicCreated) currentClipInterpreter->releaseModel();
-
-        memcpy(input->host<int>(), input_ids_ptr, 77 * sizeof(int32_t));
-        currentClipInterpreter->runSession(currentClipSession);
-        auto out = currentClipInterpreter->getSessionOutput(
-            currentClipSession, "last_hidden_state");
-        memcpy(embed_ptr, out->host<float>(),
-               77 * text_embedding_size * sizeof(float));
-
-        memcpy(input->host<int>(), input_ids_ptr + 77, 77 * sizeof(int32_t));
-        currentClipInterpreter->runSession(currentClipSession);
-        out = currentClipInterpreter->getSessionOutput(currentClipSession,
-                                                       "last_hidden_state");
-        memcpy(embed_ptr + 77 * text_embedding_size, out->host<float>(),
-               77 * text_embedding_size * sizeof(float));
-
-        if (sessionCreated)
-          currentClipInterpreter->releaseSession(currentClipSession);
-        if (dynamicCreated) delete currentClipInterpreter;
-      }
+    if (clip_cache_hit) {
+      QNN_INFO("CLIP cache hit, reusing cached text embeddings");
     } else {
-      if (!clipApp) throw std::runtime_error("Global clipApp not initialized!");
-      if (StatusCode::SUCCESS !=
-          clipApp->executeClipGraphs(input_ids_ptr, embed_ptr))
-        throw std::runtime_error("QNN CLIP exec failed (neg)");
-      if (StatusCode::SUCCESS !=
-          clipApp->executeClipGraphs(input_ids_ptr + 77,
-                                     embed_ptr + 77 * text_embedding_size))
-        throw std::runtime_error("QNN CLIP exec failed (pos)");
+      ProcessedPromptPair processed =
+          processPromptPair(prompt, negative_prompt, 77);
+
+      std::vector<int> clip_input_ids = processed.ids;  // old (2*77)
+      auto parsed_input_text = tokenizer->Decode(clip_input_ids);
+      QNN_INFO("Parsed Input Text: %s", parsed_input_text.c_str());
+
+      int32_t *input_ids_ptr = clip_input_ids.data();
+      float *embed_ptr = text_embedding_float.data();
+
+      if (sdxl_mode) {
+        if (sdxl_lowram) loadSdxlClipMnnIfNeeded();
+        if (!clipInterpreter || !clip2Interpreter)
+          throw std::runtime_error("SDXL CLIP interpreters not initialized!");
+
+        auto run_sdxl_clip = [&](const std::vector<float> &emb1,
+                                 const std::vector<float> &emb2,
+                                 float *out_hidden_concat /*77*2048*/,
+                                 float *out_pooled /*1280*/) {
+          // Encoder 1 (CLIP-L): 77x768 -> last_hidden_state 77x768
+          auto in1 =
+              clipInterpreter->getSessionInput(clipSession, "input_embedding");
+          memcpy(in1->host<float>(), emb1.data(),
+                 77 * text_embedding_size * sizeof(float));
+          clipInterpreter->runSession(clipSession);
+          auto out1 = clipInterpreter->getSessionOutput(clipSession,
+                                                        "last_hidden_state");
+          const float *out1_data = out1->host<float>();
+
+          // Encoder 2 (CLIP-G): 77x1280 -> last_hidden_state 77x1280 +
+          // pooled_output 1x1280
+          auto in2 = clip2Interpreter->getSessionInput(clip2Session,
+                                                       "input_embedding");
+          memcpy(in2->host<float>(), emb2.data(),
+                 77 * text_embedding_size_2 * sizeof(float));
+          clip2Interpreter->runSession(clip2Session);
+          auto out2_hidden = clip2Interpreter->getSessionOutput(
+              clip2Session, "last_hidden_state");
+          auto out2_pool =
+              clip2Interpreter->getSessionOutput(clip2Session, "pooled_output");
+          const float *out2_hidden_data = out2_hidden->host<float>();
+          const float *out2_pool_data = out2_pool->host<float>();
+
+          // Concat along feature dim: [77, 768] + [77, 1280] = [77, 2048]
+          for (int t = 0; t < 77; t++) {
+            memcpy(out_hidden_concat + t * sdxl_concat_dim,
+                   out1_data + t * text_embedding_size,
+                   text_embedding_size * sizeof(float));
+            memcpy(
+                out_hidden_concat + t * sdxl_concat_dim + text_embedding_size,
+                out2_hidden_data + t * text_embedding_size_2,
+                text_embedding_size_2 * sizeof(float));
+          }
+          memcpy(out_pooled, out2_pool_data,
+                 text_embedding_size_2 * sizeof(float));
+        };
+
+        // negative (batch idx 0)
+        run_sdxl_clip(
+            processed.negative_embeddings, processed.negative_embeddings_2,
+            sdxl_encoder_hidden_states.data(), sdxl_text_embeds.data());
+        // positive (batch idx 1)
+        run_sdxl_clip(processed.positive_embeddings,
+                      processed.positive_embeddings_2,
+                      sdxl_encoder_hidden_states.data() + 77 * sdxl_concat_dim,
+                      sdxl_text_embeds.data() + text_embedding_size_2);
+        if (sdxl_lowram) releaseSdxlClipMnn();
+      } else if (use_mnn || use_mnn_clip) {
+        MNN::Interpreter *currentClipInterpreter = nullptr;
+        MNN::Session *currentClipSession = nullptr;
+        bool dynamicCreated = false;
+
+        if (use_mnn_clip) {
+          currentClipInterpreter = clipInterpreter;
+          currentClipSession = clipSession;
+          if (!currentClipInterpreter)
+            throw std::runtime_error(
+                "Global clipInterpreter (hybrid) not initialized!");
+        } else {
+          currentClipInterpreter =
+              MNN::Interpreter::createFromFile(clipPath.c_str());
+          if (!currentClipInterpreter)
+            throw std::runtime_error(
+                "Failed to create temporary MNN CLIP interpreter!");
+          dynamicCreated = true;
+        }
+
+        bool sessionCreated = false;
+        if (!currentClipSession) {
+          MNN::ScheduleConfig cfg_clip;
+          cfg_clip.type = MNN_FORWARD_CPU;
+          cfg_clip.numThread = 4;
+          MNN::BackendConfig bkCfg_clip;
+          bkCfg_clip.memory = MNN::BackendConfig::Memory_Low;
+          bkCfg_clip.power = MNN::BackendConfig::Power_High;
+          cfg_clip.backendConfig = &bkCfg_clip;
+          currentClipSession = currentClipInterpreter->createSession(cfg_clip);
+          if (!currentClipSession)
+            throw std::runtime_error(
+                "Failed to create temporary MNN CLIP session!");
+          sessionCreated = true;
+        }
+
+        if (use_clip_v2) {
+          auto input = currentClipInterpreter->getSessionInput(
+              currentClipSession, "input_embedding");
+          currentClipInterpreter->resizeTensor(input, {1, 77, 768});
+          currentClipInterpreter->resizeSession(currentClipSession);
+
+          if (dynamicCreated) currentClipInterpreter->releaseModel();
+
+          memcpy(input->host<float>(), processed.negative_embeddings.data(),
+                 77 * 768 * sizeof(float));
+          currentClipInterpreter->runSession(currentClipSession);
+          auto out = currentClipInterpreter->getSessionOutput(
+              currentClipSession, "last_hidden_state");
+          memcpy(embed_ptr, out->host<float>(),
+                 77 * text_embedding_size * sizeof(float));
+
+          memcpy(input->host<float>(), processed.positive_embeddings.data(),
+                 77 * 768 * sizeof(float));
+          currentClipInterpreter->runSession(currentClipSession);
+          out = currentClipInterpreter->getSessionOutput(currentClipSession,
+                                                         "last_hidden_state");
+          memcpy(embed_ptr + 77 * text_embedding_size, out->host<float>(),
+                 77 * text_embedding_size * sizeof(float));
+
+          if (sessionCreated)
+            currentClipInterpreter->releaseSession(currentClipSession);
+          if (dynamicCreated) delete currentClipInterpreter;
+
+        } else {
+          auto input = currentClipInterpreter->getSessionInput(
+              currentClipSession, "input_ids");
+          currentClipInterpreter->resizeTensor(input, {1, 77});
+          currentClipInterpreter->resizeSession(currentClipSession);
+
+          if (dynamicCreated) currentClipInterpreter->releaseModel();
+
+          memcpy(input->host<int>(), input_ids_ptr, 77 * sizeof(int32_t));
+          currentClipInterpreter->runSession(currentClipSession);
+          auto out = currentClipInterpreter->getSessionOutput(
+              currentClipSession, "last_hidden_state");
+          memcpy(embed_ptr, out->host<float>(),
+                 77 * text_embedding_size * sizeof(float));
+
+          memcpy(input->host<int>(), input_ids_ptr + 77, 77 * sizeof(int32_t));
+          currentClipInterpreter->runSession(currentClipSession);
+          out = currentClipInterpreter->getSessionOutput(currentClipSession,
+                                                         "last_hidden_state");
+          memcpy(embed_ptr + 77 * text_embedding_size, out->host<float>(),
+                 77 * text_embedding_size * sizeof(float));
+
+          if (sessionCreated)
+            currentClipInterpreter->releaseSession(currentClipSession);
+          if (dynamicCreated) delete currentClipInterpreter;
+        }
+      } else {
+        if (!clipApp)
+          throw std::runtime_error("Global clipApp not initialized!");
+        if (StatusCode::SUCCESS !=
+            clipApp->executeClipGraphs(input_ids_ptr, embed_ptr))
+          throw std::runtime_error("QNN CLIP exec failed (neg)");
+        if (StatusCode::SUCCESS !=
+            clipApp->executeClipGraphs(input_ids_ptr + 77,
+                                       embed_ptr + 77 * text_embedding_size))
+          throw std::runtime_error("QNN CLIP exec failed (pos)");
+      }
+
+      // Persist CLIP outputs so the next request with identical prompts can
+      // bypass the text encoder entirely.
+      cached_prompt = prompt;
+      cached_negative_prompt = negative_prompt;
+      if (sdxl_mode) {
+        cached_sdxl_encoder_hidden_states = sdxl_encoder_hidden_states;
+        cached_sdxl_text_embeds = sdxl_text_embeds;
+        cached_text_embedding_float.clear();
+        cached_text_embedding_float.shrink_to_fit();
+      } else {
+        cached_text_embedding_float = text_embedding_float;
+        cached_sdxl_encoder_hidden_states.clear();
+        cached_sdxl_encoder_hidden_states.shrink_to_fit();
+        cached_sdxl_text_embeds.clear();
+        cached_sdxl_text_embeds.shrink_to_fit();
+      }
+      clip_cache_valid = true;
     }
 
     auto clip_end = std::chrono::high_resolution_clock::now();
