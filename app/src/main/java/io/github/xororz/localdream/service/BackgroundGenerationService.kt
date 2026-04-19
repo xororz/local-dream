@@ -464,8 +464,18 @@ class BackgroundGenerationService : Service() {
 
     override fun onTimeout(startId: Int) {
         super.onTimeout(startId)
-        Log.e("GenerationService", "Foreground service timeout")
+        handleTimeout(0)
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        super.onTimeout(startId, fgsType)
+        handleTimeout(fgsType)
+    }
+
+    private fun handleTimeout(fgsType: Int) {
+        Log.e("GenerationService", "Foreground service timeout (fgsType=$fgsType)")
         updateState(GenerationState.Error("Service timeout"))
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 

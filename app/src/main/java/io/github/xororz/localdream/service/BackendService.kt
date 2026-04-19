@@ -99,10 +99,26 @@ class BackendService : Service() {
 
     override fun onTimeout(startId: Int) {
         super.onTimeout(startId)
-        Log.e(TAG, "Foreground service timeout")
+        handleTimeout(0)
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        super.onTimeout(startId, fgsType)
+        handleTimeout(fgsType)
+    }
+
+    private fun handleTimeout(fgsType: Int) {
+        Log.e(TAG, "Foreground service timeout (fgsType=$fgsType)")
         updateState(BackendState.Error("Service timeout"))
-        stopBackend()
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+        Thread {
+            try {
+                stopBackend()
+            } catch (e: Exception) {
+                Log.e(TAG, "stopBackend on timeout failed", e)
+            }
+        }.apply { isDaemon = true }.start()
     }
 
     private fun createNotificationChannel() {
