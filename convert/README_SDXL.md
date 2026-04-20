@@ -37,6 +37,9 @@ set -e
 model_path=~/Downloads/anythingxl.safetensors # Path to your model
 model_name=anythingxl # Name used for output files
 realistic=false  # Set to true to enable --realistic mode. It will use prompts for realistic images.
+scheduler=dpm # dpm lcm eulera
+cfg=5,7 # 5-7 random for each image
+steps=15,30 # 15-30 random for each image
 
 # Define SOC version list. 8gen3 models works for 8e and 8e5
 soc_versions=("8gen3")
@@ -53,7 +56,7 @@ fi
 
 # ======== 1024x1024 ========
 echo "Processing base resolution: 1024x1024"
-python prepare_data_sdxl.py --model_path $model_path $realistic_flag
+python prepare_data_sdxl.py --model_path $model_path $realistic_flag --scheduler $scheduler --cfg $cfg --step $steps
 python gen_quant_data_sdxl.py
 python export_onnx_sdxl.py --model_path $model_path
 
