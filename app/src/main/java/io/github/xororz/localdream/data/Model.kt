@@ -429,12 +429,12 @@ class ModelRepository(private val context: Context) {
     }
 
     private fun isSdxlCapableSoc(soc: String): Boolean {
-        return soc in setOf("SM8750", "SM8750P", "SM8850", "SM8850P", "SM8845")
+        return soc in setOf("SM8750", "SM8750P", "SM8850", "SM8850P", "SM8845", "SM8650")
     }
 
     private fun createSDXLBaseModel(): Model {
         val id = "sdxl_base"
-        val fileUri = "xororz/sdxl-qnn/resolve/main/sdxl_base_qnn2.28_8gen4.zip"
+        val fileUri = "xororz/sdxl-qnn/resolve/main/sdxl_base_qnn2.28_8gen3.zip"
 
         val isDownloaded = Model.isModelDownloaded(context, id, false)
 
@@ -457,7 +457,7 @@ class ModelRepository(private val context: Context) {
 
     private fun createAnythingXLModel(): Model {
         val id = "anythingxl"
-        val fileUri = "xororz/sdxl-qnn/resolve/main/anythingxl_qnn2.28_8gen4.zip"
+        val fileUri = "xororz/sdxl-qnn/resolve/main/anythingxl_qnn2.28_8gen3.zip"
 
         val isDownloaded = Model.isModelDownloaded(context, id, false)
 
