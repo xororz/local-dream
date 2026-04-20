@@ -38,8 +38,8 @@ model_path=~/Downloads/anythingxl.safetensors # Path to your model
 model_name=anythingxl # Name used for output files
 realistic=false  # Set to true to enable --realistic mode. It will use prompts for realistic images.
 
-# Define SOC version list
-soc_versions=("8gen4")
+# Define SOC version list. 8gen3 models works for 8e and 8e5
+soc_versions=("8gen3")
 
 uv venv -p 3.10.17 --clear
 source .venv/bin/activate
