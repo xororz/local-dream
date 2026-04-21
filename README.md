@@ -174,7 +174,7 @@ The following models are built-in and can be downloaded directly in the app:
 | Model                | Type  | CPU/GPU | NPU | Clip Skip | Source                                                                          |
 | -------------------- | ----- | :-----: | :-: | :-------: | ------------------------------------------------------------------------------- |
 | **SDXL Base 1.0**    | SDXL  |   ❌    | ✅  |     -     | [HuggingFace](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0)  |
-| **Anything XL**      | SDXL  |   ❌    | ✅  |     -     | [CivitAI](https://civitai.com/models/9409/or-anything-xl?modelVersionId=384264) |
+| **Illustrious v16**  | SDXL  |   ❌    | ✅  |     -     | [CivitAI](https://civitai.com/models/827184/wai-illustrious-sdxl)               |
 | **AnythingV5**       | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/9409?modelVersionId=30163)                 |
 | **ChilloutMix**      | SD1.5 |   ✅    | ✅  |     1     | [CivitAI](https://civitai.com/models/6424/chilloutmix?modelVersionId=11732)     |
 | **Absolute Reality** | SD1.5 |   ✅    | ✅  |     2     | [CivitAI](https://civitai.com/models/81458?modelVersionId=132760)               |

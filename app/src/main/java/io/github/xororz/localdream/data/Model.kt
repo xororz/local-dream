@@ -411,7 +411,7 @@ class ModelRepository(private val context: Context) {
         val predefinedModels = mutableListOf<Model>().apply {
             if (isSdxlCapableSoc(getDeviceSoc())) {
                 add(createSDXLBaseModel())
-                add(createAnythingXLModel())
+                add(createIllustriousV16Model())
             }
             add(createAnythingV5Model())
             add(createAnythingV5ModelCPU())
@@ -455,22 +455,22 @@ class ModelRepository(private val context: Context) {
         )
     }
 
-    private fun createAnythingXLModel(): Model {
-        val id = "anythingxl"
-        val fileUri = "xororz/sdxl-qnn/resolve/main/anythingxl_qnn2.28_8gen3.zip"
+    private fun createIllustriousV16Model(): Model {
+        val id = "illustrious_v16"
+        val fileUri = "xororz/sdxl-qnn/resolve/main/illustrious_v16_qnn2.28_8gen3.zip"
 
         val isDownloaded = Model.isModelDownloaded(context, id, false)
 
         return Model(
             id = id,
-            name = "Anything XL",
-            description = context.getString(R.string.anythingxl_description),
+            name = "Illustrious v16",
+            description = context.getString(R.string.illustriousv16_description),
             baseUrl = baseUrl,
             fileUri = fileUri,
             generationSize = 1024,
             approximateSize = "4.2GB",
             isDownloaded = isDownloaded,
-            defaultPrompt = "masterpiece, best quality, 1girl, solo, cute, white hair,",
+            defaultPrompt = "1girl, solo, blue twintails, very long hair, bangs, blue eyes, jewelry, necklace, hair bow, off-shoulder white frilled dress, bare shoulders, collarbone, underwater, floating hair, reaching towards viewer, air bubbles, blue theme, blurry foreground, masterpiece",
             defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = false,
             useCpuClip = true,
@@ -723,7 +723,7 @@ class ModelRepository(private val context: Context) {
         // Keep in sync with the create*Model() functions and UpscalerRepository.
         private val RESERVED_MODEL_IDS = setOf(
             // SDXL (NPU)
-            "sdxl_base", "anythingxl",
+            "sdxl_base", "illustrious_v16",
             // SD 1.5 NPU
             "anythingv5", "qteamix", "cuteyukimix", "absolutereality", "chilloutmix",
             // SD 1.5 CPU
