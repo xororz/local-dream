@@ -445,11 +445,17 @@ fun ModelRunScreen(
         remember { { value: Float -> denoiseStrength = value; saveAllFields() } }
     val onSeedChange = remember { { value: String -> seed = value; saveAllFields() } }
     fun updatePromptField(value: TextFieldValue) {
+        val textChanged = value.text != promptFieldValue.text
         promptFieldValue = value
-        prompt = value.text
-        saveAllFields()
+        if (textChanged) {
+            prompt = value.text
+            saveAllFields()
+        }
         if (!enableTagAutocomplete || !isPromptFocused) {
             promptSuggestions = emptyList()
+            return
+        }
+        if (!textChanged) {
             return
         }
         val activeTag = TagAutocompleteRepository.extractActiveTag(value.text, value.selection.start)
@@ -463,11 +469,17 @@ fun ModelRunScreen(
     }
 
     fun updateNegativePromptField(value: TextFieldValue) {
+        val textChanged = value.text != negativePromptFieldValue.text
         negativePromptFieldValue = value
-        negativePrompt = value.text
-        saveAllFields()
+        if (textChanged) {
+            negativePrompt = value.text
+            saveAllFields()
+        }
         if (!enableTagAutocomplete || !isNegativePromptFocused) {
             negativePromptSuggestions = emptyList()
+            return
+        }
+        if (!textChanged) {
             return
         }
         val activeTag = TagAutocompleteRepository.extractActiveTag(value.text, value.selection.start)
@@ -1554,12 +1566,7 @@ fun ModelRunScreen(
                         PromptTagTextField(
                             value = promptFieldValue,
                             onValueChange = ::updatePromptField,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(
-                                    interactionSource = interactionSource,
-                                    indication = null
-                                ) { },
+                            modifier = Modifier.fillMaxWidth(),
                             label = { Text(stringResource(R.string.image_prompt)) },
                             suggestions = promptSuggestions,
                             onSuggestionClick = ::applyPromptSuggestion,
@@ -1573,12 +1580,7 @@ fun ModelRunScreen(
                         PromptTagTextField(
                             value = negativePromptFieldValue,
                             onValueChange = ::updateNegativePromptField,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(
-                                    interactionSource = interactionSource,
-                                    indication = null
-                                ) { },
+                            modifier = Modifier.fillMaxWidth(),
                             label = { Text(stringResource(R.string.negative_prompt)) },
                             suggestions = negativePromptSuggestions,
                             onSuggestionClick = ::applyNegativePromptSuggestion,
