@@ -8,6 +8,12 @@
     <string name="illustriousv16_description">WAI Illustrious SDXL v16</string>
     <string name="capture_logs">Capture logs</string>
     <string name="capture_logs_hint">Collect app logs while a model is running, then show them after you exit</string>
+    <string name="tag_autocomplete">Tag autocomplete</string>
+    <string name="tag_autocomplete_hint">Suggest and correct Danbooru tags while you type prompts</string>
+    <string name="tag_suggestion_count">Suggestion count: %1$d</string>
+    <string name="tag_suggestion_count_hint">Control how many autocomplete items are shown (2-10)</string>
+    <string name="tag_alias_label">Alias</string>
+    <string name="tag_correction_label">Correction</string>
     <string name="sdxl_lowram">SDXL low RAM mode</string>
     <string name="sdxl_lowram_hint">For SDXL only: load each model on demand and free it after use. Required on devices with less than 16GB RAM. Disables in-progress preview.</string>
     <string name="captured_logs_title">Captured logs</string>

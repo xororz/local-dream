@@ -131,12 +131,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -153,12 +156,15 @@ import io.github.xororz.localdream.data.HistoryManager
 import io.github.xororz.localdream.data.ModelRepository
 import io.github.xororz.localdream.data.PatchScanner
 import io.github.xororz.localdream.data.Resolution
+import io.github.xororz.localdream.data.TagAutocompleteRepository
+import io.github.xororz.localdream.data.TagSuggestion
 import io.github.xororz.localdream.data.UpscalerModel
 import io.github.xororz.localdream.data.UpscalerRepository
 import io.github.xororz.localdream.service.BackendService
 import io.github.xororz.localdream.service.BackgroundGenerationService
 import io.github.xororz.localdream.service.BackgroundGenerationService.GenerationState
 import io.github.xororz.localdream.service.ModelDownloadService
+import io.github.xororz.localdream.ui.components.PromptTagTextField
 import io.github.xororz.localdream.utils.LogCapture
 import io.github.xororz.localdream.utils.performUpscale
 import io.github.xororz.localdream.utils.reportImage
@@ -325,6 +331,12 @@ fun ModelRunScreen(
     }
     var prompt by remember { mutableStateOf("") }
     var negativePrompt by remember { mutableStateOf("") }
+    var promptFieldValue by remember { mutableStateOf(TextFieldValue("")) }
+    var negativePromptFieldValue by remember { mutableStateOf(TextFieldValue("")) }
+    var promptSuggestions by remember { mutableStateOf<List<TagSuggestion>>(emptyList()) }
+    var negativePromptSuggestions by remember { mutableStateOf<List<TagSuggestion>>(emptyList()) }
+    var isPromptFocused by remember { mutableStateOf(false) }
+    var isNegativePromptFocused by remember { mutableStateOf(false) }
     var cfg by remember { mutableStateOf(7f) }
     var steps by remember { mutableStateOf(20f) }
     var seed by remember { mutableStateOf("") }
@@ -364,6 +376,14 @@ fun ModelRunScreen(
     var offsetY by remember { mutableStateOf(0f) }
     val preferences = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
     val useImg2img = preferences.getBoolean("use_img2img", true)
+    val enableTagAutocomplete = preferences.getBoolean("enable_tag_autocomplete", true)
+    val tagSuggestionCount = preferences.getInt("tag_suggestion_count", 4).coerceIn(2, 10)
+    val tagAutocompleteRepository = remember { TagAutocompleteRepository.getInstance(context) }
+    val configuration = LocalConfiguration.current
+    val localeIsChinese = remember(configuration) {
+        val locale = configuration.locales[0]
+        locale?.language?.startsWith("zh") == true
+    }
 
     var showCropScreen by remember { mutableStateOf(false) }
     var imageUriForCrop by remember { mutableStateOf<Uri?>(null) }
@@ -424,9 +444,66 @@ fun ModelRunScreen(
     val onDenoiseStrengthChange =
         remember { { value: Float -> denoiseStrength = value; saveAllFields() } }
     val onSeedChange = remember { { value: String -> seed = value; saveAllFields() } }
-    val onPromptChange = remember { { value: String -> prompt = value; saveAllFields() } }
-    val onNegativePromptChange =
-        remember { { value: String -> negativePrompt = value; saveAllFields() } }
+    fun updatePromptField(value: TextFieldValue) {
+        promptFieldValue = value
+        prompt = value.text
+        saveAllFields()
+        if (!enableTagAutocomplete || !isPromptFocused) {
+            promptSuggestions = emptyList()
+            return
+        }
+        val activeTag = TagAutocompleteRepository.extractActiveTag(value.text, value.selection.start)
+        if (activeTag == null) {
+            promptSuggestions = emptyList()
+            return
+        }
+        scope.launch {
+            promptSuggestions = tagAutocompleteRepository.suggest(activeTag.token, localeIsChinese, tagSuggestionCount)
+        }
+    }
+
+    fun updateNegativePromptField(value: TextFieldValue) {
+        negativePromptFieldValue = value
+        negativePrompt = value.text
+        saveAllFields()
+        if (!enableTagAutocomplete || !isNegativePromptFocused) {
+            negativePromptSuggestions = emptyList()
+            return
+        }
+        val activeTag = TagAutocompleteRepository.extractActiveTag(value.text, value.selection.start)
+        if (activeTag == null) {
+            negativePromptSuggestions = emptyList()
+            return
+        }
+        scope.launch {
+            negativePromptSuggestions = tagAutocompleteRepository.suggest(activeTag.token, localeIsChinese, tagSuggestionCount)
+        }
+    }
+
+    fun applyPromptSuggestion(suggestion: TagSuggestion) {
+        val (updatedText, updatedSelection) = TagAutocompleteRepository.applySuggestion(
+            promptFieldValue.text,
+            promptFieldValue.selection.start,
+            suggestion
+        )
+        prompt = updatedText
+        promptFieldValue = TextFieldValue(updatedText, TextRange(updatedSelection))
+        promptSuggestions = emptyList()
+        saveAllFields()
+    }
+
+    fun applyNegativePromptSuggestion(suggestion: TagSuggestion) {
+        val (updatedText, updatedSelection) = TagAutocompleteRepository.applySuggestion(
+            negativePromptFieldValue.text,
+            negativePromptFieldValue.selection.start,
+            suggestion
+        )
+        negativePrompt = updatedText
+        negativePromptFieldValue = TextFieldValue(updatedText, TextRange(updatedSelection))
+        negativePromptSuggestions = emptyList()
+        saveAllFields()
+    }
+
     val onBatchCountsChange = remember {
         { value: Float ->
             batchCounts = value.roundToInt().coerceIn(1, 10)
@@ -679,15 +756,19 @@ fun ModelRunScreen(
                 model?.let { m ->
                     if (m.defaultPrompt.isNotEmpty()) {
                         prompt = m.defaultPrompt
+                        promptFieldValue = TextFieldValue(m.defaultPrompt, TextRange(m.defaultPrompt.length))
                     }
                     if (m.defaultNegativePrompt.isNotEmpty()) {
                         negativePrompt = m.defaultNegativePrompt
+                        negativePromptFieldValue = TextFieldValue(m.defaultNegativePrompt, TextRange(m.defaultNegativePrompt.length))
                     }
                     saveAllFields()
                 }
             } else {
                 prompt = prefs.prompt
                 negativePrompt = prefs.negativePrompt
+                promptFieldValue = TextFieldValue(prefs.prompt, TextRange(prefs.prompt.length))
+                negativePromptFieldValue = TextFieldValue(prefs.negativePrompt, TextRange(prefs.negativePrompt.length))
             }
 
             steps = prefs.steps
@@ -1011,6 +1092,10 @@ fun ModelRunScreen(
                         scheduler = "dpm"
                         prompt = model?.defaultPrompt ?: ""
                         negativePrompt = model?.defaultNegativePrompt ?: ""
+                        promptFieldValue = TextFieldValue(prompt, TextRange(prompt.length))
+                        negativePromptFieldValue = TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
+                        promptSuggestions = emptyList()
+                        negativePromptSuggestions = emptyList()
                         denoiseStrength = 0.6f
                         scope.launch(Dispatchers.IO) {
                             generationPreferences.saveAllFields(
@@ -1466,16 +1551,9 @@ fun ModelRunScreen(
                             }
                         }
 
-                        var expandedPrompt by remember { mutableStateOf(false) }
-                        var expandedNegativePrompt by remember {
-                            mutableStateOf(
-                                false
-                            )
-                        }
-
-                        OutlinedTextField(
-                            value = prompt,
-                            onValueChange = onPromptChange,
+                        PromptTagTextField(
+                            value = promptFieldValue,
+                            onValueChange = ::updatePromptField,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable(
@@ -1483,29 +1561,18 @@ fun ModelRunScreen(
                                     indication = null
                                 ) { },
                             label = { Text(stringResource(R.string.image_prompt)) },
-                            maxLines = if (expandedPrompt) Int.MAX_VALUE else 2,
-                            minLines = if (expandedPrompt) 3 else 2,
-                            shape = MaterialTheme.shapes.medium,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                            ),
-                            trailingIcon = {
-                                IconButton(onClick = {
-                                    expandedPrompt = !expandedPrompt
-                                }) {
-                                    Icon(
-                                        if (expandedPrompt) Icons.Default.KeyboardArrowUp
-                                        else Icons.Default.KeyboardArrowDown,
-                                        contentDescription = if (expandedPrompt) "collapse" else "expand"
-                                    )
-                                }
+                            suggestions = promptSuggestions,
+                            onSuggestionClick = ::applyPromptSuggestion,
+                            showSuggestions = enableTagAutocomplete && isPromptFocused,
+                            onFocusChanged = {
+                                isPromptFocused = it
+                                if (!it) promptSuggestions = emptyList()
                             }
                         )
 
-                        OutlinedTextField(
-                            value = negativePrompt,
-                            onValueChange = onNegativePromptChange,
+                        PromptTagTextField(
+                            value = negativePromptFieldValue,
+                            onValueChange = ::updateNegativePromptField,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable(
@@ -1513,23 +1580,12 @@ fun ModelRunScreen(
                                     indication = null
                                 ) { },
                             label = { Text(stringResource(R.string.negative_prompt)) },
-                            maxLines = if (expandedNegativePrompt) Int.MAX_VALUE else 2,
-                            minLines = if (expandedNegativePrompt) 3 else 2,
-                            shape = MaterialTheme.shapes.medium,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                            ),
-                            trailingIcon = {
-                                IconButton(onClick = {
-                                    expandedNegativePrompt = !expandedNegativePrompt
-                                }) {
-                                    Icon(
-                                        if (expandedNegativePrompt) Icons.Default.KeyboardArrowUp
-                                        else Icons.Default.KeyboardArrowDown,
-                                        contentDescription = if (expandedNegativePrompt) "collapse" else "expand"
-                                    )
-                                }
+                            suggestions = negativePromptSuggestions,
+                            onSuggestionClick = ::applyNegativePromptSuggestion,
+                            showSuggestions = enableTagAutocomplete && isNegativePromptFocused,
+                            onFocusChanged = {
+                                isNegativePromptFocused = it
+                                if (!it) negativePromptSuggestions = emptyList()
                             }
                         )
 
@@ -3607,6 +3663,10 @@ fun ModelRunScreen(
                         // Apply parameters with seed
                         prompt = params.prompt
                         negativePrompt = params.negativePrompt
+                        promptFieldValue = TextFieldValue(prompt, TextRange(prompt.length))
+                        negativePromptFieldValue = TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
+                        promptSuggestions = emptyList()
+                        negativePromptSuggestions = emptyList()
                         cfg = params.cfg
                         steps = params.steps.toFloat()
                         seed = params.seed?.toString() ?: ""
@@ -3631,6 +3691,10 @@ fun ModelRunScreen(
                         // Apply parameters without seed
                         prompt = params.prompt
                         negativePrompt = params.negativePrompt
+                        promptFieldValue = TextFieldValue(prompt, TextRange(prompt.length))
+                        negativePromptFieldValue = TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
+                        promptSuggestions = emptyList()
+                        negativePromptSuggestions = emptyList()
                         cfg = params.cfg
                         steps = params.steps.toFloat()
                         seed = ""  // Don't copy seed

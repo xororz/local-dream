@@ -8,6 +8,12 @@
     <string name="illustriousv16_description">WAI Illustrious SDXL v16</string>
     <string name="capture_logs">收集日志</string>
     <string name="capture_logs_hint">运行模型时收集应用日志，退出后展示</string>
+    <string name="tag_autocomplete">Tag 联想</string>
+    <string name="tag_autocomplete_hint">输入提示词时联想并纠正 Danbooru tag</string>
+    <string name="tag_suggestion_count">联想词范围：%1$d</string>
+    <string name="tag_suggestion_count_hint">控制联想框显示的条目数量（2-10）</string>
+    <string name="tag_alias_label">别名</string>
+    <string name="tag_correction_label">纠错</string>
     <string name="sdxl_lowram">SDXL 低内存模式</string>
     <string name="sdxl_lowram_hint">仅 SDXL 生效：按需加载每个模型，用完即释放。小于 16GB 内存的设备建议开启。开启后将禁用生成过程预览。</string>
     <string name="captured_logs_title">已收集的日志</string>
