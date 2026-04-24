@@ -420,6 +420,12 @@ fun ModelRunScreen(
     val tagDictState by tagAutocompleteRepository.state.collectAsState()
     val tagAutocompleteAvailable = enableTagAutocomplete && tagDictState.mainImported
 
+    LaunchedEffect(tagAutocompleteAvailable) {
+        if (tagAutocompleteAvailable) {
+            tagAutocompleteRepository.warmUp()
+        }
+    }
+
     var showCropScreen by remember { mutableStateOf(false) }
     var imageUriForCrop by remember { mutableStateOf<Uri?>(null) }
     var croppedBitmap by remember { mutableStateOf<Bitmap?>(null) }

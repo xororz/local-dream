@@ -10,7 +10,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.BufferedReader
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -26,9 +30,16 @@ class TagAutocompleteRepository private constructor(private val context: Context
     private val dictDir = File(context.filesDir, DICT_DIR).also { it.mkdirs() }
     private val mainFile = File(dictDir, MAIN_FILE_NAME)
     private val translationFile = File(dictDir, TRANSLATION_FILE_NAME)
+    private val cacheFile = File(dictDir, CACHE_FILE_NAME)
+    private val underscoreRegex = Regex("_+")
 
     private val _state = MutableStateFlow(readStateFromDisk())
     val state: StateFlow<DictionaryState> = _state.asStateFlow()
+
+    suspend fun warmUp() {
+        if (!state.value.mainImported) return
+        ensureLoaded()
+    }
 
     suspend fun suggest(query: String, limit: Int = 12): List<TagSuggestion> {
         if (!state.value.mainImported) return emptyList()
@@ -120,6 +131,7 @@ class TagAutocompleteRepository private constructor(private val context: Context
 
     private fun invalidate() {
         loadedData = null
+        if (cacheFile.exists()) cacheFile.delete()
     }
 
     private fun readStateFromDisk(): DictionaryState {
@@ -154,12 +166,23 @@ class TagAutocompleteRepository private constructor(private val context: Context
 
     private fun loadData(): TagData? {
         if (!mainFile.exists()) return null
+        val entries = loadEntriesFromCache() ?: run {
+            val parsed = parseCsvEntries() ?: return null
+            saveEntriesToCache(parsed)
+            parsed
+        }
+        return buildIndexes(entries)
+    }
+
+    private fun parseCsvEntries(): List<TagEntry>? {
+        if (!mainFile.exists()) return null
         val translationMap = if (translationFile.exists()) loadTranslationMap() else emptyMap()
-        val entries = mutableListOf<TagEntry>()
-        val englishSet = HashSet<String>()
+        val estimated = prefs.getInt(KEY_MAIN_LINES, 0).coerceAtLeast(16)
+        val entries = ArrayList<TagEntry>(estimated)
+        val englishSet = HashSet<String>(estimated * 2)
 
         mainFile.inputStream().use { input ->
-            BufferedReader(InputStreamReader(input)).useLines { lines ->
+            BufferedReader(InputStreamReader(input, Charsets.UTF_8)).useLines { lines ->
                 lines.forEach { rawLine ->
                     val line = rawLine.trim()
                     if (line.isEmpty()) return@forEach
@@ -193,11 +216,14 @@ class TagAutocompleteRepository private constructor(private val context: Context
                 }
             }
         }
+        return entries
+    }
 
-        val englishByHead = HashMap<Char, MutableList<TagEntry>>()
-        val aliasByHead = HashMap<Char, MutableList<AliasRef>>()
-        val translationByHead = HashMap<Char, MutableList<TagEntry>>()
-        val translationEntries = mutableListOf<TagEntry>()
+    private fun buildIndexes(entries: List<TagEntry>): TagData {
+        val englishByHead = HashMap<Char, MutableList<TagEntry>>(64)
+        val aliasByHead = HashMap<Char, MutableList<AliasRef>>(64)
+        val translationByHead = HashMap<Char, MutableList<TagEntry>>(64)
+        val translationEntries = ArrayList<TagEntry>(entries.size)
 
         for (entry in entries) {
             entry.normalizedEnglish.firstOrNull()?.let { head ->
@@ -225,9 +251,10 @@ class TagAutocompleteRepository private constructor(private val context: Context
     }
 
     private fun loadTranslationMap(): Map<String, String> {
-        val map = HashMap<String, String>()
+        val estimated = prefs.getInt(KEY_TRANSLATION_LINES, 0).coerceAtLeast(16)
+        val map = HashMap<String, String>(estimated * 2)
         translationFile.inputStream().use { input ->
-            BufferedReader(InputStreamReader(input)).useLines { lines ->
+            BufferedReader(InputStreamReader(input, Charsets.UTF_8)).useLines { lines ->
                 lines.forEach { rawLine ->
                     val line = rawLine.trim()
                     if (line.isEmpty()) return@forEach
@@ -241,6 +268,110 @@ class TagAutocompleteRepository private constructor(private val context: Context
             }
         }
         return map
+    }
+
+    private fun loadEntriesFromCache(): List<TagEntry>? {
+        if (!cacheFile.exists()) return null
+        return runCatching {
+            DataInputStream(BufferedInputStream(cacheFile.inputStream())).use { input ->
+                if (input.readInt() != CACHE_MAGIC) return@use null
+                if (input.readInt() != CACHE_VERSION) return@use null
+                val cachedMainSize = input.readLong()
+                val cachedMainMtime = input.readLong()
+                val cachedTransSize = input.readLong()
+                val cachedTransMtime = input.readLong()
+                val currentMainSize = mainFile.length()
+                val currentMainMtime = mainFile.lastModified()
+                val currentTransSize =
+                    if (translationFile.exists()) translationFile.length() else 0L
+                val currentTransMtime =
+                    if (translationFile.exists()) translationFile.lastModified() else 0L
+                if (cachedMainSize != currentMainSize ||
+                    cachedMainMtime != currentMainMtime ||
+                    cachedTransSize != currentTransSize ||
+                    cachedTransMtime != currentTransMtime
+                ) {
+                    return@use null
+                }
+                val count = input.readInt()
+                if (count < 0) return@use null
+                val list = ArrayList<TagEntry>(count)
+                repeat(count) {
+                    val english = input.readUTF()
+                    val translation = if (input.readBoolean()) input.readUTF() else null
+                    val category = input.readInt()
+                    val postCount = input.readInt()
+                    val aliasCount = input.readInt()
+                    val aliases =
+                        if (aliasCount == 0) emptyList() else ArrayList<String>(aliasCount).also {
+                            repeat(aliasCount) { _ -> it += input.readUTF() }
+                        }
+                    val normalizedEnglish = input.readUTF()
+                    val normalizedAliasCount = input.readInt()
+                    val normalizedAliases =
+                        if (normalizedAliasCount == 0) emptyList() else ArrayList<String>(
+                            normalizedAliasCount
+                        ).also {
+                            repeat(normalizedAliasCount) { _ -> it += input.readUTF() }
+                        }
+                    val normalizedTranslation = if (input.readBoolean()) input.readUTF() else null
+                    list += TagEntry(
+                        english = english,
+                        translation = translation,
+                        category = category,
+                        postCount = postCount,
+                        aliases = aliases,
+                        normalizedEnglish = normalizedEnglish,
+                        normalizedAliases = normalizedAliases,
+                        normalizedTranslation = normalizedTranslation
+                    )
+                }
+                list
+            }
+        }.getOrElse {
+            cacheFile.delete()
+            null
+        }
+    }
+
+    private fun saveEntriesToCache(entries: List<TagEntry>) {
+        runCatching {
+            DataOutputStream(BufferedOutputStream(cacheFile.outputStream())).use { output ->
+                output.writeInt(CACHE_MAGIC)
+                output.writeInt(CACHE_VERSION)
+                output.writeLong(mainFile.length())
+                output.writeLong(mainFile.lastModified())
+                output.writeLong(if (translationFile.exists()) translationFile.length() else 0L)
+                output.writeLong(if (translationFile.exists()) translationFile.lastModified() else 0L)
+                output.writeInt(entries.size)
+                for (entry in entries) {
+                    output.writeUTF(entry.english)
+                    val translation = entry.translation
+                    if (translation != null) {
+                        output.writeBoolean(true)
+                        output.writeUTF(translation)
+                    } else {
+                        output.writeBoolean(false)
+                    }
+                    output.writeInt(entry.category)
+                    output.writeInt(entry.postCount)
+                    output.writeInt(entry.aliases.size)
+                    for (a in entry.aliases) output.writeUTF(a)
+                    output.writeUTF(entry.normalizedEnglish)
+                    output.writeInt(entry.normalizedAliases.size)
+                    for (a in entry.normalizedAliases) output.writeUTF(a)
+                    val normTr = entry.normalizedTranslation
+                    if (normTr != null) {
+                        output.writeBoolean(true)
+                        output.writeUTF(normTr)
+                    } else {
+                        output.writeBoolean(false)
+                    }
+                }
+            }
+        }.onFailure {
+            cacheFile.delete()
+        }
     }
 
     private fun extractTranslation(cells: List<String>): String? {
@@ -484,7 +615,7 @@ class TagAutocompleteRepository private constructor(private val context: Context
             .lowercase()
             .replace(' ', '_')
             .replace('-', '_')
-            .replace(Regex("_+"), "_")
+            .replace(underscoreRegex, "_")
     }
 
     private fun containsNonAsciiLetter(value: String): Boolean =
@@ -551,6 +682,9 @@ class TagAutocompleteRepository private constructor(private val context: Context
         private const val DICT_DIR = "tagcomplete"
         private const val MAIN_FILE_NAME = "main.csv"
         private const val TRANSLATION_FILE_NAME = "translation.csv"
+        private const val CACHE_FILE_NAME = "dict.bin"
+        private const val CACHE_MAGIC = 0x54444331 // "TDC1"
+        private const val CACHE_VERSION = 1
         private const val KEY_MAIN_NAME = "main_csv_name"
         private const val KEY_MAIN_LINES = "main_csv_lines"
         private const val KEY_TRANSLATION_NAME = "translation_csv_name"
