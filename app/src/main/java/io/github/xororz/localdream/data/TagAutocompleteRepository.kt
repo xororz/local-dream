@@ -18,6 +18,7 @@ import kotlin.math.abs
 
 class TagAutocompleteRepository private constructor(private val context: Context) {
     private val loadMutex = Mutex()
+
     @Volatile
     private var loadedData: TagData? = null
 
@@ -48,52 +49,54 @@ class TagAutocompleteRepository private constructor(private val context: Context
         }
     }
 
-    suspend fun importMainCsv(uri: Uri, displayName: String?): ImportResult = withContext(Dispatchers.IO) {
-        runCatching {
-            val lineCount = copyUriToFile(uri, mainFile) { cells ->
-                cells.getOrNull(0)?.trim()?.removePrefix("﻿").isNullOrEmpty().not()
-            }
-            if (lineCount == 0) {
+    suspend fun importMainCsv(uri: Uri, displayName: String?): ImportResult =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val lineCount = copyUriToFile(uri, mainFile) { cells ->
+                    cells.getOrNull(0)?.trim()?.removePrefix("﻿").isNullOrEmpty().not()
+                }
+                if (lineCount == 0) {
+                    mainFile.delete()
+                    return@withContext ImportResult.Error("empty")
+                }
+                invalidate()
+                prefs.edit {
+                    putString(KEY_MAIN_NAME, displayName ?: MAIN_FILE_NAME)
+                    putInt(KEY_MAIN_LINES, lineCount)
+                }
+                _state.value = readStateFromDisk()
+                ImportResult.Success(lineCount)
+            }.getOrElse {
                 mainFile.delete()
-                return@withContext ImportResult.Error("empty")
+                ImportResult.Error(it.message ?: "unknown")
             }
-            invalidate()
-            prefs.edit {
-                putString(KEY_MAIN_NAME, displayName ?: MAIN_FILE_NAME)
-                putInt(KEY_MAIN_LINES, lineCount)
-            }
-            _state.value = readStateFromDisk()
-            ImportResult.Success(lineCount)
-        }.getOrElse {
-            mainFile.delete()
-            ImportResult.Error(it.message ?: "unknown")
         }
-    }
 
-    suspend fun importTranslationCsv(uri: Uri, displayName: String?): ImportResult = withContext(Dispatchers.IO) {
-        runCatching {
-            val lineCount = copyUriToFile(uri, translationFile) { cells ->
-                if (cells.size < 2) return@copyUriToFile false
-                val key = cells[0].trim().removePrefix("﻿")
-                if (key.isEmpty()) return@copyUriToFile false
-                extractTranslation(cells) != null
-            }
-            if (lineCount == 0) {
+    suspend fun importTranslationCsv(uri: Uri, displayName: String?): ImportResult =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val lineCount = copyUriToFile(uri, translationFile) { cells ->
+                    if (cells.size < 2) return@copyUriToFile false
+                    val key = cells[0].trim().removePrefix("﻿")
+                    if (key.isEmpty()) return@copyUriToFile false
+                    extractTranslation(cells) != null
+                }
+                if (lineCount == 0) {
+                    translationFile.delete()
+                    return@withContext ImportResult.Error("empty")
+                }
+                invalidate()
+                prefs.edit {
+                    putString(KEY_TRANSLATION_NAME, displayName ?: TRANSLATION_FILE_NAME)
+                    putInt(KEY_TRANSLATION_LINES, lineCount)
+                }
+                _state.value = readStateFromDisk()
+                ImportResult.Success(lineCount)
+            }.getOrElse {
                 translationFile.delete()
-                return@withContext ImportResult.Error("empty")
+                ImportResult.Error(it.message ?: "unknown")
             }
-            invalidate()
-            prefs.edit {
-                putString(KEY_TRANSLATION_NAME, displayName ?: TRANSLATION_FILE_NAME)
-                putInt(KEY_TRANSLATION_LINES, lineCount)
-            }
-            _state.value = readStateFromDisk()
-            ImportResult.Success(lineCount)
-        }.getOrElse {
-            translationFile.delete()
-            ImportResult.Error(it.message ?: "unknown")
         }
-    }
 
     fun clearMainCsv() {
         mainFile.delete()
@@ -127,8 +130,14 @@ class TagAutocompleteRepository private constructor(private val context: Context
             mainFileName = if (mainImported) prefs.getString(KEY_MAIN_NAME, null) else null,
             mainEntryCount = if (mainImported) prefs.getInt(KEY_MAIN_LINES, 0) else 0,
             translationImported = translationImported,
-            translationFileName = if (translationImported) prefs.getString(KEY_TRANSLATION_NAME, null) else null,
-            translationEntryCount = if (translationImported) prefs.getInt(KEY_TRANSLATION_LINES, 0) else 0
+            translationFileName = if (translationImported) prefs.getString(
+                KEY_TRANSLATION_NAME,
+                null
+            ) else null,
+            translationEntryCount = if (translationImported) prefs.getInt(
+                KEY_TRANSLATION_LINES,
+                0
+            ) else 0
         )
     }
 
@@ -177,7 +186,8 @@ class TagAutocompleteRepository private constructor(private val context: Context
                         postCount = postCount,
                         aliases = aliases,
                         normalizedEnglish = normalizeQuery(english),
-                        normalizedAliases = aliases.map(::normalizeQuery).filter { it.isNotEmpty() },
+                        normalizedAliases = aliases.map(::normalizeQuery)
+                            .filter { it.isNotEmpty() },
                         normalizedTranslation = translation?.let(::normalizeTranslation)
                     )
                 }
@@ -244,7 +254,11 @@ class TagAutocompleteRepository private constructor(private val context: Context
         return null
     }
 
-    private fun suggestByTranslation(data: TagData, normalizedQuery: String, limit: Int): List<TagSuggestion> {
+    private fun suggestByTranslation(
+        data: TagData,
+        normalizedQuery: String,
+        limit: Int
+    ): List<TagSuggestion> {
         if (normalizedQuery.isEmpty()) return emptyList()
         val head = normalizedQuery.first()
         val prefix = mutableListOf<TagSuggestion>()
@@ -293,7 +307,11 @@ class TagAutocompleteRepository private constructor(private val context: Context
             .take(limit)
     }
 
-    private fun suggestByEnglish(data: TagData, normalizedQuery: String, limit: Int): List<TagSuggestion> {
+    private fun suggestByEnglish(
+        data: TagData,
+        normalizedQuery: String,
+        limit: Int
+    ): List<TagSuggestion> {
         if (normalizedQuery.isEmpty()) return emptyList()
         val head = normalizedQuery.first()
         val prefix = mutableListOf<TagSuggestion>()
@@ -306,7 +324,11 @@ class TagAutocompleteRepository private constructor(private val context: Context
         for (entry in englishCandidates) {
             if (!entry.normalizedEnglish.startsWith(normalizedQuery)) continue
             val scoreBase = popularityScore(entry.postCount)
-            prefix += buildSuggestion(entry, TagMatchType.Prefix, 6000 + scoreBase - entry.normalizedEnglish.length)
+            prefix += buildSuggestion(
+                entry,
+                TagMatchType.Prefix,
+                6000 + scoreBase - entry.normalizedEnglish.length
+            )
         }
 
         val seenAliasEntries = HashSet<String>()
@@ -332,13 +354,14 @@ class TagAutocompleteRepository private constructor(private val context: Context
             for (entry in correctionCandidates) {
                 if (entry.normalizedEnglish.startsWith(normalizedQuery)) continue
 
-                val englishDistance = if (abs(entry.normalizedEnglish.length - normalizedQuery.length) <= threshold &&
-                    entry.normalizedEnglish.firstOrNull() == head
-                ) {
-                    damerauLevenshtein(normalizedQuery, entry.normalizedEnglish, threshold)
-                } else {
-                    threshold + 1
-                }
+                val englishDistance =
+                    if (abs(entry.normalizedEnglish.length - normalizedQuery.length) <= threshold &&
+                        entry.normalizedEnglish.firstOrNull() == head
+                    ) {
+                        damerauLevenshtein(normalizedQuery, entry.normalizedEnglish, threshold)
+                    } else {
+                        threshold + 1
+                    }
                 var bestDistance = englishDistance
                 var matchedAlias: String? = null
 
@@ -346,7 +369,8 @@ class TagAutocompleteRepository private constructor(private val context: Context
                     for (aliasValue in entry.normalizedAliases) {
                         if (abs(aliasValue.length - normalizedQuery.length) > threshold) continue
                         if (aliasValue.firstOrNull() != head) continue
-                        val aliasDistance = damerauLevenshtein(normalizedQuery, aliasValue, threshold)
+                        val aliasDistance =
+                            damerauLevenshtein(normalizedQuery, aliasValue, threshold)
                         if (aliasDistance < bestDistance) {
                             bestDistance = aliasDistance
                             matchedAlias = aliasValue
@@ -437,10 +461,12 @@ class TagAutocompleteRepository private constructor(private val context: Context
                         inQuotes = !inQuotes
                     }
                 }
+
                 char == ',' && !inQuotes -> {
                     result += current.toString()
                     current.setLength(0)
                 }
+
                 else -> current.append(char)
             }
             index++
@@ -449,7 +475,8 @@ class TagAutocompleteRepository private constructor(private val context: Context
         return result
     }
 
-    private fun normalizeTranslation(value: String): String = value.trim().replace(" ", "").lowercase()
+    private fun normalizeTranslation(value: String): String =
+        value.trim().replace(" ", "").lowercase()
 
     private fun normalizeQuery(value: String): String {
         return value
@@ -534,15 +561,18 @@ class TagAutocompleteRepository private constructor(private val context: Context
 
         fun getInstance(context: Context): TagAutocompleteRepository {
             return instance ?: synchronized(this) {
-                instance ?: TagAutocompleteRepository(context.applicationContext).also { instance = it }
+                instance ?: TagAutocompleteRepository(context.applicationContext).also {
+                    instance = it
+                }
             }
         }
 
         fun extractActiveTag(text: String, selection: Int): ActiveTagContext? {
             if (selection < 0 || selection > text.length) return null
-            val segmentStart = text.lastIndexOf(',', startIndex = (selection - 1).coerceAtLeast(0)).let {
-                if (it == -1) 0 else it + 1
-            }
+            val segmentStart =
+                text.lastIndexOf(',', startIndex = (selection - 1).coerceAtLeast(0)).let {
+                    if (it == -1) 0 else it + 1
+                }
             val segmentEnd = text.indexOf(',', startIndex = selection).let {
                 if (it == -1) text.length else it
             }
@@ -558,7 +588,11 @@ class TagAutocompleteRepository private constructor(private val context: Context
             )
         }
 
-        fun applySuggestion(text: String, selection: Int, suggestion: TagSuggestion): Pair<String, Int> {
+        fun applySuggestion(
+            text: String,
+            selection: Int,
+            suggestion: TagSuggestion
+        ): Pair<String, Int> {
             val context = extractActiveTag(text, selection) ?: return text to selection
             val prefix = text.substring(0, context.trimmedStart)
             val suffix = text.substring(context.segmentEnd)

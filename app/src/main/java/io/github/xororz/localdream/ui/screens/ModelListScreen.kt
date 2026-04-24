@@ -1106,13 +1106,14 @@ fun ModelListScreen(
                                 }
                                 var enableTagAutocomplete by remember {
                                     mutableStateOf(
-                                        preferences.getBoolean("enable_tag_autocomplete", true).also {
-                                            if (!preferences.contains("enable_tag_autocomplete")) {
-                                                preferences.edit {
-                                                    putBoolean("enable_tag_autocomplete", true)
+                                        preferences.getBoolean("enable_tag_autocomplete", true)
+                                            .also {
+                                                if (!preferences.contains("enable_tag_autocomplete")) {
+                                                    preferences.edit {
+                                                        putBoolean("enable_tag_autocomplete", true)
+                                                    }
                                                 }
                                             }
-                                        }
                                     )
                                 }
                                 var tagSuggestionCount by remember {
@@ -1126,7 +1127,8 @@ fun ModelListScreen(
                                         }.coerceIn(2, 10)
                                     )
                                 }
-                                val tagRepository = remember { TagAutocompleteRepository.getInstance(context) }
+                                val tagRepository =
+                                    remember { TagAutocompleteRepository.getInstance(context) }
                                 val tagDictState by tagRepository.state.collectAsState()
                                 var tagImportInProgress by remember { mutableStateOf(false) }
                                 val mainCsvPickerLauncher = rememberLauncherForActivityResult(
@@ -1142,29 +1144,34 @@ fun ModelListScreen(
                                             is ImportResult.Success -> context.getString(
                                                 R.string.tag_import_success, result.lineCount
                                             )
+
                                             is ImportResult.Error -> context.getString(R.string.tag_import_failed)
                                         }
                                         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                                     }
                                 }
-                                val translationCsvPickerLauncher = rememberLauncherForActivityResult(
-                                    contract = ActivityResultContracts.GetContent()
-                                ) { uri ->
-                                    if (uri == null) return@rememberLauncherForActivityResult
-                                    val displayName = getFileNameFromUri(context, uri)
-                                    tagImportInProgress = true
-                                    scope.launch {
-                                        val result = tagRepository.importTranslationCsv(uri, displayName)
-                                        tagImportInProgress = false
-                                        val message = when (result) {
-                                            is ImportResult.Success -> context.getString(
-                                                R.string.tag_import_success, result.lineCount
-                                            )
-                                            is ImportResult.Error -> context.getString(R.string.tag_import_failed)
+                                val translationCsvPickerLauncher =
+                                    rememberLauncherForActivityResult(
+                                        contract = ActivityResultContracts.GetContent()
+                                    ) { uri ->
+                                        if (uri == null) return@rememberLauncherForActivityResult
+                                        val displayName = getFileNameFromUri(context, uri)
+                                        tagImportInProgress = true
+                                        scope.launch {
+                                            val result =
+                                                tagRepository.importTranslationCsv(uri, displayName)
+                                            tagImportInProgress = false
+                                            val message = when (result) {
+                                                is ImportResult.Success -> context.getString(
+                                                    R.string.tag_import_success, result.lineCount
+                                                )
+
+                                                is ImportResult.Error -> context.getString(R.string.tag_import_failed)
+                                            }
+                                            Toast.makeText(context, message, Toast.LENGTH_SHORT)
+                                                .show()
                                         }
-                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                                     }
-                                }
                                 var sdxlLowRam by remember {
                                     mutableStateOf(
                                         preferences.getBoolean("sdxl_lowram", true).also {
@@ -1366,7 +1373,9 @@ fun ModelListScreen(
                                     Column {
                                         HorizontalDivider(
                                             modifier = Modifier.padding(horizontal = 16.dp),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                                alpha = 0.2f
+                                            )
                                         )
                                         Column(
                                             modifier = Modifier
@@ -1389,7 +1398,9 @@ fun ModelListScreen(
                                                     stringResource(R.string.tag_main_dictionary_hint)
                                                 },
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                                color = MaterialTheme.colorScheme.onSurface.copy(
+                                                    alpha = 0.7f
+                                                )
                                             )
                                             Row(
                                                 modifier = Modifier
@@ -1421,7 +1432,9 @@ fun ModelListScreen(
                                         }
                                         HorizontalDivider(
                                             modifier = Modifier.padding(horizontal = 16.dp),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                                alpha = 0.2f
+                                            )
                                         )
                                         Column(
                                             modifier = Modifier
@@ -1444,7 +1457,9 @@ fun ModelListScreen(
                                                     stringResource(R.string.tag_translation_dictionary_hint)
                                                 },
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                                color = MaterialTheme.colorScheme.onSurface.copy(
+                                                    alpha = 0.7f
+                                                )
                                             )
                                             Row(
                                                 modifier = Modifier
@@ -1453,7 +1468,11 @@ fun ModelListScreen(
                                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
                                                 Button(
-                                                    onClick = { translationCsvPickerLauncher.launch("*/*") },
+                                                    onClick = {
+                                                        translationCsvPickerLauncher.launch(
+                                                            "*/*"
+                                                        )
+                                                    },
                                                     enabled = !tagImportInProgress,
                                                     modifier = Modifier.weight(1f)
                                                 ) {
@@ -1476,7 +1495,9 @@ fun ModelListScreen(
                                         }
                                         HorizontalDivider(
                                             modifier = Modifier.padding(horizontal = 16.dp),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                                alpha = 0.2f
+                                            )
                                         )
                                         Column(
                                             modifier = Modifier
@@ -1484,21 +1505,29 @@ fun ModelListScreen(
                                                 .padding(16.dp)
                                         ) {
                                             Text(
-                                                text = stringResource(R.string.tag_suggestion_count, tagSuggestionCount),
+                                                text = stringResource(
+                                                    R.string.tag_suggestion_count,
+                                                    tagSuggestionCount
+                                                ),
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.Medium
                                             )
                                             Text(
                                                 stringResource(R.string.tag_suggestion_count_hint),
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                                color = MaterialTheme.colorScheme.onSurface.copy(
+                                                    alpha = 0.7f
+                                                )
                                             )
                                             Slider(
                                                 value = tagSuggestionCount.toFloat(),
                                                 onValueChange = {
                                                     tagSuggestionCount = it.toInt().coerceIn(2, 10)
                                                     preferences.edit {
-                                                        putInt("tag_suggestion_count", tagSuggestionCount)
+                                                        putInt(
+                                                            "tag_suggestion_count",
+                                                            tagSuggestionCount
+                                                        )
                                                     }
                                                 },
                                                 valueRange = 2f..10f,

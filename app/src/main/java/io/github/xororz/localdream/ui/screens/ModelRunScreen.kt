@@ -460,7 +460,8 @@ fun ModelRunScreen(
             return
         }
         if (!textChanged && !selectionChanged) return
-        val activeTag = TagAutocompleteRepository.extractActiveTag(value.text, value.selection.start)
+        val activeTag =
+            TagAutocompleteRepository.extractActiveTag(value.text, value.selection.start)
         if (activeTag == null) {
             promptSuggestJob?.cancel()
             promptSuggestions = emptyList()
@@ -491,7 +492,8 @@ fun ModelRunScreen(
             return
         }
         if (!textChanged && !selectionChanged) return
-        val activeTag = TagAutocompleteRepository.extractActiveTag(value.text, value.selection.start)
+        val activeTag =
+            TagAutocompleteRepository.extractActiveTag(value.text, value.selection.start)
         if (activeTag == null) {
             negativePromptSuggestJob?.cancel()
             negativePromptSuggestions = emptyList()
@@ -785,11 +787,15 @@ fun ModelRunScreen(
                 model?.let { m ->
                     if (m.defaultPrompt.isNotEmpty()) {
                         prompt = m.defaultPrompt
-                        promptFieldValue = TextFieldValue(m.defaultPrompt, TextRange(m.defaultPrompt.length))
+                        promptFieldValue =
+                            TextFieldValue(m.defaultPrompt, TextRange(m.defaultPrompt.length))
                     }
                     if (m.defaultNegativePrompt.isNotEmpty()) {
                         negativePrompt = m.defaultNegativePrompt
-                        negativePromptFieldValue = TextFieldValue(m.defaultNegativePrompt, TextRange(m.defaultNegativePrompt.length))
+                        negativePromptFieldValue = TextFieldValue(
+                            m.defaultNegativePrompt,
+                            TextRange(m.defaultNegativePrompt.length)
+                        )
                     }
                     saveAllFields()
                 }
@@ -797,7 +803,8 @@ fun ModelRunScreen(
                 prompt = prefs.prompt
                 negativePrompt = prefs.negativePrompt
                 promptFieldValue = TextFieldValue(prefs.prompt, TextRange(prefs.prompt.length))
-                negativePromptFieldValue = TextFieldValue(prefs.negativePrompt, TextRange(prefs.negativePrompt.length))
+                negativePromptFieldValue =
+                    TextFieldValue(prefs.negativePrompt, TextRange(prefs.negativePrompt.length))
             }
 
             steps = prefs.steps
@@ -1122,7 +1129,8 @@ fun ModelRunScreen(
                         prompt = model?.defaultPrompt ?: ""
                         negativePrompt = model?.defaultNegativePrompt ?: ""
                         promptFieldValue = TextFieldValue(prompt, TextRange(prompt.length))
-                        negativePromptFieldValue = TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
+                        negativePromptFieldValue =
+                            TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
                         promptSuggestions = emptyList()
                         negativePromptSuggestions = emptyList()
                         denoiseStrength = 0.6f
@@ -3685,7 +3693,8 @@ fun ModelRunScreen(
                         prompt = params.prompt
                         negativePrompt = params.negativePrompt
                         promptFieldValue = TextFieldValue(prompt, TextRange(prompt.length))
-                        negativePromptFieldValue = TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
+                        negativePromptFieldValue =
+                            TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
                         promptSuggestions = emptyList()
                         negativePromptSuggestions = emptyList()
                         cfg = params.cfg
@@ -3713,7 +3722,8 @@ fun ModelRunScreen(
                         prompt = params.prompt
                         negativePrompt = params.negativePrompt
                         promptFieldValue = TextFieldValue(prompt, TextRange(prompt.length))
-                        negativePromptFieldValue = TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
+                        negativePromptFieldValue =
+                            TextFieldValue(negativePrompt, TextRange(negativePrompt.length))
                         promptSuggestions = emptyList()
                         negativePromptSuggestions = emptyList()
                         cfg = params.cfg
