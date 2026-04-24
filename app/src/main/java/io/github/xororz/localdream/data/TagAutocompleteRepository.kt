@@ -1,11 +1,18 @@
 package io.github.xororz.localdream.data
 
 import android.content.Context
+import android.net.Uri
+import androidx.core.content.edit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
+import java.io.File
+import java.io.InputStream
 import java.io.InputStreamReader
 import kotlin.math.abs
 
@@ -14,23 +21,118 @@ class TagAutocompleteRepository private constructor(private val context: Context
     @Volatile
     private var loadedData: TagData? = null
 
-    suspend fun suggest(query: String, localeIsChinese: Boolean, limit: Int = 12): List<TagSuggestion> {
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val dictDir = File(context.filesDir, DICT_DIR).also { it.mkdirs() }
+    private val mainFile = File(dictDir, MAIN_FILE_NAME)
+    private val translationFile = File(dictDir, TRANSLATION_FILE_NAME)
+
+    private val _state = MutableStateFlow(readStateFromDisk())
+    val state: StateFlow<DictionaryState> = _state.asStateFlow()
+
+    suspend fun suggest(query: String, limit: Int = 12): List<TagSuggestion> {
+        if (!state.value.mainImported) return emptyList()
+        val isTranslationQuery = containsNonAsciiLetter(query)
+        if (isTranslationQuery && !state.value.translationImported) return emptyList()
+
         val normalizedQuery = normalizeQuery(query)
         if (normalizedQuery.isEmpty()) return emptyList()
 
-        val data = ensureLoaded()
-        val isChineseInput = containsChinese(query)
+        val data = ensureLoaded() ?: return emptyList()
 
         return withContext(Dispatchers.Default) {
-            if (isChineseInput) {
-                suggestChinese(data, normalizedQuery, limit)
+            if (isTranslationQuery) {
+                suggestByTranslation(data, normalizeTranslation(query), limit)
             } else {
-                suggestEnglish(data, normalizedQuery, localeIsChinese, limit)
+                suggestByEnglish(data, normalizedQuery, limit)
             }
         }
     }
 
-    private suspend fun ensureLoaded(): TagData {
+    suspend fun importMainCsv(uri: Uri, displayName: String?): ImportResult = withContext(Dispatchers.IO) {
+        runCatching {
+            val lineCount = copyUriToFile(uri, mainFile) { cells ->
+                cells.getOrNull(0)?.trim()?.removePrefix("﻿").isNullOrEmpty().not()
+            }
+            if (lineCount == 0) {
+                mainFile.delete()
+                return@withContext ImportResult.Error("empty")
+            }
+            invalidate()
+            prefs.edit {
+                putString(KEY_MAIN_NAME, displayName ?: MAIN_FILE_NAME)
+                putInt(KEY_MAIN_LINES, lineCount)
+            }
+            _state.value = readStateFromDisk()
+            ImportResult.Success(lineCount)
+        }.getOrElse {
+            mainFile.delete()
+            ImportResult.Error(it.message ?: "unknown")
+        }
+    }
+
+    suspend fun importTranslationCsv(uri: Uri, displayName: String?): ImportResult = withContext(Dispatchers.IO) {
+        runCatching {
+            val lineCount = copyUriToFile(uri, translationFile) { cells ->
+                if (cells.size < 2) return@copyUriToFile false
+                val key = cells[0].trim().removePrefix("﻿")
+                if (key.isEmpty()) return@copyUriToFile false
+                extractTranslation(cells) != null
+            }
+            if (lineCount == 0) {
+                translationFile.delete()
+                return@withContext ImportResult.Error("empty")
+            }
+            invalidate()
+            prefs.edit {
+                putString(KEY_TRANSLATION_NAME, displayName ?: TRANSLATION_FILE_NAME)
+                putInt(KEY_TRANSLATION_LINES, lineCount)
+            }
+            _state.value = readStateFromDisk()
+            ImportResult.Success(lineCount)
+        }.getOrElse {
+            translationFile.delete()
+            ImportResult.Error(it.message ?: "unknown")
+        }
+    }
+
+    fun clearMainCsv() {
+        mainFile.delete()
+        prefs.edit {
+            remove(KEY_MAIN_NAME)
+            remove(KEY_MAIN_LINES)
+        }
+        invalidate()
+        _state.value = readStateFromDisk()
+    }
+
+    fun clearTranslationCsv() {
+        translationFile.delete()
+        prefs.edit {
+            remove(KEY_TRANSLATION_NAME)
+            remove(KEY_TRANSLATION_LINES)
+        }
+        invalidate()
+        _state.value = readStateFromDisk()
+    }
+
+    private fun invalidate() {
+        loadedData = null
+    }
+
+    private fun readStateFromDisk(): DictionaryState {
+        val mainImported = mainFile.exists() && mainFile.length() > 0
+        val translationImported = translationFile.exists() && translationFile.length() > 0
+        return DictionaryState(
+            mainImported = mainImported,
+            mainFileName = if (mainImported) prefs.getString(KEY_MAIN_NAME, null) else null,
+            mainEntryCount = if (mainImported) prefs.getInt(KEY_MAIN_LINES, 0) else 0,
+            translationImported = translationImported,
+            translationFileName = if (translationImported) prefs.getString(KEY_TRANSLATION_NAME, null) else null,
+            translationEntryCount = if (translationImported) prefs.getInt(KEY_TRANSLATION_LINES, 0) else 0
+        )
+    }
+
+    private suspend fun ensureLoaded(): TagData? {
         loadedData?.let { return it }
 
         return loadMutex.withLock {
@@ -41,12 +143,13 @@ class TagAutocompleteRepository private constructor(private val context: Context
         }
     }
 
-    private fun loadData(): TagData {
-        val zhMap = loadChineseMap()
+    private fun loadData(): TagData? {
+        if (!mainFile.exists()) return null
+        val translationMap = if (translationFile.exists()) loadTranslationMap() else emptyMap()
         val entries = mutableListOf<TagEntry>()
-        val englishSet = LinkedHashSet<String>()
+        val englishSet = HashSet<String>()
 
-        context.assets.open(ENGLISH_ASSET_PATH).use { input ->
+        mainFile.inputStream().use { input ->
             BufferedReader(InputStreamReader(input)).useLines { lines ->
                 lines.forEach { rawLine ->
                     val line = rawLine.trim()
@@ -54,7 +157,7 @@ class TagAutocompleteRepository private constructor(private val context: Context
                     val cells = parseCsvLine(line)
                     if (cells.isEmpty()) return@forEach
 
-                    val english = cells.getOrNull(0)?.trim().orEmpty()
+                    val english = cells.getOrNull(0)?.trim()?.removePrefix("﻿").orEmpty()
                     if (english.isEmpty()) return@forEach
                     if (!englishSet.add(english)) return@forEach
 
@@ -66,70 +169,122 @@ class TagAutocompleteRepository private constructor(private val context: Context
                         ?.filter { it.isNotEmpty() }
                         .orEmpty()
 
-                    val zhCn = zhMap[english]
+                    val translation = translationMap[english]
                     entries += TagEntry(
                         english = english,
-                        zhCn = zhCn,
+                        translation = translation,
                         category = category,
                         postCount = postCount,
                         aliases = aliases,
                         normalizedEnglish = normalizeQuery(english),
                         normalizedAliases = aliases.map(::normalizeQuery).filter { it.isNotEmpty() },
-                        normalizedZhCn = zhCn?.let(::normalizeChinese)
+                        normalizedTranslation = translation?.let(::normalizeTranslation)
                     )
                 }
             }
         }
 
-        return TagData(entries = entries)
+        val englishByHead = HashMap<Char, MutableList<TagEntry>>()
+        val aliasByHead = HashMap<Char, MutableList<AliasRef>>()
+        val translationByHead = HashMap<Char, MutableList<TagEntry>>()
+        val translationEntries = mutableListOf<TagEntry>()
+
+        for (entry in entries) {
+            entry.normalizedEnglish.firstOrNull()?.let { head ->
+                englishByHead.getOrPut(head) { mutableListOf() } += entry
+            }
+            for (alias in entry.normalizedAliases) {
+                alias.firstOrNull()?.let { head ->
+                    aliasByHead.getOrPut(head) { mutableListOf() } += AliasRef(entry, alias)
+                }
+            }
+            val normTr = entry.normalizedTranslation
+            if (!normTr.isNullOrEmpty()) {
+                translationEntries += entry
+                translationByHead.getOrPut(normTr.first()) { mutableListOf() } += entry
+            }
+        }
+
+        return TagData(
+            entries = entries,
+            englishByHead = englishByHead,
+            aliasByHead = aliasByHead,
+            translationEntries = translationEntries,
+            translationByHead = translationByHead
+        )
     }
 
-    private fun loadChineseMap(): Map<String, String> {
-        val map = LinkedHashMap<String, String>()
-        context.assets.open(CHINESE_ASSET_PATH).use { input ->
+    private fun loadTranslationMap(): Map<String, String> {
+        val map = HashMap<String, String>()
+        translationFile.inputStream().use { input ->
             BufferedReader(InputStreamReader(input)).useLines { lines ->
                 lines.forEach { rawLine ->
                     val line = rawLine.trim()
                     if (line.isEmpty()) return@forEach
                     val cells = parseCsvLine(line)
                     if (cells.size < 2) return@forEach
-                    val english = cells[0].removePrefix("\uFEFF").trim()
-                    val zhCn = cells[1].trim()
-                    if (english.isNotEmpty() && zhCn.isNotEmpty()) {
-                        map[english] = zhCn
-                    }
+                    val english = cells[0].trim().removePrefix("﻿")
+                    if (english.isEmpty()) return@forEach
+                    val translation = extractTranslation(cells) ?: return@forEach
+                    map[english] = translation
                 }
             }
         }
         return map
     }
 
-    private fun suggestChinese(data: TagData, normalizedQuery: String, limit: Int): List<TagSuggestion> {
+    private fun extractTranslation(cells: List<String>): String? {
+        for (i in 1 until cells.size) {
+            val raw = cells[i].trim().removePrefix("﻿")
+            if (raw.isEmpty()) continue
+            if (raw.toIntOrNull() != null) continue
+            if (raw.toDoubleOrNull() != null) continue
+            return raw
+        }
+        return null
+    }
+
+    private fun suggestByTranslation(data: TagData, normalizedQuery: String, limit: Int): List<TagSuggestion> {
+        if (normalizedQuery.isEmpty()) return emptyList()
+        val head = normalizedQuery.first()
         val prefix = mutableListOf<TagSuggestion>()
-        val contains = mutableListOf<TagSuggestion>()
 
-        for (entry in data.entries) {
-            val normalizedZh = entry.normalizedZhCn ?: continue
+        for (entry in data.translationByHead[head].orEmpty()) {
+            val normalized = entry.normalizedTranslation ?: continue
+            if (!normalized.startsWith(normalizedQuery)) continue
             val scoreBase = popularityScore(entry.postCount)
-            when {
-                normalizedZh.startsWith(normalizedQuery) -> prefix += TagSuggestion(
-                    replacementTag = entry.english,
-                    primaryText = entry.english,
-                    secondaryText = entry.zhCn,
-                    matchType = TagMatchType.Chinese,
-                    postCount = entry.postCount,
-                    score = 5000 + scoreBase - normalizedZh.length
-                )
+            prefix += TagSuggestion(
+                replacementTag = entry.english,
+                primaryText = entry.english,
+                secondaryText = entry.translation,
+                matchType = TagMatchType.Translation,
+                category = entry.category,
+                postCount = entry.postCount,
+                score = 5000 + scoreBase - normalized.length
+            )
+        }
 
-                normalizedZh.contains(normalizedQuery) -> contains += TagSuggestion(
+        val contains = if (prefix.size < limit) {
+            val collector = mutableListOf<TagSuggestion>()
+            for (entry in data.translationEntries) {
+                val normalized = entry.normalizedTranslation ?: continue
+                if (normalized.startsWith(normalizedQuery)) continue
+                val idx = normalized.indexOf(normalizedQuery)
+                if (idx < 0) continue
+                val scoreBase = popularityScore(entry.postCount)
+                collector += TagSuggestion(
                     replacementTag = entry.english,
                     primaryText = entry.english,
-                    secondaryText = entry.zhCn,
-                    matchType = TagMatchType.Chinese,
+                    secondaryText = entry.translation,
+                    matchType = TagMatchType.Translation,
+                    category = entry.category,
                     postCount = entry.postCount,
-                    score = 4200 + scoreBase - normalizedZh.indexOf(normalizedQuery)
+                    score = 4200 + scoreBase - idx
                 )
             }
+            collector
+        } else {
+            emptyList()
         }
 
         return (prefix + contains)
@@ -138,53 +293,59 @@ class TagAutocompleteRepository private constructor(private val context: Context
             .take(limit)
     }
 
-    private fun suggestEnglish(
-        data: TagData,
-        normalizedQuery: String,
-        localeIsChinese: Boolean,
-        limit: Int
-    ): List<TagSuggestion> {
+    private fun suggestByEnglish(data: TagData, normalizedQuery: String, limit: Int): List<TagSuggestion> {
+        if (normalizedQuery.isEmpty()) return emptyList()
+        val head = normalizedQuery.first()
         val prefix = mutableListOf<TagSuggestion>()
         val alias = mutableListOf<TagSuggestion>()
         val correction = mutableListOf<TagSuggestion>()
 
-        for (entry in data.entries) {
+        val englishCandidates = data.englishByHead[head].orEmpty()
+        val aliasCandidates = data.aliasByHead[head].orEmpty()
+
+        for (entry in englishCandidates) {
+            if (!entry.normalizedEnglish.startsWith(normalizedQuery)) continue
             val scoreBase = popularityScore(entry.postCount)
+            prefix += buildSuggestion(entry, TagMatchType.Prefix, 6000 + scoreBase - entry.normalizedEnglish.length)
+        }
 
-            if (entry.normalizedEnglish.startsWith(normalizedQuery)) {
-                prefix += buildSuggestion(entry, TagMatchType.Prefix, localeIsChinese, 6000 + scoreBase - entry.normalizedEnglish.length)
-                continue
-            }
-
-            val aliasMatch = entry.normalizedAliases.firstOrNull { it.startsWith(normalizedQuery) }
-            if (aliasMatch != null) {
-                alias += buildSuggestion(
-                    entry,
-                    TagMatchType.Alias,
-                    localeIsChinese,
-                    5200 + scoreBase - aliasMatch.length,
-                    aliasMatch
-                )
-            }
+        val seenAliasEntries = HashSet<String>()
+        for (ref in aliasCandidates) {
+            if (!ref.alias.startsWith(normalizedQuery)) continue
+            if (ref.entry.normalizedEnglish.startsWith(normalizedQuery)) continue
+            if (!seenAliasEntries.add(ref.entry.english)) continue
+            val scoreBase = popularityScore(ref.entry.postCount)
+            alias += buildSuggestion(
+                ref.entry,
+                TagMatchType.Alias,
+                5200 + scoreBase - ref.alias.length,
+                ref.alias
+            )
         }
 
         if (prefix.size + alias.size < limit) {
             val threshold = correctionThreshold(normalizedQuery.length)
-            val candidateHead = normalizedQuery.firstOrNull()
-            for (entry in data.entries) {
-                if (entry.normalizedEnglish.startsWith(normalizedQuery)) continue
-                if (abs(entry.normalizedEnglish.length - normalizedQuery.length) > threshold) continue
-                if (candidateHead != null && entry.normalizedEnglish.firstOrNull() != candidateHead) continue
+            val correctionCandidates = HashSet<TagEntry>()
+            correctionCandidates += englishCandidates
+            for (ref in aliasCandidates) correctionCandidates += ref.entry
 
-                val scoreBase = popularityScore(entry.postCount)
-                val englishDistance = damerauLevenshtein(normalizedQuery, entry.normalizedEnglish, threshold)
+            for (entry in correctionCandidates) {
+                if (entry.normalizedEnglish.startsWith(normalizedQuery)) continue
+
+                val englishDistance = if (abs(entry.normalizedEnglish.length - normalizedQuery.length) <= threshold &&
+                    entry.normalizedEnglish.firstOrNull() == head
+                ) {
+                    damerauLevenshtein(normalizedQuery, entry.normalizedEnglish, threshold)
+                } else {
+                    threshold + 1
+                }
                 var bestDistance = englishDistance
                 var matchedAlias: String? = null
 
                 if (bestDistance > threshold) {
                     for (aliasValue in entry.normalizedAliases) {
                         if (abs(aliasValue.length - normalizedQuery.length) > threshold) continue
-                        if (candidateHead != null && aliasValue.firstOrNull() != candidateHead) continue
+                        if (aliasValue.firstOrNull() != head) continue
                         val aliasDistance = damerauLevenshtein(normalizedQuery, aliasValue, threshold)
                         if (aliasDistance < bestDistance) {
                             bestDistance = aliasDistance
@@ -194,10 +355,10 @@ class TagAutocompleteRepository private constructor(private val context: Context
                 }
 
                 if (bestDistance <= threshold) {
+                    val scoreBase = popularityScore(entry.postCount)
                     correction += buildSuggestion(
                         entry,
                         TagMatchType.Correction,
-                        localeIsChinese,
                         3600 + scoreBase - bestDistance * 100,
                         matchedAlias
                     )
@@ -214,33 +375,49 @@ class TagAutocompleteRepository private constructor(private val context: Context
     private fun buildSuggestion(
         entry: TagEntry,
         matchType: TagMatchType,
-        localeIsChinese: Boolean,
         score: Int,
         aliasValue: String? = null
     ): TagSuggestion {
-        val secondary = buildString {
-            when (matchType) {
-                TagMatchType.Alias -> append("Alias")
-                TagMatchType.Correction -> append("Correction")
-                else -> Unit
-            }
-            if (localeIsChinese && !entry.zhCn.isNullOrBlank()) {
-                if (isNotEmpty()) append(" · ")
-                append(entry.zhCn)
-            } else if (matchType == TagMatchType.Alias && aliasValue != null) {
-                if (isNotEmpty()) append(" · ")
-                append(aliasValue)
-            }
-        }.ifBlank { null }
-
+        val secondary = when (matchType) {
+            TagMatchType.Alias -> aliasValue?.replace('_', ' ')
+            else -> entry.translation
+        }
         return TagSuggestion(
             replacementTag = entry.english,
             primaryText = entry.english,
             secondaryText = secondary,
             matchType = matchType,
+            category = entry.category,
             postCount = entry.postCount,
             score = score
         )
+    }
+
+    private fun copyUriToFile(
+        uri: Uri,
+        target: File,
+        isValidRow: (List<String>) -> Boolean
+    ): Int {
+        val input: InputStream = context.contentResolver.openInputStream(uri)
+            ?: throw IllegalStateException("cannot open uri")
+        var validRows = 0
+        input.use { stream ->
+            target.outputStream().use { out ->
+                val reader = BufferedReader(InputStreamReader(stream))
+                val writer = out.bufferedWriter()
+                reader.forEachLine { rawLine ->
+                    val line = rawLine.trim()
+                    if (line.isEmpty()) return@forEachLine
+                    val cells = parseCsvLine(line)
+                    if (!isValidRow(cells)) return@forEachLine
+                    writer.write(rawLine)
+                    writer.newLine()
+                    validRows++
+                }
+                writer.flush()
+            }
+        }
+        return validRows
     }
 
     private fun parseCsvLine(line: String): List<String> {
@@ -272,7 +449,7 @@ class TagAutocompleteRepository private constructor(private val context: Context
         return result
     }
 
-    private fun normalizeChinese(value: String): String = value.trim().replace(" ", "")
+    private fun normalizeTranslation(value: String): String = value.trim().replace(" ", "").lowercase()
 
     private fun normalizeQuery(value: String): String {
         return value
@@ -283,7 +460,8 @@ class TagAutocompleteRepository private constructor(private val context: Context
             .replace(Regex("_+"), "_")
     }
 
-    private fun containsChinese(value: String): Boolean = value.any { it.code in 0x4E00..0x9FFF }
+    private fun containsNonAsciiLetter(value: String): Boolean =
+        value.any { it.code > 127 && it.isLetter() }
 
     private fun popularityScore(postCount: Int): Int = when {
         postCount >= 1_000_000 -> 300
@@ -332,12 +510,24 @@ class TagAutocompleteRepository private constructor(private val context: Context
     }
 
     private data class TagData(
-        val entries: List<TagEntry>
+        val entries: List<TagEntry>,
+        val englishByHead: Map<Char, List<TagEntry>>,
+        val aliasByHead: Map<Char, List<AliasRef>>,
+        val translationEntries: List<TagEntry>,
+        val translationByHead: Map<Char, List<TagEntry>>
     )
 
+    private data class AliasRef(val entry: TagEntry, val alias: String)
+
     companion object {
-        private const val ENGLISH_ASSET_PATH = "tagcomplete/danbooru.csv"
-        private const val CHINESE_ASSET_PATH = "tagcomplete/danbooru.zh_CN_SFW.csv"
+        private const val PREFS_NAME = "tag_autocomplete_prefs"
+        private const val DICT_DIR = "tagcomplete"
+        private const val MAIN_FILE_NAME = "main.csv"
+        private const val TRANSLATION_FILE_NAME = "translation.csv"
+        private const val KEY_MAIN_NAME = "main_csv_name"
+        private const val KEY_MAIN_LINES = "main_csv_lines"
+        private const val KEY_TRANSLATION_NAME = "translation_csv_name"
+        private const val KEY_TRANSLATION_LINES = "translation_csv_lines"
 
         @Volatile
         private var instance: TagAutocompleteRepository? = null

@@ -131,7 +131,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -335,6 +334,8 @@ fun ModelRunScreen(
     var negativePromptFieldValue by remember { mutableStateOf(TextFieldValue("")) }
     var promptSuggestions by remember { mutableStateOf<List<TagSuggestion>>(emptyList()) }
     var negativePromptSuggestions by remember { mutableStateOf<List<TagSuggestion>>(emptyList()) }
+    var promptActiveQuery by remember { mutableStateOf<String?>(null) }
+    var negativePromptActiveQuery by remember { mutableStateOf<String?>(null) }
     var isPromptFocused by remember { mutableStateOf(false) }
     var isNegativePromptFocused by remember { mutableStateOf(false) }
     var cfg by remember { mutableStateOf(7f) }
@@ -379,11 +380,8 @@ fun ModelRunScreen(
     val enableTagAutocomplete = preferences.getBoolean("enable_tag_autocomplete", true)
     val tagSuggestionCount = preferences.getInt("tag_suggestion_count", 4).coerceIn(2, 10)
     val tagAutocompleteRepository = remember { TagAutocompleteRepository.getInstance(context) }
-    val configuration = LocalConfiguration.current
-    val localeIsChinese = remember(configuration) {
-        val locale = configuration.locales[0]
-        locale?.language?.startsWith("zh") == true
-    }
+    val tagDictState by tagAutocompleteRepository.state.collectAsState()
+    val tagAutocompleteAvailable = enableTagAutocomplete && tagDictState.mainImported
 
     var showCropScreen by remember { mutableStateOf(false) }
     var imageUriForCrop by remember { mutableStateOf<Uri?>(null) }
@@ -444,51 +442,68 @@ fun ModelRunScreen(
     val onDenoiseStrengthChange =
         remember { { value: Float -> denoiseStrength = value; saveAllFields() } }
     val onSeedChange = remember { { value: String -> seed = value; saveAllFields() } }
+    var promptSuggestJob by remember { mutableStateOf<Job?>(null) }
+    var negativePromptSuggestJob by remember { mutableStateOf<Job?>(null) }
+
     fun updatePromptField(value: TextFieldValue) {
         val textChanged = value.text != promptFieldValue.text
+        val selectionChanged = value.selection != promptFieldValue.selection
         promptFieldValue = value
         if (textChanged) {
             prompt = value.text
             saveAllFields()
         }
-        if (!enableTagAutocomplete || !isPromptFocused) {
+        if (!tagAutocompleteAvailable || !isPromptFocused) {
+            promptSuggestJob?.cancel()
             promptSuggestions = emptyList()
+            promptActiveQuery = null
             return
         }
-        if (!textChanged) {
-            return
-        }
+        if (!textChanged && !selectionChanged) return
         val activeTag = TagAutocompleteRepository.extractActiveTag(value.text, value.selection.start)
         if (activeTag == null) {
+            promptSuggestJob?.cancel()
             promptSuggestions = emptyList()
+            promptActiveQuery = null
             return
         }
-        scope.launch {
-            promptSuggestions = tagAutocompleteRepository.suggest(activeTag.token, localeIsChinese, tagSuggestionCount)
+        promptActiveQuery = activeTag.token
+        promptSuggestJob?.cancel()
+        promptSuggestJob = scope.launch {
+            delay(80)
+            val results = tagAutocompleteRepository.suggest(activeTag.token, tagSuggestionCount)
+            promptSuggestions = results
         }
     }
 
     fun updateNegativePromptField(value: TextFieldValue) {
         val textChanged = value.text != negativePromptFieldValue.text
+        val selectionChanged = value.selection != negativePromptFieldValue.selection
         negativePromptFieldValue = value
         if (textChanged) {
             negativePrompt = value.text
             saveAllFields()
         }
-        if (!enableTagAutocomplete || !isNegativePromptFocused) {
+        if (!tagAutocompleteAvailable || !isNegativePromptFocused) {
+            negativePromptSuggestJob?.cancel()
             negativePromptSuggestions = emptyList()
+            negativePromptActiveQuery = null
             return
         }
-        if (!textChanged) {
-            return
-        }
+        if (!textChanged && !selectionChanged) return
         val activeTag = TagAutocompleteRepository.extractActiveTag(value.text, value.selection.start)
         if (activeTag == null) {
+            negativePromptSuggestJob?.cancel()
             negativePromptSuggestions = emptyList()
+            negativePromptActiveQuery = null
             return
         }
-        scope.launch {
-            negativePromptSuggestions = tagAutocompleteRepository.suggest(activeTag.token, localeIsChinese, tagSuggestionCount)
+        negativePromptActiveQuery = activeTag.token
+        negativePromptSuggestJob?.cancel()
+        negativePromptSuggestJob = scope.launch {
+            delay(80)
+            val results = tagAutocompleteRepository.suggest(activeTag.token, tagSuggestionCount)
+            negativePromptSuggestions = results
         }
     }
 
@@ -501,6 +516,7 @@ fun ModelRunScreen(
         prompt = updatedText
         promptFieldValue = TextFieldValue(updatedText, TextRange(updatedSelection))
         promptSuggestions = emptyList()
+        promptActiveQuery = null
         saveAllFields()
     }
 
@@ -513,6 +529,7 @@ fun ModelRunScreen(
         negativePrompt = updatedText
         negativePromptFieldValue = TextFieldValue(updatedText, TextRange(updatedSelection))
         negativePromptSuggestions = emptyList()
+        negativePromptActiveQuery = null
         saveAllFields()
     }
 
@@ -1570,7 +1587,8 @@ fun ModelRunScreen(
                             label = { Text(stringResource(R.string.image_prompt)) },
                             suggestions = promptSuggestions,
                             onSuggestionClick = ::applyPromptSuggestion,
-                            showSuggestions = enableTagAutocomplete && isPromptFocused,
+                            showSuggestions = tagAutocompleteAvailable && isPromptFocused,
+                            highlightQuery = promptActiveQuery,
                             onFocusChanged = {
                                 isPromptFocused = it
                                 if (!it) promptSuggestions = emptyList()
@@ -1584,7 +1602,8 @@ fun ModelRunScreen(
                             label = { Text(stringResource(R.string.negative_prompt)) },
                             suggestions = negativePromptSuggestions,
                             onSuggestionClick = ::applyNegativePromptSuggestion,
-                            showSuggestions = enableTagAutocomplete && isNegativePromptFocused,
+                            showSuggestions = tagAutocompleteAvailable && isNegativePromptFocused,
+                            highlightQuery = negativePromptActiveQuery,
                             onFocusChanged = {
                                 isNegativePromptFocused = it
                                 if (!it) negativePromptSuggestions = emptyList()
