@@ -177,8 +177,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
@@ -197,6 +200,40 @@ private fun checkStoragePermission(context: Context): Boolean {
         ) == PackageManager.PERMISSION_GRANTED
     }
 }
+
+private val tokenizeClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.SECONDS)
+        .build()
+}
+
+private data class TokenizeResult(val count: Int, val maxLength: Int)
+
+private suspend fun tokenizePromptRequest(text: String): TokenizeResult? =
+    withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().apply { put("prompt", text) }
+                .toString()
+                .toRequestBody("application/json".toMediaTypeOrNull())
+            val request = Request.Builder()
+                .url("http://localhost:8081/tokenize")
+                .post(body)
+                .build()
+            tokenizeClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val payload = response.body?.string() ?: return@withContext null
+                val json = JSONObject(payload)
+                TokenizeResult(
+                    count = json.optInt("count", 0),
+                    maxLength = json.optInt("max_length", 77)
+                )
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
 private suspend fun checkBackendHealth(
     backendState: StateFlow<BackendService.BackendState>,
@@ -444,6 +481,26 @@ fun ModelRunScreen(
     val onSeedChange = remember { { value: String -> seed = value; saveAllFields() } }
     var promptSuggestJob by remember { mutableStateOf<Job?>(null) }
     var negativePromptSuggestJob by remember { mutableStateOf<Job?>(null) }
+
+    var promptTokenCount by remember { mutableStateOf(2) }
+    var negativePromptTokenCount by remember { mutableStateOf(2) }
+    var promptTokenMax by remember { mutableStateOf(77) }
+    var negativePromptTokenMax by remember { mutableStateOf(77) }
+
+    LaunchedEffect(prompt, isCheckingBackend) {
+        if (isCheckingBackend) return@LaunchedEffect
+        delay(400)
+        val result = tokenizePromptRequest(prompt) ?: return@LaunchedEffect
+        promptTokenCount = result.count
+        promptTokenMax = result.maxLength
+    }
+    LaunchedEffect(negativePrompt, isCheckingBackend) {
+        if (isCheckingBackend) return@LaunchedEffect
+        delay(400)
+        val result = tokenizePromptRequest(negativePrompt) ?: return@LaunchedEffect
+        negativePromptTokenCount = result.count
+        negativePromptTokenMax = result.maxLength
+    }
 
     fun updatePromptField(value: TextFieldValue) {
         val textChanged = value.text != promptFieldValue.text
@@ -1592,7 +1649,13 @@ fun ModelRunScreen(
                             value = promptFieldValue,
                             onValueChange = ::updatePromptField,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.image_prompt)) },
+                            label = {
+                                PromptCountLabel(
+                                    label = stringResource(R.string.image_prompt),
+                                    count = promptTokenCount,
+                                    max = promptTokenMax
+                                )
+                            },
                             suggestions = promptSuggestions,
                             onSuggestionClick = ::applyPromptSuggestion,
                             showSuggestions = tagAutocompleteAvailable && isPromptFocused,
@@ -1607,7 +1670,13 @@ fun ModelRunScreen(
                             value = negativePromptFieldValue,
                             onValueChange = ::updateNegativePromptField,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.negative_prompt)) },
+                            label = {
+                                PromptCountLabel(
+                                    label = stringResource(R.string.negative_prompt),
+                                    count = negativePromptTokenCount,
+                                    max = negativePromptTokenMax
+                                )
+                            },
                             suggestions = negativePromptSuggestions,
                             onSuggestionClick = ::applyNegativePromptSuggestion,
                             showSuggestions = tagAutocompleteAvailable && isNegativePromptFocused,
@@ -3986,5 +4055,14 @@ fun UpscalerModelCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PromptCountLabel(label: String, count: Int, max: Int) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label)
+        Spacer(Modifier.width(6.dp))
+        Text("$count/$max")
     }
 }

@@ -3287,6 +3287,48 @@ int main(int argc, char **argv) {
     }
   });
 
+  svr.Post("/tokenize", [&](const httplib::Request &req,
+                            httplib::Response &res) {
+    res.set_header("Access-Control-Allow-Origin", "*");
+    try {
+      auto json = nlohmann::json::parse(req.body);
+      std::string text = json.value("prompt", std::string());
+      const int max_len = 77;
+
+      int count = 2;  // BOS + EOS
+      if (!text.empty() && tokenizer) {
+        auto tokens = promptProcessor.process(text);
+        const int dim1 = 768;
+        const int dim2 = text_embedding_size_2;
+        int content = 0;
+        for (const auto &token : tokens) {
+          if (token.is_embedding) {
+            int emb_tokens = 0;
+            if (!token.embedding_data.empty())
+              emb_tokens = token.embedding_data.size() / dim1;
+            else if (sdxl_mode && !token.embedding_data_2.empty())
+              emb_tokens = token.embedding_data_2.size() / dim2;
+            content += emb_tokens;
+          } else {
+            std::vector<int> token_ids = tokenizer->Encode(token.text);
+            content += (int)token_ids.size();
+          }
+        }
+        count = content + 2;  // BOS + EOS
+      }
+
+      nlohmann::json resp = {{"count", count}, {"max_length", max_len}};
+      res.status = 200;
+      res.set_content(resp.dump(), "application/json");
+    } catch (const std::exception &e) {
+      nlohmann::json err = {
+          {"error",
+           {{"message", std::string(e.what())}, {"type", "tokenize_error"}}}};
+      res.status = 400;
+      res.set_content(err.dump(), "application/json");
+    }
+  });
+
   std::cout << "Server listening on " << listen_address << ":" << port
             << std::endl;
   svr.listen(listen_address.c_str(), port);

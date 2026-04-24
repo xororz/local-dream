@@ -293,6 +293,7 @@ fun ModelListScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
                         .padding(vertical = 8.dp)
                 ) {
                     val context = LocalContext.current

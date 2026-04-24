@@ -64,6 +64,16 @@ class PromptProcessor {
     while (i < prompt.length()) {
       char c = prompt[i];
 
+      if (c == '\\' && i + 1 < prompt.length()) {
+        char next = prompt[i + 1];
+        if (next == '(' || next == ')' || next == '[' || next == ']' ||
+            next == '\\' || next == ',' || next == ':') {
+          current_text += next;
+          i += 2;
+          continue;
+        }
+      }
+
       if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
         if (!current_text.empty() && i + 1 < prompt.length()) {
           char next = prompt[i + 1];

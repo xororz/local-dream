@@ -56,7 +56,7 @@
     <string name="yes">是</string>
     <string name="no">否</string>
     <string name="about_app">须知</string>
-    <string name="must_read">此APP支持在CPU/GPU和部分高通NPU上运行stable diffusion图像生成。\n\n如您的芯片不是下列之一，则只能用CPU/GPU运行，支持的NPU列表:\n\n- 骁龙 8 Gen 1\n- 骁龙 8 Gen 2\n- 骁龙 8 Gen 3\n- 骁龙 8 Elite\n- 骁龙 8 Elite Gen 5\n\n对于具有 Hexagon V68 架构或更新 NPU 的高通芯片，提供实验性支持，但不保证能在 NPU 上运行。\n\n本项目在 https://github.com/xororz/local-dream 开源，可以在github上查看源代码或提交问题</string>
+    <string name="must_read">此APP支持在CPU/GPU和部分高通NPU上运行stable diffusion图像生成。\n\n支持在 Hexagon V68 架构及以上的骁龙 NPU 上运行 SD1.5 模型。\n\n支持在骁龙 8 Gen 3 及更新的设备上运行 SDXL 模型。\n\n若您的芯片不在上述范围内，则只能使用 CPU/GPU 运行。\n\n本项目在 https://github.com/xororz/local-dream 开源，可以在github上查看源代码或提交问题</string>
     <string name="help">help</string>
 
     <!-- Model List Screen -->
