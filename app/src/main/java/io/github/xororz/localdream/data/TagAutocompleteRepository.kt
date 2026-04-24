@@ -711,7 +711,7 @@ class TagAutocompleteRepository private constructor(private val context: Context
                 if (it == -1) text.length else it
             }
             var trimmedStart = segmentStart
-            while (trimmedStart < segmentEnd && text[trimmedStart].isWhitespace()) trimmedStart++
+            while (trimmedStart < selection && text[trimmedStart].isWhitespace()) trimmedStart++
             val token = text.substring(trimmedStart, selection).trim()
             if (token.isEmpty()) return null
             return ActiveTagContext(
