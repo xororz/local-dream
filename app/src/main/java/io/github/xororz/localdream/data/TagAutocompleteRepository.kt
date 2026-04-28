@@ -702,11 +702,10 @@ class TagAutocompleteRepository private constructor(private val context: Context
         }
 
         fun extractActiveTag(text: String, selection: Int): ActiveTagContext? {
-            if (selection < 0 || selection > text.length) return null
-            val segmentStart =
-                text.lastIndexOf(',', startIndex = (selection - 1).coerceAtLeast(0)).let {
-                    if (it == -1) 0 else it + 1
-                }
+            if (selection <= 0 || selection > text.length) return null
+            val segmentStart = text.lastIndexOf(',', startIndex = selection - 1).let {
+                if (it == -1) 0 else it + 1
+            }
             val segmentEnd = text.indexOf(',', startIndex = selection).let {
                 if (it == -1) text.length else it
             }
