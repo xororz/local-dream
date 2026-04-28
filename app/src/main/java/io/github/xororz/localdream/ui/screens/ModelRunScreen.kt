@@ -182,7 +182,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 import android.graphics.Rect as AndroidRect
@@ -344,6 +346,7 @@ fun ModelRunScreen(
     var showHistoryParametersDialog by remember { mutableStateOf(false) }
     var showDeleteHistoryDialog by remember { mutableStateOf(false) }
     var showSeedConfirmDialog by remember { mutableStateOf(false) }
+    var pendingReproduceParams by remember { mutableStateOf<GenerationParameters?>(null) }
 
     // Selection mode state
     var isSelectionMode by remember { mutableStateOf(false) }
@@ -658,6 +661,58 @@ fun ModelRunScreen(
                     isInpaintMode = false
                     maskBitmap = null
                     savedPathHistory = null
+                }
+            }
+        }
+    }
+
+    fun sendBitmapToImg2img(bitmap: Bitmap) {
+        scope.launch {
+            val ready = try {
+                base64EncodeDone = false
+                val resized = withContext(Dispatchers.Default) {
+                    if (bitmap.width != currentWidth || bitmap.height != currentHeight) {
+                        bitmap.scale(currentWidth, currentHeight)
+                    } else {
+                        bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                    }
+                }
+
+                val base64String = withContext(Dispatchers.IO) {
+                    val baos = ByteArrayOutputStream()
+                    resized.compress(Bitmap.CompressFormat.PNG, 90, baos)
+                    Base64.getEncoder().encodeToString(baos.toByteArray())
+                }
+
+                withContext(Dispatchers.IO) {
+                    File(context.filesDir, "tmp.txt").writeText(base64String)
+                }
+
+                croppedBitmap = resized
+                cropRect = AndroidRect(0, 0, resized.width, resized.height)
+                selectedImageUri = Uri.fromFile(File(context.filesDir, "tmp.txt"))
+                base64EncodeDone = true
+                true
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Toast.makeText(
+                    context,
+                    "img2img failed: ${e.message}",
+                    Toast.LENGTH_SHORT
+                ).show()
+                base64EncodeDone = false
+                selectedImageUri = null
+                croppedBitmap = null
+                cropRect = null
+                false
+            }
+
+            if (ready) {
+                try {
+                    pagerState.animateScrollToPage(0)
+                } catch (_: kotlinx.coroutines.CancellationException) {
+                    // Animation interrupted by another scroll — img2img data is already set, ignore
                 }
             }
         }
@@ -2606,8 +2661,48 @@ fun ModelRunScreen(
                         }
                     },
                     confirmButton = {
-                        TextButton(onClick = { showParametersDialog = false }) {
-                            Text(stringResource(R.string.close))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (useImg2img) {
+                                TextButton(
+                                    onClick = {
+                                        val bmp = currentBitmap
+                                        if (bmp != null) {
+                                            sendBitmapToImg2img(bmp)
+                                            showParametersDialog = false
+                                        } else {
+                                            Toast.makeText(
+                                                context,
+                                                "No image available",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                ) {
+                                    Text("img2img")
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.width(0.dp))
+                            }
+                            Row {
+                                TextButton(onClick = { showParametersDialog = false }) {
+                                    Text(stringResource(R.string.close))
+                                }
+                                TextButton(
+                                    onClick = {
+                                        generationParams?.let {
+                                            pendingReproduceParams = it
+                                            showParametersDialog = false
+                                            showSeedConfirmDialog = true
+                                        }
+                                    }
+                                ) {
+                                    Text(stringResource(R.string.reproduce))
+                                }
+                            }
                         }
                     }
                 )
@@ -3731,19 +3826,54 @@ fun ModelRunScreen(
                     }
                 },
                 confirmButton = {
-                    TextButton(
-                        onClick = {
-                            // Show seed confirmation dialog
-                            showHistoryParametersDialog = false
-                            showSeedConfirmDialog = true
-                        }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(stringResource(R.string.reproduce))
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showHistoryParametersDialog = false }) {
-                        Text(stringResource(R.string.close))
+                        if (useImg2img) {
+                            TextButton(
+                                onClick = {
+                                    val item = selectedHistoryItem
+                                    if (item != null) {
+                                        val bmp = BitmapFactory.decodeFile(
+                                            item.imageFile.absolutePath
+                                        )
+                                        if (bmp != null) {
+                                            sendBitmapToImg2img(bmp)
+                                            showHistoryParametersDialog = false
+                                            showHistoryDetailDialog = false
+                                            selectedHistoryItem = null
+                                        } else {
+                                            Toast.makeText(
+                                                context,
+                                                "Failed to load image",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                }
+                            ) {
+                                Text("img2img")
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.width(0.dp))
+                        }
+                        Row {
+                            TextButton(onClick = { showHistoryParametersDialog = false }) {
+                                Text(stringResource(R.string.close))
+                            }
+                            TextButton(
+                                onClick = {
+                                    pendingReproduceParams =
+                                        selectedHistoryItem!!.params
+                                    showHistoryParametersDialog = false
+                                    showSeedConfirmDialog = true
+                                }
+                            ) {
+                                Text(stringResource(R.string.reproduce))
+                            }
+                        }
                     }
                 }
             )
@@ -3751,11 +3881,12 @@ fun ModelRunScreen(
     }
 
     // Seed confirmation dialog for reproduce
-    if (showSeedConfirmDialog && selectedHistoryItem != null && selectedHistoryItem!!.params != null) {
-        val params = selectedHistoryItem!!.params!!
+    if (showSeedConfirmDialog && pendingReproduceParams != null) {
+        val params = pendingReproduceParams!!
         AlertDialog(
             onDismissRequest = {
                 showSeedConfirmDialog = false
+                pendingReproduceParams = null
                 showHistoryDetailDialog = false
                 selectedHistoryItem = null
             },
@@ -3780,6 +3911,7 @@ fun ModelRunScreen(
 
                         // Close dialogs and switch to prompt page
                         showSeedConfirmDialog = false
+                        pendingReproduceParams = null
                         showHistoryDetailDialog = false
                         selectedHistoryItem = null
                         scope.launch {
@@ -3809,6 +3941,7 @@ fun ModelRunScreen(
 
                         // Close dialogs and switch to prompt page
                         showSeedConfirmDialog = false
+                        pendingReproduceParams = null
                         showHistoryDetailDialog = false
                         selectedHistoryItem = null
                         scope.launch {
