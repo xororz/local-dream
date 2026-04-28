@@ -56,7 +56,7 @@
 
 int port = 8081;
 std::string listen_address = "127.0.0.1";
-bool ponyv55 = false;
+bool use_v_pred = false;
 bool use_mnn = false;
 bool use_safety_checker = false;
 bool use_mnn_clip = false;
@@ -423,7 +423,7 @@ void processCommandLine(int argc, char **argv) {
     OPT_VAE_DECODER = 23,
     OPT_TEXT_EMBEDDING_SIZE = 24,
     OPT_USE_MNN = 25,
-    OPT_PONYV55 = 26,
+    OPT_USE_V_PRED = 26,
     OPT_SAFETY_CHECKER = 27,
     OPT_USE_MNN_CLIP = 28,
     OPT_VAE_ENCODER_ARG = 29,
@@ -446,7 +446,7 @@ void processCommandLine(int argc, char **argv) {
       {"text_embedding_size", pal::required_argument, NULL,
        OPT_TEXT_EMBEDDING_SIZE},
       {"cpu", pal::no_argument, NULL, OPT_USE_MNN},
-      {"ponyv55", pal::no_argument, NULL, OPT_PONYV55},
+      {"use_v_pred", pal::no_argument, NULL, OPT_USE_V_PRED},
       {"safety_checker", pal::required_argument, NULL, OPT_SAFETY_CHECKER},
       {"use_cpu_clip", pal::no_argument, NULL, OPT_USE_MNN_CLIP},
       {"vae_encoder", pal::required_argument, NULL, OPT_VAE_ENCODER_ARG},
@@ -498,8 +498,8 @@ void processCommandLine(int argc, char **argv) {
       case OPT_USE_MNN:
         use_mnn = true;
         break;
-      case OPT_PONYV55:
-        ponyv55 = true;
+      case OPT_USE_V_PRED:
+        use_v_pred = true;
         break;
       case OPT_SAFETY_CHECKER:
         use_safety_checker = true;
@@ -2008,7 +2008,7 @@ GenerationResult generateImage(
       scheduler = std::make_unique<DPMSolverMultistepScheduler>(
           1000, 0.00085f, 0.012f, "scaled_linear", 2, "epsilon", "leading");
     }
-    if (ponyv55) scheduler->set_prediction_type("v_prediction");
+    if (use_v_pred) scheduler->set_prediction_type("v_prediction");
     scheduler->set_timesteps(steps);
     xt::xarray<float> timesteps = scheduler->get_timesteps();
     const float vae_scale = sdxl_mode ? 0.13025f : 0.18215f;

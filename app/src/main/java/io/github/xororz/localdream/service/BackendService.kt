@@ -287,8 +287,8 @@ class BackendService : Service() {
                     "--vae_encoder", File(modelsDir, "vae_encoder.bin").absolutePath,
                 )
             }
-            if (model.id.startsWith("pony")) {
-                command += "--ponyv55"
+            if (File(modelsDir, "V_PRED").exists()) {
+                command += "--use_v_pred"
             }
             if (model.useCpuClip) {
                 command += "--use_cpu_clip"
