@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "Config.hpp"
+#include "AdditionalSchedulers.hpp"
 #include "DPMSolverMultistepScheduler.hpp"
 #include "EulerAncestralDiscreteScheduler.hpp"
 #include "FloatConversion.hpp"
@@ -1996,10 +1997,34 @@ GenerationResult generateImage(
 
     // --- Scheduler & Latents ---
     std::unique_ptr<Scheduler> scheduler;
-    if (scheduler_type == "euler_a" || scheduler_type == "eulera") {
+    if (scheduler_type == "euler" || scheduler_type == "euler_discrete") {
+      scheduler = std::make_unique<EulerDiscreteScheduler>(
+          1000, 0.00085f, 0.012f, "scaled_linear", "epsilon", "leading");
+    } else if (scheduler_type == "heun" || scheduler_type == "henu") {
+      scheduler = std::make_unique<EulerDiscreteScheduler>(
+          1000, 0.00085f, 0.012f, "scaled_linear", "epsilon", "leading",
+          true, false);
+    } else if (scheduler_type == "dpm2") {
+      scheduler = std::make_unique<EulerDiscreteScheduler>(
+          1000, 0.00085f, 0.012f, "scaled_linear", "epsilon", "leading",
+          true, false);
+    } else if (scheduler_type == "ddim") {
+      scheduler = std::make_unique<DDIMScheduler>(1000, 0.00085f, 0.012f,
+                                                  "scaled_linear", "epsilon");
+    } else if (scheduler_type == "er_sde" || scheduler_type == "ersde") {
+      scheduler = std::make_unique<EulerDiscreteScheduler>(
+          1000, 0.00085f, 0.012f, "scaled_linear", "epsilon", "leading",
+          false, true);
+    } else if (scheduler_type == "dpmpp_2m_v2") {
+      scheduler = std::make_unique<DPMSolverMultistepScheduler>(
+          1000, 0.00085f, 0.012f, "scaled_linear", 2, "epsilon", "leading");
+    } else if (scheduler_type == "dpmpp_2s") {
+      scheduler = std::make_unique<DPMSolverMultistepScheduler>(
+          1000, 0.00085f, 0.012f, "scaled_linear", 1, "epsilon", "leading");
+    } else if (scheduler_type == "euler_a" || scheduler_type == "eulera") {
       scheduler = std::make_unique<EulerAncestralDiscreteScheduler>(
           1000, 0.00085f, 0.012f, "scaled_linear", "epsilon", "leading");
-    } else if (scheduler_type == "lcm") {
+    } else if (scheduler_type == "lcm" || scheduler_type == "tcd") {
       scheduler = std::make_unique<LCMScheduler>(1000, 0.00085f, 0.012f,
                                                  "scaled_linear", "epsilon", 50,
                                                  10.0f, true, false);

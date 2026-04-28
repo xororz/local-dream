@@ -211,6 +211,25 @@ private val tokenizeClient: OkHttpClient by lazy {
 
 private data class TokenizeResult(val count: Int, val maxLength: Int)
 
+private data class SchedulerOption(val id: String, val label: String)
+
+private val schedulerOptions = listOf(
+    SchedulerOption("dpm", "DPM++ 2M"),
+    SchedulerOption("euler", "Euler"),
+    SchedulerOption("euler_a", "Euler A"),
+    SchedulerOption("heun", "Henu"),
+    SchedulerOption("dpm2", "DPM2"),
+    SchedulerOption("dpmpp_2m_v2", "DPM++ 2M v2"),
+    SchedulerOption("dpmpp_2s", "DPM++ 2S"),
+    SchedulerOption("er_sde", "ER-SDE"),
+    SchedulerOption("tcd", "TCD"),
+    SchedulerOption("ddim", "DDIM"),
+    SchedulerOption("lcm", "LCM")
+)
+
+private fun schedulerLabel(id: String?): String =
+    schedulerOptions.firstOrNull { it.id == id }?.label ?: id ?: "DPM++ 2M"
+
 private suspend fun tokenizePromptRequest(text: String): TokenizeResult? =
     withContext(Dispatchers.IO) {
         try {
@@ -1404,30 +1423,16 @@ fun ModelRunScreen(
                                                         .horizontalScroll(rememberScrollState()),
                                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                                 ) {
-                                                    FilterChip(
-                                                        selected = scheduler == "dpm",
-                                                        onClick = {
-                                                            scheduler = "dpm"
-                                                            saveAllFields()
-                                                        },
-                                                        label = { Text("DPM++ 2M") }
-                                                    )
-                                                    FilterChip(
-                                                        selected = scheduler == "euler_a",
-                                                        onClick = {
-                                                            scheduler = "euler_a"
-                                                            saveAllFields()
-                                                        },
-                                                        label = { Text("Euler A") }
-                                                    )
-                                                    FilterChip(
-                                                        selected = scheduler == "lcm",
-                                                        onClick = {
-                                                            scheduler = "lcm"
-                                                            saveAllFields()
-                                                        },
-                                                        label = { Text("LCM") }
-                                                    )
+                                                    schedulerOptions.forEach { option ->
+                                                        FilterChip(
+                                                            selected = scheduler == option.id,
+                                                            onClick = {
+                                                                scheduler = option.id
+                                                                saveAllFields()
+                                                            },
+                                                            label = { Text(option.label) }
+                                                        )
+                                                    }
                                                 }
                                             }
 
@@ -2558,14 +2563,7 @@ fun ModelRunScreen(
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                                 Text(
-                                    "${stringResource(R.string.scheduler)}: ${
-                                        when (generationParams?.scheduler) {
-                                            "dpm" -> "DPM++ 2M"
-                                            "euler_a" -> "Euler A"
-                                            "lcm" -> "LCM"
-                                            else -> generationParams?.scheduler ?: "DPM++ 2M"
-                                        }
-                                    }",
+                                    "${stringResource(R.string.scheduler)}: ${schedulerLabel(generationParams?.scheduler)}",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                                 Text(
@@ -3684,14 +3682,7 @@ fun ModelRunScreen(
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Text(
-                                "${stringResource(R.string.scheduler)}: ${
-                                    when (params.scheduler) {
-                                        "dpm" -> "DPM++ 2M"
-                                        "euler_a" -> "Euler A"
-                                        "lcm" -> "LCM"
-                                        else -> params.scheduler
-                                    }
-                                }",
+                                "${stringResource(R.string.scheduler)}: ${schedulerLabel(params.scheduler)}",
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Text(
