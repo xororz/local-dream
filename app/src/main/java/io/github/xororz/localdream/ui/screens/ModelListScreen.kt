@@ -2844,8 +2844,10 @@ suspend fun extractNpuModel(
             }
         }
 
-        val npuCustomFile = File(modelDir, "npucustom")
-        npuCustomFile.createNewFile()
+        if (modelId != "upscaler_anime" && modelId != "upscaler_realistic") {
+            val npuCustomFile = File(modelDir, "npucustom")
+            npuCustomFile.createNewFile()
+        }
 
         withContext(Dispatchers.Main) {
             onSuccess()

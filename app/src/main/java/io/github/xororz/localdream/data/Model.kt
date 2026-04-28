@@ -729,8 +729,6 @@ class ModelRepository(private val context: Context) {
             // SD 1.5 CPU
             "anythingv5cpu", "qteamixcpu", "cuteyukimixcpu",
             "absoluterealitycpu", "chilloutmixcpu",
-            // Upscalers (share the same models dir)
-            "upscaler_anime", "upscaler_realistic"
         )
 
         fun isReservedModelId(id: String): Boolean = id in RESERVED_MODEL_IDS
