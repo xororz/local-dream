@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -75,6 +76,7 @@ fun PromptTagTextField(
 ) {
     var expanded by remember { mutableStateOf(false) }
     var anchorWidthPx by remember { mutableStateOf(0) }
+    var anchorTopPx by remember { mutableStateOf(0f) }
     val density = LocalDensity.current
 
     Column(modifier = modifier) {
@@ -84,7 +86,10 @@ fun PromptTagTextField(
             modifier = Modifier
                 .fillMaxWidth()
                 .onFocusChanged { onFocusChanged(it.isFocused) }
-                .onGloballyPositioned { coords -> anchorWidthPx = coords.size.width },
+                .onGloballyPositioned { coords ->
+                    anchorWidthPx = coords.size.width
+                    anchorTopPx = coords.positionInWindow().y
+                },
             enabled = enabled,
             label = label,
             maxLines = if (expanded) Int.MAX_VALUE else maxCollapsedLines,
@@ -107,6 +112,12 @@ fun PromptTagTextField(
 
     if (showSuggestions && suggestions.isNotEmpty() && anchorWidthPx > 0) {
         val widthDp = with(density) { anchorWidthPx.toDp() }
+        val gapDp = 8.dp
+        val gapPx = with(density) { gapDp.toPx() }
+        val availableAboveDp = with(density) {
+            (anchorTopPx - gapPx).coerceAtLeast(0f).toDp()
+        }
+        val maxHeightDp = minOf(280.dp, availableAboveDp)
         Popup(
             popupPositionProvider = remember { AnchorPositionProvider() },
             properties = PopupProperties(
@@ -125,7 +136,7 @@ fun PromptTagTextField(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 280.dp)
+                        .heightIn(max = maxHeightDp)
                         .verticalScroll(rememberScrollState())
                 ) {
                     suggestions.forEach { suggestion ->
@@ -270,14 +281,12 @@ private class AnchorPositionProvider : PopupPositionProvider {
         popupContentSize: IntSize
     ): IntOffset {
         val gap = 8
-        val belowY = anchorBounds.bottom + gap
         val aboveY = anchorBounds.top - popupContentSize.height - gap
-        val y = if (belowY + popupContentSize.height <= windowSize.height) {
-            belowY
-        } else if (aboveY >= 0) {
-            aboveY
-        } else {
-            belowY.coerceAtMost(windowSize.height - popupContentSize.height).coerceAtLeast(0)
+        val belowY = anchorBounds.bottom + gap
+        val y = when {
+            aboveY >= 0 -> aboveY
+            belowY + popupContentSize.height <= windowSize.height -> belowY
+            else -> aboveY.coerceAtLeast(0)
         }
         val x = anchorBounds.left.coerceIn(
             0,

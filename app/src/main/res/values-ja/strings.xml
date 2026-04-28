@@ -8,8 +8,6 @@
     <string name="capture_logs_hint">モデル実行中にアプリのログを収集し、終了後に表示します</string>
     <string name="tag_autocomplete">タグ補完</string>
     <string name="tag_autocomplete_hint">プロンプト入力中にタグを補完・修正します</string>
-    <string name="tag_suggestion_count">候補表示数：%1$d</string>
-    <string name="tag_suggestion_count_hint">補完候補の表示件数を設定します（2～10）</string>
     <string name="tag_alias_label">別名</string>
     <string name="tag_correction_label">修正</string>
     <string name="tag_main_dictionary">タグ辞書</string>

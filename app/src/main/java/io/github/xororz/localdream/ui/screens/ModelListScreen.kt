@@ -1117,17 +1117,6 @@ fun ModelListScreen(
                                             }
                                     )
                                 }
-                                var tagSuggestionCount by remember {
-                                    mutableStateOf(
-                                        preferences.getInt("tag_suggestion_count", 4).also {
-                                            if (!preferences.contains("tag_suggestion_count")) {
-                                                preferences.edit {
-                                                    putInt("tag_suggestion_count", 4)
-                                                }
-                                            }
-                                        }.coerceIn(2, 10)
-                                    )
-                                }
                                 val tagRepository =
                                     remember { TagAutocompleteRepository.getInstance(context) }
                                 val tagDictState by tagRepository.state.collectAsState()
@@ -1493,48 +1482,6 @@ fun ModelListScreen(
                                                     }
                                                 }
                                             }
-                                        }
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(horizontal = 16.dp),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                                                alpha = 0.2f
-                                            )
-                                        )
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(16.dp)
-                                        ) {
-                                            Text(
-                                                text = stringResource(
-                                                    R.string.tag_suggestion_count,
-                                                    tagSuggestionCount
-                                                ),
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                            Text(
-                                                stringResource(R.string.tag_suggestion_count_hint),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(
-                                                    alpha = 0.7f
-                                                )
-                                            )
-                                            Slider(
-                                                value = tagSuggestionCount.toFloat(),
-                                                onValueChange = {
-                                                    tagSuggestionCount = it.toInt().coerceIn(2, 10)
-                                                    preferences.edit {
-                                                        putInt(
-                                                            "tag_suggestion_count",
-                                                            tagSuggestionCount
-                                                        )
-                                                    }
-                                                },
-                                                valueRange = 2f..10f,
-                                                steps = 7,
-                                                modifier = Modifier.fillMaxWidth()
-                                            )
                                         }
                                     }
                                 }
