@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <permission
+        android:name="io.github.xororz.localdream.permission.BIND_BACKEND"
+        android:protectionLevel="normal" />
+
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
@@ -48,8 +52,15 @@
         <service
             android:name=".service.BackendService"
             android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:exported="true"
+            android:foregroundServiceType="dataSync"
+            android:permission="io.github.xororz.localdream.permission.BIND_BACKEND">
+
+            <!-- Restrict who can bind with a permission -->
+            <intent-filter>
+                <action android:name="io.github.xororz.localdream.BIND_SERVICE" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".service.BackgroundGenerationService"

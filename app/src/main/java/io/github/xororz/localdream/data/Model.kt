@@ -14,6 +14,8 @@ import kotlinx.coroutines.runBlocking
 import java.io.File
 import android.content.Intent
 import android.util.Log
+import android.os.Parcelable
+import kotlinx.parcelize.Parcelize
 
 data class Resolution(
     val width: Int,
@@ -97,6 +99,24 @@ sealed class DownloadResult {
     data class Error(val message: String) : DownloadResult()
     data class Progress(val progress: DownloadProgress) : DownloadResult()
 }
+
+// used in AIDL DTO
+@Parcelize
+data class ModelInfo(
+    val id: String,
+    val name: String,
+    val description: String,
+    val generationSize: Int = 512,
+    val textEmbeddingSize: Int = 768,
+    val isDownloaded: Boolean = false,
+    val needsUpgrade: Boolean = false,
+    val defaultPrompt: String = "",
+    val defaultNegativePrompt: String = "",
+    val runOnCpu: Boolean = false,
+    val useCpuClip: Boolean = false,
+    val isCustom: Boolean = false,
+    val isSdxl: Boolean = false
+) : Parcelable
 
 data class Model(
     val id: String,

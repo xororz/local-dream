@@ -1,19 +1,26 @@
 package io.github.xororz.localdream.service
 
-import android.app.*
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import io.github.xororz.localdream.BuildConfig
+import io.github.xororz.localdream.ILocalDreamService
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.Model
+import io.github.xororz.localdream.data.ModelInfo
+import io.github.xororz.localdream.data.ModelRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-import io.github.xororz.localdream.data.ModelRepository
-import io.github.xororz.localdream.BuildConfig
+
 
 class BackendService : Service() {
     private var process: Process? = null
@@ -52,8 +59,6 @@ class BackendService : Service() {
         createNotificationChannel()
         prepareRuntimeDir()
     }
-
-    override fun onBind(intent: Intent): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "service started command: ${intent?.action}")
@@ -106,6 +111,64 @@ class BackendService : Service() {
         super.onTimeout(startId, fgsType)
         handleTimeout(fgsType)
     }
+
+    // the binder implementation
+    private val binder = object : ILocalDreamService.Stub() {
+
+        override fun startModel(modelId: String?, width: Int, height: Int): Boolean {
+            if (modelId == null) return false
+
+            val modelRepository = ModelRepository(this@BackendService)
+            val model = modelRepository.models.find { it.id == modelId } ?: return false
+
+            val success = startBackend(model, width, height)
+            if (success) updateState(BackendState.Running)
+            else updateState(BackendState.Error("Backend start failed"))
+            return success
+        }
+
+        override fun stopModel() {
+            stopBackend()
+        }
+
+        override fun getState(): Int = when (backendState.value) {
+            is BackendState.Idle -> 0
+            is BackendState.Starting -> 1
+            is BackendState.Running -> 2
+            is BackendState.Error -> -1
+        }
+
+        override fun getErrorMessage(): String? {
+            val state = backendState.value
+            return if (state is BackendState.Error) state.message else null
+        }
+
+        override fun getPort(): Int = 8081
+
+        override fun getModels(): MutableList<ModelInfo> {
+            val modelRepository = ModelRepository(this@BackendService)
+            return modelRepository.models.map { model ->
+                ModelInfo(
+                    id = model.id,
+                    name = model.name,
+                    description = model.description,
+                    isDownloaded = model.isDownloaded,
+                    isSdxl = model.isSdxl,
+                    isCustom = model.isCustom,
+                    runOnCpu = model.runOnCpu,
+                    useCpuClip = model.useCpuClip,
+                    needsUpgrade = model.needsUpgrade,
+                    defaultPrompt = model.defaultPrompt,
+                    generationSize = model.generationSize,
+                    textEmbeddingSize = model.textEmbeddingSize,
+                    defaultNegativePrompt = model.defaultNegativePrompt
+                )
+            }.toMutableList()
+        }
+    }
+
+    // Now return the binder
+    override fun onBind(intent: Intent): IBinder = binder
 
     private fun handleTimeout(fgsType: Int) {
         Log.e(TAG, "Foreground service timeout (fgsType=$fgsType)")
