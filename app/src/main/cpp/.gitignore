@@ -1,4 +1,6 @@
 build/
 .vscode/
 3rdparty/SampleApp/
+3rdparty/LiteRT/
+
 lib/

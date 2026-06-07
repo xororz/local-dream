@@ -56,6 +56,16 @@
 
 #include "zstd.h"
 
+//liteRT
+#include <litert/c/litert_environment.h>
+#include <litert/c/litert_compiled_model.h>
+#include <litert/c/litert_common.h>
+
+#include <android/log.h>
+#define TAG "LiteRTCheck"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
+
+
 int port = 8081;
 std::string listen_address = "127.0.0.1";
 bool use_v_pred = false;
@@ -3468,7 +3478,16 @@ int main(int argc, char **argv) {
       res.set_header("Access-Control-Allow-Origin", "*");
     }
   });
-
+  svr.Post("/about", [](const httplib::Request &, httplib::Response &res) {
+    nlohmann::json about = {
+        {"app", "local dream (This is a test version with the backend modified from MNN to LiteRT.)"},
+        {"description",
+         "A high-performance image generation server using QNN and MNN."},
+        {"github", "https://github.com/yukkuri-Dev/local-dream"}
+    };
+    res.set_content(about.dump(), "application/json");
+    res.set_header("Access-Control-Allow-Origin", "*");
+  });
   // Binary protocol upscale endpoint - optimized for performance
   svr.Post("/upscale", [&](const httplib::Request &req,
                            httplib::Response &res) {

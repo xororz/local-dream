@@ -144,6 +144,34 @@ if(NOT DEFINED ANDROID_ABI)
     set(ANDROID_ABI ${CMAKE_ANDROID_ARCH_ABI} CACHE STRING "Android ABI" FORCE)
 endif()
 
+# LiteRT (optional)
+option(ENABLE_LITERT "Enable LiteRT support when the SDK is available" ON)
+set(LITERT_CC_SDK_LOCATION
+    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/LiteRT
+    CACHE PATH "Path to the LiteRT C++ SDK root")
+set(LITERT_SO_PATH
+    ${LITERT_CC_SDK_LOCATION}/libLiteRt.so
+    CACHE FILEPATH "Path to the prebuilt LiteRT shared library")
+set(LITERT_INCLUDE_DIR
+    ${LITERT_CC_SDK_LOCATION}
+    CACHE PATH "Path to the LiteRT header root")
+set(LITERT_LINK_TARGET "")
+
+if(ENABLE_LITERT)
+    if(EXISTS "${LITERT_SO_PATH}")
+        add_library(LiteRT SHARED IMPORTED GLOBAL)
+        set_target_properties(LiteRT PROPERTIES
+            IMPORTED_LOCATION "${LITERT_SO_PATH}")
+        set(LITERT_LINK_TARGET LiteRT)
+        list(APPEND PACKAGE_INCLUDES "${LITERT_INCLUDE_DIR}")
+        message(STATUS "LiteRT enabled from prebuilt ${LITERT_SO_PATH}")
+    else()
+        message(STATUS
+            "LiteRT prebuilt not found at ${LITERT_SO_PATH}; "
+            "set LITERT_SO_PATH to enable it.")
+    endif()
+endif()
+
 add_subdirectory(${TOKENZIER_CPP_PATH} tokenizers EXCLUDE_FROM_ALL)
 
 # set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -199,3 +227,9 @@ target_link_libraries(${PROJECT_NAME}
     tokenizers_cpp
     libzstd
 )
+
+if(LITERT_LINK_TARGET)
+    target_link_libraries(${PROJECT_NAME}
+        PRIVATE
+        ${LITERT_LINK_TARGET})
+endif()
