@@ -31,6 +31,12 @@ If you like it, please consider [sponsor](#-support-this-project) this project.
 
 For certain reasons, all guides and documentation have been moved to [Guide Site](https://ld-guide.chino.icu).
 
+## Local Automation API
+
+There is a proposal for a supported pure-local API for Android terminal
+environments, automation apps, and companion apps:
+[Local Automation API Proposal](docs/local-automation-api.md).
+
 ## Credits & Acknowledgments
 
 Local Dream is built on top of many excellent open-source projects. Sincere thanks to all the authors and contributors whose work made this project possible.
