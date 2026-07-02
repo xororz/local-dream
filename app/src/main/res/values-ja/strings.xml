@@ -11,6 +11,10 @@
     <string name="capture_logs_hint">モデル実行中にアプリのログを収集し、終了後に表示します</string>
     <string name="listen_on_all_addresses">LAN からのアクセスを許可</string>
     <string name="listen_on_all_addresses_hint">同じネットワーク上の他のデバイスからバックエンド（ポート 8081）にアクセスできるようにします。オフの場合はローカルのみ。</string>
+    <string name="openai_compat_api">OpenAI 互換 API</string>
+    <string name="openai_compat_api_hint">既存のバックエンド API を残したまま、`/v1/images/generations` と `/v1/images/edits` を公開します。</string>
+    <string name="openai_api_key">OpenAI API キー</string>
+    <string name="openai_api_key_hint">任意です。空欄なら認証不要、設定すると OpenAI 互換ルートで `Authorization: Bearer &lt;key&gt;` が必須になります。</string>
     <string name="tag_autocomplete">タグ補完</string>
     <string name="tag_autocomplete_hint">プロンプト入力中にタグを補完・修正します</string>
     <string name="tag_alias_label">別名</string>
@@ -67,6 +71,7 @@
     <string name="confirm">決定</string>
     <string name="cancel">取り消す</string>
     <string name="save">保存</string>
+    <string name="clear">クリア</string>
     <string name="back">戻る</string>
     <string name="close">閉じる</string>
     <string name="delete">削除</string>

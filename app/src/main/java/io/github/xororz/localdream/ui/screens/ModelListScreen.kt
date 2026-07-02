@@ -1405,6 +1405,22 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                         preferences.getBoolean("listen_on_all_addresses", false),
                                     )
                                 }
+                                var enableOpenAiApi by remember {
+                                    mutableStateOf(
+                                        preferences.getBoolean("enable_openai_api", true).also {
+                                            if (!preferences.contains("enable_openai_api")) {
+                                                preferences.edit {
+                                                    putBoolean("enable_openai_api", true)
+                                                }
+                                            }
+                                        },
+                                    )
+                                }
+                                var openAiApiKey by remember {
+                                    mutableStateOf(
+                                        preferences.getString("openai_api_key", "").orEmpty(),
+                                    )
+                                }
                                 var enableTagAutocomplete by remember {
                                     mutableStateOf(
                                         preferences.getBoolean("enable_tag_autocomplete", true)
@@ -1765,6 +1781,74 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                         }
                                     },
                                 )
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                                SwitchSettingRow(
+                                    title = stringResource(R.string.openai_compat_api),
+                                    description = stringResource(R.string.openai_compat_api_hint),
+                                    checked = enableOpenAiApi,
+                                    onCheckedChange = {
+                                        enableOpenAiApi = it
+                                        preferences.edit { putBoolean("enable_openai_api", it) }
+                                    },
+                                )
+                                AnimatedVisibility(visible = enableOpenAiApi) {
+                                    Column {
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(horizontal = 16.dp),
+                                        )
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(16.dp),
+                                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.openai_api_key),
+                                                style = MaterialTheme.typography.titleSmall,
+                                            )
+                                            Text(
+                                                text = stringResource(
+                                                    R.string.openai_api_key_hint,
+                                                ),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                            OutlinedTextField(
+                                                value = openAiApiKey,
+                                                onValueChange = {
+                                                    openAiApiKey = it
+                                                    preferences.edit {
+                                                        putString("openai_api_key", it)
+                                                    }
+                                                },
+                                                label = {
+                                                    Text(
+                                                        stringResource(R.string.openai_api_key),
+                                                    )
+                                                },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                singleLine = true,
+                                            )
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.End,
+                                            ) {
+                                                TextButton(
+                                                    onClick = {
+                                                        openAiApiKey = ""
+                                                        preferences.edit {
+                                                            putString("openai_api_key", "")
+                                                        }
+                                                    },
+                                                ) {
+                                                    Text(stringResource(R.string.clear))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

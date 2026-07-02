@@ -7,7 +7,74 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # QNN SDK PATH
 set(QNN_SDK_ROOT /data/qairt/2.39.0.250926)
 
-file(COPY ${QNN_SDK_ROOT}/examples/QNN/SampleApp/SampleApp/
+function(first_existing_path out_var)
+    foreach(candidate IN LISTS ARGN)
+        if(EXISTS "${candidate}")
+            set(${out_var} "${candidate}" PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+    set(${out_var} "" PARENT_SCOPE)
+endfunction()
+
+first_existing_path(QNN_ROOT_CANDIDATE
+    ${QNN_SDK_ROOT}/2.39.0.250926
+    ${QNN_SDK_ROOT}
+    ${QNN_SDK_ROOT}/QAIRT
+    ${QNN_SDK_ROOT}/qairt
+)
+if(NOT QNN_ROOT_CANDIDATE)
+    set(QNN_ROOT_CANDIDATE ${QNN_SDK_ROOT})
+endif()
+
+first_existing_path(QNN_INCLUDE_DIR
+    ${QNN_ROOT_CANDIDATE}/include/QNN
+    ${QNN_SDK_ROOT}/include/QNN
+    ${QNN_ROOT_CANDIDATE}/QNN/include/QNN
+    ${QNN_SDK_ROOT}/QNN/include/QNN
+)
+if(NOT QNN_INCLUDE_DIR)
+    find_path(QNN_INCLUDE_DIR
+        NAMES QnnTypes.h
+        PATHS
+            ${QNN_ROOT_CANDIDATE}
+            ${QNN_SDK_ROOT}
+        PATH_SUFFIXES
+            include/QNN
+            QNN/include/QNN
+        NO_DEFAULT_PATH
+    )
+endif()
+if(NOT QNN_INCLUDE_DIR)
+    message(FATAL_ERROR "Could not locate QNN include directory under ${QNN_SDK_ROOT}")
+endif()
+get_filename_component(QNN_RESOLVED_SDK_ROOT "${QNN_INCLUDE_DIR}/../.." ABSOLUTE)
+message(STATUS "Resolved QNN SDK root: ${QNN_RESOLVED_SDK_ROOT}")
+
+first_existing_path(QNN_SAMPLEAPP_SOURCE
+    ${QNN_RESOLVED_SDK_ROOT}/examples/QNN/SampleApp/SampleApp
+    ${QNN_RESOLVED_SDK_ROOT}/examples/SampleApp/SampleApp
+    ${QNN_RESOLVED_SDK_ROOT}/examples/QNN/SampleApp
+    ${QNN_RESOLVED_SDK_ROOT}/SampleApp/SampleApp
+    ${QNN_RESOLVED_SDK_ROOT}/SampleApp
+)
+if(NOT QNN_SAMPLEAPP_SOURCE)
+    file(GLOB_RECURSE QNN_SAMPLEAPP_CANDIDATES LIST_DIRECTORIES true
+        ${QNN_RESOLVED_SDK_ROOT}/*SampleApp
+        ${QNN_RESOLVED_SDK_ROOT}/*/*SampleApp
+        ${QNN_RESOLVED_SDK_ROOT}/*/*/*SampleApp)
+    foreach(candidate IN LISTS QNN_SAMPLEAPP_CANDIDATES)
+        if(EXISTS "${candidate}/src/QnnSampleApp.cpp")
+            set(QNN_SAMPLEAPP_SOURCE "${candidate}")
+            break()
+        endif()
+    endforeach()
+endif()
+if(NOT QNN_SAMPLEAPP_SOURCE)
+    message(FATAL_ERROR "Could not locate QNN SampleApp under ${QNN_RESOLVED_SDK_ROOT}")
+endif()
+
+file(COPY ${QNN_SAMPLEAPP_SOURCE}/
     DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp)
 execute_process(COMMAND git apply --directory=app/src/main/cpp/ --verbose ${CMAKE_CURRENT_SOURCE_DIR}/SampleApp.patch
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -20,46 +87,76 @@ message(STATUS "Patch: ${patch_output}")
 message(STATUS "Patch: ${patch_error}")
 
 make_directory(${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtp.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnSystem.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV68Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV69Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV73Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV75Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV79Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV81Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v68/unsigned/libQnnHtpV68.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v68/unsigned/libQnnHtpV68Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v69/unsigned/libQnnHtpV69.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v69/unsigned/libQnnHtpV69Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v73/unsigned/libQnnHtpV73.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v73/unsigned/libQnnHtpV73Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v75/unsigned/libQnnHtpV75.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v75/unsigned/libQnnHtpV75Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v79/unsigned/libQnnHtpV79.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v79/unsigned/libQnnHtpV79Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v81/unsigned/libQnnHtpV81.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v81/unsigned/libQnnHtpV81Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
+set(QNN_ANDROID_LIB_DIR "")
+foreach(candidate
+    ${QNN_RESOLVED_SDK_ROOT}/lib/aarch64-android
+    ${QNN_RESOLVED_SDK_ROOT}/lib/android
+    ${QNN_RESOLVED_SDK_ROOT}/libs/aarch64-android
+    ${QNN_RESOLVED_SDK_ROOT}/lib)
+    if(EXISTS "${candidate}/libQnnHtp.so")
+        set(QNN_ANDROID_LIB_DIR "${candidate}")
+        break()
+    endif()
+endforeach()
+if(NOT QNN_ANDROID_LIB_DIR)
+    file(GLOB_RECURSE QNN_HTP_LIB_CANDIDATES
+        ${QNN_RESOLVED_SDK_ROOT}/*/libQnnHtp.so
+        ${QNN_RESOLVED_SDK_ROOT}/*/*/libQnnHtp.so
+        ${QNN_RESOLVED_SDK_ROOT}/*/*/*/libQnnHtp.so)
+    list(LENGTH QNN_HTP_LIB_CANDIDATES QNN_HTP_LIB_COUNT)
+    if(QNN_HTP_LIB_COUNT GREATER 0)
+        list(GET QNN_HTP_LIB_CANDIDATES 0 QNN_HTP_LIB_PATH)
+        get_filename_component(QNN_ANDROID_LIB_DIR "${QNN_HTP_LIB_PATH}" DIRECTORY)
+    endif()
+endif()
+if(NOT QNN_ANDROID_LIB_DIR)
+    message(FATAL_ERROR "Could not locate Android QNN libraries under ${QNN_RESOLVED_SDK_ROOT}")
+endif()
+
+foreach(lib_name
+    libQnnHtp.so
+    libQnnSystem.so
+    libQnnHtpV68Stub.so
+    libQnnHtpV69Stub.so
+    libQnnHtpV73Stub.so
+    libQnnHtpV75Stub.so
+    libQnnHtpV79Stub.so
+    libQnnHtpV81Stub.so)
+    if(NOT EXISTS "${QNN_ANDROID_LIB_DIR}/${lib_name}")
+        message(FATAL_ERROR
+            "Could not locate required Android QNN library ${lib_name} in ${QNN_ANDROID_LIB_DIR}")
+    endif()
+    file(COPY ${QNN_ANDROID_LIB_DIR}/${lib_name}
+        DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
+endforeach()
+
+foreach(hex_ver v68 v69 v73 v75 v79 v81)
+    string(TOUPPER "${hex_ver}" hex_ver_upper)
+    foreach(lib_name
+        libQnnHtp${hex_ver_upper}.so
+        libQnnHtp${hex_ver_upper}Skel.so)
+        first_existing_path(QNN_HEXAGON_LIB
+            ${QNN_RESOLVED_SDK_ROOT}/lib/hexagon-${hex_ver}/unsigned/${lib_name}
+            ${QNN_RESOLVED_SDK_ROOT}/lib/hexagon-${hex_ver}/${lib_name}
+            ${QNN_RESOLVED_SDK_ROOT}/hexagon-${hex_ver}/unsigned/${lib_name}
+        )
+        if(NOT QNN_HEXAGON_LIB)
+            file(GLOB_RECURSE QNN_HEXAGON_CANDIDATES
+                ${QNN_RESOLVED_SDK_ROOT}/*/${lib_name}
+                ${QNN_RESOLVED_SDK_ROOT}/*/*/${lib_name}
+                ${QNN_RESOLVED_SDK_ROOT}/*/*/*/${lib_name})
+            list(LENGTH QNN_HEXAGON_CANDIDATES QNN_HEXAGON_COUNT)
+            if(QNN_HEXAGON_COUNT GREATER 0)
+                list(GET QNN_HEXAGON_CANDIDATES 0 QNN_HEXAGON_LIB)
+            endif()
+        endif()
+        if(NOT QNN_HEXAGON_LIB)
+            message(FATAL_ERROR "Could not locate required Hexagon library ${lib_name}")
+        endif()
+        file(COPY ${QNN_HEXAGON_LIB}
+            DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
+    endforeach()
+endforeach()
 
 if(WIN32)
     set(PLATFORM_NAME "windows")
@@ -113,7 +210,7 @@ set(XTENSOR_USE_XSIMD ON)
 
 set(PACKAGE_INCLUDES
     ${MNN_ROOT_DIR}/include
-    ${QNN_SDK_ROOT}/include/QNN
+    ${QNN_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include/
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/cpp-httplib

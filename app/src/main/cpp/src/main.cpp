@@ -10,6 +10,7 @@
 
 #include "Config.hpp"
 #include "MnnUtils.hpp"
+#include "OpenAiCompat.hpp"
 #include "Pipeline.hpp"
 #include "PipelineAnima.hpp"
 #include "PipelineSd15Cpu.hpp"
@@ -63,6 +64,8 @@ struct ServerOptions {
   bool no_img2img = false;  // skip the VAE encoder entirely
   bool lowram = false;
   bool anima_seq_dit = false;  // (anima+lowram) never co-resident DiT halves
+  bool openai_api_enabled = true;
+  std::string api_key;
   bool upscaler_mode = false;
   bool convert_mode = false;
   bool convert_clip_skip_2 = false;
@@ -105,6 +108,9 @@ static void showHelp() {
          "  --lowram               (sdxl/anima) load/release models per stage\n"
          "  --anima_seq_dit        (anima+lowram) never keep both DiT halves "
          "resident; for 12GB devices\n"
+         "  --no_openai_api        Disable OpenAI-compatible image routes\n"
+         "  --api_key <key>        Require Bearer auth for OpenAI-compatible "
+         "routes\n"
          "  --clip_skip_2          (convert) export CLIP with skip 2\n"
          "  --log_level <n>        QNN log level\n"
          "  --version              Print QNN SDK build id\n"
@@ -136,6 +142,8 @@ static ServerOptions processCommandLine(int argc, char **argv) {
     OPT_UPSCALER_MODE,
     OPT_LOWRAM,
     OPT_ANIMA_SEQ_DIT,
+    OPT_NO_OPENAI_API,
+    OPT_API_KEY,
     OPT_LOG_LEVEL
   };
   static struct pal::Option s_longOptions[] = {
@@ -155,6 +163,8 @@ static ServerOptions processCommandLine(int argc, char **argv) {
       {"upscaler_mode", pal::no_argument, NULL, OPT_UPSCALER_MODE},
       {"lowram", pal::no_argument, NULL, OPT_LOWRAM},
       {"anima_seq_dit", pal::no_argument, NULL, OPT_ANIMA_SEQ_DIT},
+      {"no_openai_api", pal::no_argument, NULL, OPT_NO_OPENAI_API},
+      {"api_key", pal::required_argument, NULL, OPT_API_KEY},
       {"log_level", pal::required_argument, NULL, OPT_LOG_LEVEL},
       {NULL, 0, NULL, 0}};
 
@@ -215,6 +225,12 @@ static ServerOptions processCommandLine(int argc, char **argv) {
         break;
       case OPT_ANIMA_SEQ_DIT:
         opts.anima_seq_dit = true;
+        break;
+      case OPT_NO_OPENAI_API:
+        opts.openai_api_enabled = false;
+        break;
+      case OPT_API_KEY:
+        opts.api_key = pal::g_optArg;
         break;
       case OPT_LOG_LEVEL:
         logLevel = sample_app::parseLogLevel(pal::g_optArg);
@@ -386,6 +402,13 @@ static std::string encodeResultImage(const GenerationResult &result,
 // new request arriving while an aborted one is still winding down).
 static std::mutex g_generation_mutex;
 
+static GenerationResult runGenerationLocked(Pipeline *pipeline,
+                                            GenerationRequest &req,
+                                            const ProgressCallback &cb) {
+  std::lock_guard<std::mutex> generation_lock(g_generation_mutex);
+  return pipeline->generate(req, cb);
+}
+
 static void registerGenerateEndpoint(httplib::Server &svr, Pipeline *pipeline) {
   svr.Post("/generate", [pipeline](const httplib::Request &request,
                                    httplib::Response &res) {
@@ -411,9 +434,9 @@ static void registerGenerateEndpoint(httplib::Server &svr, Pipeline *pipeline) {
           "text/event-stream",
           [pipeline, req](intptr_t, httplib::DataSink &sink) -> bool {
             try {
-              std::lock_guard<std::mutex> generation_lock(g_generation_mutex);
-              auto result = pipeline->generate(
-                  *req, [&sink, &req](int s, int t, const std::string &img) {
+              auto result = runGenerationLocked(
+                  pipeline, *req, [&sink, &req](int s, int t,
+                                                const std::string &img) {
                     nlohmann::json p = {
                         {"type", "progress"}, {"step", s}, {"total_steps", t}};
                     if (!img.empty()) {
@@ -493,6 +516,94 @@ static void registerGenerateEndpoint(httplib::Server &svr, Pipeline *pipeline) {
       res.set_content(err.dump(), "application/json");
     }
   });
+}
+
+static void registerOpenAiImageEndpoints(httplib::Server &svr,
+                                         Pipeline *pipeline,
+                                         const ServerOptions &opts) {
+  if (!opts.openai_api_enabled) return;
+
+  OpenAiRouteOptions route_opts = {
+      pipeline->isSdxl() || pipeline->isAnima(),
+      pipeline->supportsImg2Img(),
+      opts.api_key,
+      std::filesystem::path(opts.model_dir).filename().string(),
+  };
+
+  auto handle_openai_request =
+      [pipeline](const OpenAiPreparedRequest &prepared, httplib::Response &res) {
+        std::vector<std::string> images_b64;
+        images_b64.reserve(prepared.items.size());
+        for (const auto &item_json : prepared.items) {
+          GenerationRequest req = parseGenerationRequest(
+              item_json, pipeline->isSdxl(), pipeline->isAnima(),
+              pipeline->supportsImg2Img(), pipeline->supportsUltrafix());
+          auto result = runGenerationLocked(
+              pipeline, req,
+              [](int, int, const std::string &) {
+                // OpenAI-compatible routes return only the final image.
+              });
+          images_b64.push_back(encodeResultImage(result, "png"));
+        }
+        res.status = 200;
+        res.set_content(buildOpenAiImagesResponse(images_b64).dump(),
+                        "application/json");
+      };
+
+  svr.Post("/v1/images/generations",
+           [route_opts, handle_openai_request](const httplib::Request &request,
+                                               httplib::Response &res) {
+             try {
+               requireOpenAiAuthorization(request, route_opts);
+               auto json = nlohmann::json::parse(request.body);
+               auto prepared = parseOpenAiGenerationRequest(json, route_opts);
+               handle_openai_request(prepared, res);
+             } catch (const OpenAiHttpError &e) {
+               setOpenAiError(res, e.status, e.what(), e.type, e.param);
+             } catch (const nlohmann::json::parse_error &e) {
+               setOpenAiError(res, 400,
+                              "Invalid JSON: " + std::string(e.what()),
+                              "invalid_request_error");
+             } catch (const nlohmann::json::exception &e) {
+               setOpenAiError(res, 400,
+                              "Invalid request field type: " +
+                                  std::string(e.what()),
+                              "invalid_request_error");
+             } catch (const std::invalid_argument &e) {
+               setOpenAiError(res, 400,
+                              "Invalid Arg: " + std::string(e.what()),
+                              "invalid_request_error");
+             } catch (const std::exception &e) {
+               setOpenAiError(res, 500,
+                              "Server Err: " + std::string(e.what()),
+                              "server_error");
+             }
+           });
+
+  svr.Post("/v1/images/edits",
+           [route_opts, handle_openai_request](const httplib::Request &request,
+                                               httplib::Response &res) {
+             try {
+               requireOpenAiAuthorization(request, route_opts);
+               auto prepared = parseOpenAiEditRequest(request, route_opts);
+               handle_openai_request(prepared, res);
+             } catch (const OpenAiHttpError &e) {
+               setOpenAiError(res, e.status, e.what(), e.type, e.param);
+             } catch (const nlohmann::json::exception &e) {
+               setOpenAiError(res, 400,
+                              "Invalid request field type: " +
+                                  std::string(e.what()),
+                              "invalid_request_error");
+             } catch (const std::invalid_argument &e) {
+               setOpenAiError(res, 400,
+                              "Invalid Arg: " + std::string(e.what()),
+                              "invalid_request_error");
+             } catch (const std::exception &e) {
+               setOpenAiError(res, 500,
+                              "Server Err: " + std::string(e.what()),
+                              "server_error");
+             }
+           });
 }
 
 // Binary protocol upscale endpoint - optimized for performance.
@@ -787,6 +898,7 @@ int main(int argc, char **argv) {
   });
 
   if (pipeline) registerGenerateEndpoint(svr, pipeline.get());
+  if (pipeline) registerOpenAiImageEndpoints(svr, pipeline.get(), opts);
   registerUpscaleEndpoint(svr);
   if (text_encoder) registerTokenizeEndpoint(svr, text_encoder.get());
 

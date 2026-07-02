@@ -1,0 +1,194 @@
+name: Android Build
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QAIRT_VERSION: 2.39.0.250926
+  QAIRT_URL: https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.39.0.250926/v2.39.0.250926.zip
+  ANDROID_NDK_VERSION: 28.0.13004108
+  ANDROID_NDK_ROOT: /data/android-ndk-r28
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Rust 1.84.0
+        uses: dtolnay/rust-toolchain@1.84.0
+        with:
+          targets: aarch64-linux-android
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # The repo vendors MNN as a recursive submodule, and one of its
+          # flatbuffers Android samples carries a wrapper jar that is outside
+          # Gradle's known-checksum list. We still use the root wrapper, so
+          # disable the action's repo-wide recursive validation here.
+          validate-wrappers: false
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache cmake ninja-build unzip
+
+      - name: Restore native build caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ccache
+            ~/.cargo/registry
+            ~/.cargo/git
+            app/src/main/cpp/3rdparty/tokenizers-cpp/rust/target
+            /tmp/qairt-download
+          key: native-build-${{ runner.os }}-${{ env.QAIRT_VERSION }}-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('app/src/main/cpp/CMakeLists.txt', 'app/src/main/cpp/build.sh', 'app/src/main/cpp/CMakePresets.json', 'app/src/main/cpp/SampleApp.patch', '.gitmodules') }}
+          restore-keys: |
+            native-build-${{ runner.os }}-${{ env.QAIRT_VERSION }}-${{ env.ANDROID_NDK_VERSION }}-
+
+      - name: Install Android SDK packages
+        run: |
+          if ! sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;36.0.0" "ndk;${ANDROID_NDK_VERSION}"; then
+            sdkmanager "platform-tools" "platforms;android-37" "build-tools;36.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          fi
+          mkdir -p "${ANDROID_SDK_ROOT}/platforms"
+          if [ -d "${ANDROID_SDK_ROOT}/platforms/android-37.0" ]; then
+            ln -sfn "${ANDROID_SDK_ROOT}/platforms/android-37.0" "${ANDROID_SDK_ROOT}/platforms/android-37"
+          fi
+          sudo mkdir -p /data
+          sudo ln -sfn "${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" "${ANDROID_NDK_ROOT}"
+
+      - name: Download Qualcomm AI Runtime SDK
+        run: |
+          if [ -f /tmp/qairt-download/qairt.zip ]; then
+            echo "Using cached QAIRT zip"
+          else
+            rm -rf /tmp/qairt-download
+            mkdir -p /tmp/qairt-download
+            curl -L "${QAIRT_URL}" -o /tmp/qairt-download/qairt.zip
+          fi
+          rm -rf /tmp/qairt-download/raw
+          mkdir -p /tmp/qairt-download/raw
+          unzip -q /tmp/qairt-download/qairt.zip -d /tmp/qairt-download/raw
+
+          SDK_ROOT=""
+          if [ -d "/tmp/qairt-download/raw/${QAIRT_VERSION}/include/QNN" ]; then
+            SDK_ROOT="/tmp/qairt-download/raw/${QAIRT_VERSION}"
+          elif [ -d "/tmp/qairt-download/raw/${QAIRT_VERSION}/${QAIRT_VERSION}/include/QNN" ]; then
+            SDK_ROOT="/tmp/qairt-download/raw/${QAIRT_VERSION}/${QAIRT_VERSION}"
+          elif [ -d "/tmp/qairt-download/raw/${QAIRT_VERSION}" ]; then
+            SDK_ROOT="/tmp/qairt-download/raw/${QAIRT_VERSION}"
+          else
+            FIRST_DIR="$(find /tmp/qairt-download/raw -type d -path '*/include/QNN' | head -n 1)"
+            if [ -n "${FIRST_DIR}" ]; then
+              SDK_ROOT="$(dirname "$(dirname "${FIRST_DIR}")")"
+            else
+              SDK_ROOT="/tmp/qairt-download/raw"
+            fi
+          fi
+
+          sudo mkdir -p /data/qairt
+          sudo rm -rf "/data/qairt/${QAIRT_VERSION}"
+          sudo mv "${SDK_ROOT}" "/data/qairt/${QAIRT_VERSION}"
+
+      - name: Inspect QAIRT layout
+        run: |
+          echo "QAIRT root:"
+          find "/data/qairt/${QAIRT_VERSION}" -maxdepth 4 -type d | sort | sed -n '1,200p'
+          echo "QnnTypes.h candidates:"
+          find "/data/qairt/${QAIRT_VERSION}" -type f -name QnnTypes.h | sort | sed -n '1,50p'
+          echo "SampleApp candidates:"
+          find "/data/qairt/${QAIRT_VERSION}" -type f -path '*SampleApp*/src/QnnSampleApp.cpp' | sort | sed -n '1,50p'
+          echo "libQnnHtp.so candidates:"
+          find "/data/qairt/${QAIRT_VERSION}" -type f -name libQnnHtp.so | sort | sed -n '1,50p'
+
+      - name: Build native backend
+        working-directory: app/src/main/cpp
+        run: |
+          ccache --max-size=1G
+          ccache --show-config
+          ./build.sh
+
+      - name: Assemble debug APKs
+        run: ./gradlew --stacktrace :app:assembleBasicDebug :app:assembleFilterDebug
+
+      - name: Run unit tests
+        run: ./gradlew --stacktrace :app:testBasicDebugUnitTest :app:testFilterDebugUnitTest
+
+      - name: Run formatting checks
+        run: ./gradlew --stacktrace :app:ktlintCheck
+
+      - name: Restore release keystore
+        if: github.event_name != 'pull_request'
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "${RELEASE_KEYSTORE_BASE64}" ]; then
+            echo "Missing RELEASE_KEYSTORE_BASE64 secret" >&2
+            exit 1
+          fi
+          keystore_path="${RUNNER_TEMP}/release-keystore.jks"
+          echo "RELEASE_KEYSTORE_PATH=${keystore_path}" >> "${GITHUB_ENV}"
+          printf '%s' "${RELEASE_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+
+      - name: Assemble signed release artifacts
+        if: github.event_name != 'pull_request'
+        env:
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          ./gradlew --stacktrace \
+            -PRELEASE_STORE_FILE="${RELEASE_KEYSTORE_PATH}" \
+            -PRELEASE_STORE_PASSWORD="${RELEASE_STORE_PASSWORD}" \
+            -PRELEASE_KEY_ALIAS="${RELEASE_KEY_ALIAS}" \
+            -PRELEASE_KEY_PASSWORD="${RELEASE_KEY_PASSWORD}" \
+            :app:assembleBasicRelease \
+            :app:assembleFilterRelease
+
+      - name: Upload debug artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-dream-debug-artifacts
+          path: |
+            app/build/outputs/apk/basic/debug/*.apk
+            app/build/outputs/apk/filter/debug/*.apk
+            app/src/main/jniLibs/arm64-v8a/libstable_diffusion_core.so
+          if-no-files-found: error
+
+      - name: Upload signed release artifacts
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-dream-release-artifacts
+          path: |
+            app/build/outputs/apk/basic/release/*.apk
+            app/build/outputs/apk/filter/release/*.apk
+          if-no-files-found: error

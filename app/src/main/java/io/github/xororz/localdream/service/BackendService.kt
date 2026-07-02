@@ -381,6 +381,8 @@ class BackendService : Service() {
             val preferences = this.getSharedPreferences("app_prefs", MODE_PRIVATE)
             val useImg2img = preferences.getBoolean("use_img2img", true)
             val listenOnAll = preferences.getBoolean("listen_on_all_addresses", false)
+            val openAiApiEnabled = preferences.getBoolean("enable_openai_api", true)
+            val openAiApiKey = preferences.getString("openai_api_key", "")?.trim().orEmpty()
 
             val command = mutableListOf(
                 executableFile.absolutePath,
@@ -444,6 +446,12 @@ class BackendService : Service() {
             }
             if (listenOnAll) {
                 command += "--listen_all"
+            }
+            if (!openAiApiEnabled) {
+                command += "--no_openai_api"
+            }
+            if (openAiApiKey.isNotEmpty()) {
+                command += listOf("--api_key", openAiApiKey)
             }
             val env = mutableMapOf<String, String>()
 
