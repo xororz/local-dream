@@ -1,11 +1,14 @@
 cmake_minimum_required(VERSION 3.18)
-project(libstable_diffusion_core.so C CXX)
+project(stable_diffusion_core C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# QNN SDK PATH
-set(QNN_SDK_ROOT /data/qairt/2.39.0.250926)
+# QNN SDK PATH - can be overridden with -DQNN_SDK_ROOT=... or QNN_SDK_ROOT env
+set(QNN_SDK_ROOT "$ENV{QNN_SDK_ROOT}" CACHE PATH "QNN SDK root directory")
+if(NOT QNN_SDK_ROOT)
+  set(QNN_SDK_ROOT /data/qairt/2.39.0.250926 CACHE PATH "QNN SDK root directory")
+endif()
 
 file(COPY ${QNN_SDK_ROOT}/examples/QNN/SampleApp/SampleApp/
     DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp)
@@ -174,25 +177,28 @@ else()
     add_definitions(-DQNN_API=__attribute__\(\(visibility\(\"default\"\)\)\))
 endif()
 
-# executable
-add_executable(${PROJECT_NAME} ${SOURCES})
-if(NOT QNN_DEBUG_ENABLE)
-    target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-s")
-endif()
-target_include_directories(${PROJECT_NAME} PRIVATE ${PACKAGE_INCLUDES})
+# Build as shared library instead of executable
+add_library(stable_diffusion_core SHARED ${SOURCES})
 
-set_target_properties(${PROJECT_NAME}
+if(NOT QNN_DEBUG_ENABLE)
+    target_link_options(stable_diffusion_core PRIVATE "-Wl,-s")
+endif()
+
+target_include_directories(stable_diffusion_core PRIVATE ${PACKAGE_INCLUDES})
+
+# Set output directory to jniLibs for Gradle integration
+set_target_properties(stable_diffusion_core
     PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${OUTPUT_SUFFIX}"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/../../../build/intermediates/cmake/basic/debug/obj/${OUTPUT_SUFFIX}"
 )
 
-target_compile_definitions(${PROJECT_NAME}
+target_compile_definitions(stable_diffusion_core
     PRIVATE
     XTENSOR_USE_XSIMD
 )
 
 # link
-target_link_libraries(${PROJECT_NAME}
+target_link_libraries(stable_diffusion_core
     PRIVATE
     ${PLATFORM_LIBS}
     MNN
