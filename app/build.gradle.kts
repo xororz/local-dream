@@ -67,6 +67,15 @@ android {
             enableSplit = false
         }
     }
+    
+    // CMake configuration for native library builds
+    externalNativeBuild {
+        cmake {
+            path("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+    
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
