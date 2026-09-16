@@ -1080,9 +1080,11 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                         }
                     }
 
-                    if (page == 1 && !remoteActive) {
+                    if (!remoteActive) {
                         item {
-                            AddCustomNpuModelButton(
+                            AddModelOutlinedCard(
+                                label = stringResource(R.string.add_custom_npu_model),
+                                accent = true,
                                 onClick = { showCustomNpuModelDialog = true },
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -2689,17 +2691,6 @@ fun AddCustomModelButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         onClick = onClick,
         modifier = modifier,
         accent = false,
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AddCustomNpuModelButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    AddModelOutlinedCard(
-        label = stringResource(R.string.add_custom_npu_model),
-        onClick = onClick,
-        modifier = modifier,
-        accent = true,
     )
 }
 

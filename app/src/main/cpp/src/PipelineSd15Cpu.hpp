@@ -30,7 +30,7 @@ class PipelineSd15Cpu : public Pipeline {
   bool supportsImg2Img() const override { return !vae_encoder_path_.empty(); }
 
  protected:
-  bool canSkipUncond() const override { return false; }
+  bool canSkipUncond() const override { return true; }
   bool previewSupported() const override { return false; }
 
   void encodeText(const ProcessedPromptPair &prompts, bool need_negative,
@@ -54,11 +54,14 @@ class PipelineSd15Cpu : public Pipeline {
     interpreter->releaseModel();
 
     auto run_side = [&](const std::vector<float> &embeddings, float *dst) {
-      memcpy(input->host<float>(), embeddings.data(),
-             77 * text_embedding_size * sizeof(float));
-      interpreter->runSession(session);
-      auto out = interpreter->getSessionOutput(session, "last_hidden_state");
-      memcpy(dst, out->host<float>(), 77 * text_embedding_size * sizeof(float));
+      const size_t chunk_size = 77 * text_embedding_size;
+      for (size_t offset = 0; offset < embeddings.size(); offset += chunk_size) {
+        memcpy(input->host<float>(), embeddings.data() + offset,
+               chunk_size * sizeof(float));
+        interpreter->runSession(session);
+        auto out = interpreter->getSessionOutput(session, "last_hidden_state");
+        memcpy(dst + offset, out->host<float>(), chunk_size * sizeof(float));
+      }
     };
 
     if (need_negative) run_side(prompts.negative_embeddings, cond.negHidden());
@@ -120,6 +123,7 @@ class PipelineSd15Cpu : public Pipeline {
       throw std::runtime_error(
           "Failed to create temporary MNN UNET interpreter!");
 
+    unet_interpreter_->setSessionMode(MNN::Interpreter::Session_Resize_Defer);
     unet_session_ =
         createMnnSession(unet_interpreter_, sessionOptions(req, "unet_cache"));
     if (!unet_session_)
@@ -130,10 +134,12 @@ class PipelineSd15Cpu : public Pipeline {
     auto enc = unet_interpreter_->getSessionInput(unet_session_,
                                                   "encoder_hidden_states");
 
+    const int batch = req.cfg == 1.0f ? 1 : 2;
+    const int tokens = text_encoder_.contextLength(req.prompt, req.negative_prompt);
     unet_interpreter_->resizeTensor(samp,
-                                    {2, 4, req.height / 8, req.width / 8});
+                                    {batch, 4, req.height / 8, req.width / 8});
     unet_interpreter_->resizeTensor(ts, {1});
-    unet_interpreter_->resizeTensor(enc, {2, 77, text_embedding_size});
+    unet_interpreter_->resizeTensor(enc, {batch, tokens, text_embedding_size});
     unet_interpreter_->resizeSession(unet_session_);
     if (req.use_opencl) unet_interpreter_->updateCacheFile(unet_session_);
 
@@ -141,7 +147,7 @@ class PipelineSd15Cpu : public Pipeline {
   }
 
   void runUnetStep(const GenerationRequest &req, const float *latents_batch2,
-                   float timestep_f, bool /*skip_uncond*/, Conditioning &cond,
+                   float timestep_f, bool skip_uncond, Conditioning &cond,
                    float *out_batch2) override {
     const int timestep = static_cast<int>(timestep_f);
     auto samp = unet_interpreter_->getSessionInput(unet_session_, "sample");
@@ -153,27 +159,28 @@ class PipelineSd15Cpu : public Pipeline {
     auto ts_nchw_tensor = new MNN::Tensor(ts, MNN::Tensor::CAFFE);
     auto enc_nchw_tensor = new MNN::Tensor(enc, MNN::Tensor::CAFFE);
 
-    size_t batch2_count = (size_t)2 * 4 * (req.height / 8) * (req.width / 8);
-
-    // Copy both batches (negative and positive) at once.
-    memcpy(samp_nchw_tensor->host<float>(), latents_batch2,
-           batch2_count * sizeof(float));
+    const size_t latent_count = (size_t)4 * (req.height / 8) * (req.width / 8);
+    const size_t output_count = (skip_uncond ? 1 : 2) * latent_count;
+    memcpy(samp_nchw_tensor->host<float>(),
+           latents_batch2 + (skip_uncond ? latent_count : 0),
+           output_count * sizeof(float));
     memcpy(ts_nchw_tensor->host<int>(), &timestep, sizeof(int));
-    memcpy(enc_nchw_tensor->host<float>(), cond.hidden.data(),
-           cond.hidden.size() * sizeof(float));
+    memcpy(enc_nchw_tensor->host<float>(),
+           skip_uncond ? cond.posHidden() : cond.hidden.data(),
+           (skip_uncond ? cond.hidden.size() / 2 : cond.hidden.size()) * sizeof(float));
 
     samp->copyFromHostTensor(samp_nchw_tensor);
     ts->copyFromHostTensor(ts_nchw_tensor);
     enc->copyFromHostTensor(enc_nchw_tensor);
 
-    // Single batch inference for both negative and positive conditions.
+    // CFG=1 runs only the positive batch.
     unet_interpreter_->runSession(unet_session_);
 
     auto output =
         unet_interpreter_->getSessionOutput(unet_session_, "out_sample");
     output->copyToHostTensor(samp_nchw_tensor);
-    memcpy(out_batch2, samp_nchw_tensor->host<float>(),
-           batch2_count * sizeof(float));
+    memcpy(out_batch2 + (skip_uncond ? latent_count : 0),
+           samp_nchw_tensor->host<float>(), output_count * sizeof(float));
 
     delete samp_nchw_tensor;
     delete ts_nchw_tensor;

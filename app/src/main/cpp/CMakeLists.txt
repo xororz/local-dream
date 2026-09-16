@@ -4,62 +4,36 @@ project(libstable_diffusion_core.so C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# QNN SDK PATH
-set(QNN_SDK_ROOT /data/qairt/2.39.0.250926)
-
-file(COPY ${QNN_SDK_ROOT}/examples/QNN/SampleApp/SampleApp/
-    DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp)
-execute_process(COMMAND git apply --directory=app/src/main/cpp/ --verbose ${CMAKE_CURRENT_SOURCE_DIR}/SampleApp.patch
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+# Build and package against the same QNN SDK revision.
+set(QNN_SDK_ROOT "$ENV{QNN_SDK_ROOT}" CACHE PATH "Qualcomm AI Runtime SDK 2.50.0.260828")
+set(SAMPLE_APP_DIR "${CMAKE_CURRENT_BINARY_DIR}/3rdparty/SampleApp")
+file(COPY "${QNN_SDK_ROOT}/examples/QNN/SampleApp/SampleApp/"
+    DESTINATION "${SAMPLE_APP_DIR}")
+execute_process(
+    COMMAND git apply --unsafe-paths --directory=${CMAKE_CURRENT_BINARY_DIR}
+        "${CMAKE_CURRENT_SOURCE_DIR}/SampleApp.patch"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../../.."
     RESULT_VARIABLE patch_result
-    OUTPUT_VARIABLE patch_output
     ERROR_VARIABLE patch_error
 )
-message(STATUS "Patch: ${patch_result}")
-message(STATUS "Patch: ${patch_output}")
-message(STATUS "Patch: ${patch_error}")
+if(NOT patch_result EQUAL 0)
+    message(FATAL_ERROR "${patch_error}")
+endif()
 
-make_directory(${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtp.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnSystem.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV68Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV69Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV73Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV75Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV79Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV81Stub.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v68/unsigned/libQnnHtpV68.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v68/unsigned/libQnnHtpV68Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v69/unsigned/libQnnHtpV69.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v69/unsigned/libQnnHtpV69Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v73/unsigned/libQnnHtpV73.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v73/unsigned/libQnnHtpV73Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v75/unsigned/libQnnHtpV75.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v75/unsigned/libQnnHtpV75Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v79/unsigned/libQnnHtpV79.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v79/unsigned/libQnnHtpV79Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v81/unsigned/libQnnHtpV81.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
-file(COPY ${QNN_SDK_ROOT}/lib/hexagon-v81/unsigned/libQnnHtpV81Skel.so
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/qnnlibs")
+file(COPY "${QNN_SDK_ROOT}/LICENSE.pdf" "${QNN_SDK_ROOT}/NOTICE.txt"
+    "${QNN_SDK_ROOT}/QNN_NOTICE.txt"
+    DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/qnn-notices")
+foreach(lib QnnHtp QnnSystem)
+    file(COPY "${QNN_SDK_ROOT}/lib/aarch64-android/lib${lib}.so"
+        DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/qnnlibs")
+endforeach()
+foreach(arch 68 69 73 75 79 81)
+    file(COPY "${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV${arch}Stub.so"
+        "${QNN_SDK_ROOT}/lib/hexagon-v${arch}/unsigned/libQnnHtpV${arch}.so"
+        "${QNN_SDK_ROOT}/lib/hexagon-v${arch}/unsigned/libQnnHtpV${arch}Skel.so"
+        DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/qnnlibs")
+endforeach()
 
 if(WIN32)
     set(PLATFORM_NAME "windows")
@@ -101,7 +75,6 @@ set(MNN_ROOT_DIR 3rdparty/MNN)
 set(MNN_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(MNN_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(MNN_LOW_MEMORY ON CACHE BOOL "" FORCE)
-set(MNN_CPU_WEIGHT_DEQUANT_GEMM ON CACHE BOOL "" FORCE)
 set(MNN_BUILD_FOR_ANDROID ON CACHE BOOL "" FORCE)
 set(MNN_BUILD_FOR_ANDROID_COMMAND ON CACHE BOOL "" FORCE)
 set(MNN_USE_LOGCAT OFF CACHE BOOL "" FORCE)
@@ -126,16 +99,17 @@ set(PACKAGE_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/xtensor-blas/include
     ${ZSTD_INCLUDE_DIR}
 
-    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src/
-    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src/CachingUtil
-    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src/Log
-    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src/PAL/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src/Utils
-    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src/WrapperUtils
+    ${SAMPLE_APP_DIR}/src/
+    ${SAMPLE_APP_DIR}/src/CachingUtil
+    ${SAMPLE_APP_DIR}/src/Log
+    ${SAMPLE_APP_DIR}/src/PAL/include
+    ${SAMPLE_APP_DIR}/src/Utils
+    ${SAMPLE_APP_DIR}/src/WrapperUtils
 )
 
 # tokenizers-cpp
 set(TOKENZIER_CPP_PATH ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/tokenizers-cpp)
+set(MSGPACK_BUILD_DOCS OFF CACHE BOOL "Build msgpack documentation" FORCE)
 
 if(NOT DEFINED CMAKE_ANDROID_ARCH_ABI)
     set(CMAKE_ANDROID_ARCH_ABI "arm64-v8a" CACHE STRING "Android ABI" FORCE)
@@ -147,7 +121,7 @@ endif()
 add_subdirectory(${TOKENZIER_CPP_PATH} tokenizers EXCLUDE_FROM_ALL)
 
 # set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
-set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src)
+set(SRC_DIR ${SAMPLE_APP_DIR}/src)
 message(STATUS "SRC_DIR: ${SRC_DIR}")
 set(SRC_DIR_LOG ${SRC_DIR}/Log)
 set(SRC_DIR_PAL_LINUX ${SRC_DIR}/PAL/src/linux)

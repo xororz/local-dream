@@ -124,7 +124,7 @@ class PipelineSdxl : public PipelineQnn {
   }
 
   bool supportsImg2Img() const override {
-    return lowram_ ? !vae_encoder_path_.empty() : vae_encoder_ != nullptr;
+    return !vae_encoder_path_.empty();
   }
 
  protected:
@@ -142,13 +142,25 @@ class PipelineSdxl : public PipelineQnn {
     if (!clip_interpreter_ || !clip2_interpreter_)
       throw std::runtime_error("SDXL CLIP interpreters not initialized!");
 
-    if (need_negative) {
-      runDualClip(prompts.negative_embeddings, prompts.negative_embeddings_2,
-                  prompts.ids.data(), cond.negHidden(), cond.negPooled());
-    }
-    if (need_positive) {
-      runDualClip(prompts.positive_embeddings, prompts.positive_embeddings_2,
-                  prompts.ids.data() + 77, cond.posHidden(), cond.posPooled());
+    std::vector<float> pooled(text_embedding_size_2);
+    for (int chunk = 0; chunk < cond.seq_len / 77; ++chunk) {
+      const int offset = chunk * 77;
+      if (need_negative) {
+        runDualClip(prompts.negative_embeddings.data() + offset * text_embedding_size,
+                    prompts.negative_embeddings_2.data() + offset * text_embedding_size_2,
+                    prompts.eos_positions[chunk],
+                    cond.negHidden() + offset * cond.hidden_dim, pooled.data());
+        if (chunk + 1 == (text_encoder_.fixed_chunks_ ? cond.negative_chunks : cond.seq_len / 77))
+          std::copy(pooled.begin(), pooled.end(), cond.negPooled());
+      }
+      if (need_positive) {
+        runDualClip(prompts.positive_embeddings.data() + offset * text_embedding_size,
+                    prompts.positive_embeddings_2.data() + offset * text_embedding_size_2,
+                    prompts.eos_positions[cond.seq_len / 77 + chunk],
+                    cond.posHidden() + offset * cond.hidden_dim, pooled.data());
+        if (chunk + 1 == (text_encoder_.fixed_chunks_ ? cond.positive_chunks : cond.seq_len / 77))
+          std::copy(pooled.begin(), pooled.end(), cond.posPooled());
+      }
     }
 
     if (lowram_) releaseClips();
@@ -161,18 +173,33 @@ class PipelineSdxl : public PipelineQnn {
   // per-call load/release would reload a multi-GB model once per tile.
   void vaeEncode(const GenerationRequest &, const float *image, float *mean,
                  float *std_dev) override {
-    if (lowram_) loadVaeEncoderIfNeeded();
+    loadVaeEncoderIfNeeded();
     if (!vae_encoder_) throw std::runtime_error("QNN VAE Enc missing");
     if (StatusCode::SUCCESS != vae_encoder_->executeVaeEncoderGraphsSDXL(
                                    const_cast<float *>(image), mean, std_dev))
       throw std::runtime_error("QNN VAE enc SDXL exec failed");
   }
 
-  void beginDenoise(const GenerationRequest &) override {
-    if (!lowram_ || unet_) return;
-    // The encode stage is over once the UNet is needed; never hold both.
-    releaseVaeEncoder();
-    unet_ = qnn_runtime::createAndInitModel(unet_path_, "unet");
+  void beginDenoise(const GenerationRequest &req) override {
+    const int tokens = text_encoder_.contextLength(req.prompt, req.negative_prompt);
+    if (unet_ && unet_tokens_ == tokens) return;
+    // The UNet is the spill-fill group head, so release its dependents first.
+    vae_encoder_.reset();
+    vae_decoder_.reset();
+    unet_.reset();
+    unet_tokens_ = tokens;
+    unet_ = qnn_runtime::createModel(unet_path_, "unet");
+    if (unet_ && !lowram_)
+      unet_->setSpillFillGroup(spillFillGroupBytes(), nullptr);
+    std::unique_ptr<qnn_runtime::PatchedModelBuffer> patched;
+    if (tokens > 77 && !text_encoder_.fixed_chunks_) {
+      patched = qnn_runtime::applyZstdPatchToBuffer(
+          unet_path_, model_dir_ + "/" + std::to_string(tokens) + ".patch");
+      if (!patched) throw std::runtime_error(unet_path_);
+    }
+    if (qnn_runtime::initializeApp("UNET", unet_, patched ? patched->buffer.get() : nullptr,
+                                    patched ? patched->size : 0) != EXIT_SUCCESS)
+      throw std::runtime_error("Failed init QNN UNET");
     QNN_INFO("[lowram] SDXL UNET loaded");
   }
 
@@ -189,13 +216,13 @@ class PipelineSdxl : public PipelineQnn {
     if (!skip_uncond &&
         StatusCode::SUCCESS != unet_->executeUnetGraphsSDXL(
                                    latents_in, ts, cond.negHidden(),
-                                   cond.negPooled(), time_ids, out_batch2))
+                                   cond.negPooled(), time_ids, out_batch2, cond.seq_len, cond.negative_chunks))
       throw std::runtime_error("QNN UNET SDXL exec failed (uncond)");
 
     if (StatusCode::SUCCESS !=
         unet_->executeUnetGraphsSDXL(
             latents_in + single_latent_size, ts, cond.posHidden(),
-            cond.posPooled(), time_ids + 6, out_batch2 + single_latent_size))
+            cond.posPooled(), time_ids + 6, out_batch2 + single_latent_size, cond.seq_len, cond.positive_chunks))
       throw std::runtime_error("QNN UNET SDXL exec failed (cond)");
   }
 
@@ -207,9 +234,8 @@ class PipelineSdxl : public PipelineQnn {
 
   void vaeDecode(const GenerationRequest &, const float *latents,
                  float *pixels) override {
-    if (lowram_ && !vae_decoder_) {
-      vae_decoder_ =
-          qnn_runtime::createAndInitModel(vae_decoder_path_, "vae_decoder");
+    if (!vae_decoder_) {
+      vae_decoder_ = createVaeModel(vae_decoder_path_, "vae_decoder");
       QNN_INFO("[lowram] SDXL VAE Decoder loaded");
     }
     if (!vae_decoder_) throw std::runtime_error("QNN VAE Dec missing");
@@ -237,6 +263,17 @@ class PipelineSdxl : public PipelineQnn {
   }
 
  private:
+  std::unique_ptr<QnnModel> createVaeModel(const std::string &path,
+                                          const std::string &name) {
+    auto model = qnn_runtime::createModel(path, name);
+    if (!model) throw std::runtime_error("Failed create QNN model: " + name);
+    if (!lowram_ && unet_)
+      model->setSpillFillGroup(spillFillGroupBytes(), unet_->getContextHandle());
+    if (qnn_runtime::initializeApp(name, model) != EXIT_SUCCESS)
+      throw std::runtime_error("Failed init QNN model: " + name);
+    return model;
+  }
+
   // Max shared spill-fill buffer (bytes) for the SDXL non-lowram context group.
   // Hardcoded default = 920 MiB, chosen to cover the measured per-model
   // requirements (UNet 89,063,424 / VAE-dec 884,801,536 / VAE-enc 575,668,224)
@@ -262,6 +299,7 @@ class PipelineSdxl : public PipelineQnn {
              (unsigned long long)bytes, bytes / (1024.0 * 1024.0));
   }
 
+ protected:
   void loadClipsIfNeeded() {
     if (!clip_interpreter_) {
       clip_interpreter_ = createMnnInterpreterMmap(clip_path_.c_str());
@@ -317,8 +355,7 @@ class PipelineSdxl : public PipelineQnn {
     if (vae_encoder_) return;
     if (vae_encoder_path_.empty())
       throw std::runtime_error("[lowram] SDXL VAE Encoder path missing");
-    vae_encoder_ =
-        qnn_runtime::createAndInitModel(vae_encoder_path_, "vae_encoder");
+    vae_encoder_ = createVaeModel(vae_encoder_path_, "vae_encoder");
     QNN_INFO("[lowram] SDXL VAE Encoder loaded");
   }
 
@@ -333,14 +370,14 @@ class PipelineSdxl : public PipelineQnn {
   // 77x1280 (exported without pooling; we select the EOS row here as the true
   // pooled embedding). Hidden states are concatenated along the feature dim:
   // [77, 768] + [77, 1280] = [77, 2048].
-  void runDualClip(const std::vector<float> &emb1,
-                   const std::vector<float> &emb2, const int *ids77,
+  void runDualClip(const float *emb1,
+                   const float *emb2, int eos_pos,
                    float *out_hidden_concat, float *out_pooled) {
     const int concat_dim = text_embedding_size + text_embedding_size_2;
 
     auto in1 =
         clip_interpreter_->getSessionInput(clip_session_, "input_embedding");
-    memcpy(in1->host<float>(), emb1.data(),
+    memcpy(in1->host<float>(), emb1,
            77 * text_embedding_size * sizeof(float));
     clip_interpreter_->runSession(clip_session_);
     auto out1 =
@@ -349,7 +386,7 @@ class PipelineSdxl : public PipelineQnn {
 
     auto in2 =
         clip2_interpreter_->getSessionInput(clip2_session_, "input_embedding");
-    memcpy(in2->host<float>(), emb2.data(),
+    memcpy(in2->host<float>(), emb2,
            77 * text_embedding_size_2 * sizeof(float));
     clip2_interpreter_->runSession(clip2_session_);
     auto out2_hidden = clip2_interpreter_->getSessionOutput(
@@ -367,14 +404,7 @@ class PipelineSdxl : public PipelineQnn {
              out2_hidden_data + t * text_embedding_size_2,
              text_embedding_size_2 * sizeof(float));
     }
-    // Pool by picking the EOS (49407) row; fall back to last row (76).
-    int eos_pos = 76;
-    for (int i = 0; i < 77; i++) {
-      if (ids77[i] == 49407) {
-        eos_pos = i;
-        break;
-      }
-    }
+    // Use the true EOS row; textual-inversion slots also carry ID 49407.
     memcpy(out_pooled, out2_pool_data + eos_pos * text_embedding_size_2,
            text_embedding_size_2 * sizeof(float));
   }
@@ -385,6 +415,7 @@ class PipelineSdxl : public PipelineQnn {
   const std::string vae_decoder_path_;
   const std::string vae_encoder_path_;
   const bool lowram_;
+  int unet_tokens_ = 77;
 
   MNN::Interpreter *clip_interpreter_ = nullptr;
   MNN::Interpreter *clip2_interpreter_ = nullptr;

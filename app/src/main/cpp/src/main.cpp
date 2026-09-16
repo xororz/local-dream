@@ -14,7 +14,7 @@
 #include "PipelineAnima.hpp"
 #include "PipelineSd15Cpu.hpp"
 #include "PipelineSd15Npu.hpp"
-#include "PipelineSdxl.hpp"
+#include "PipelineSdxlMnn.hpp"
 #include "QnnRuntime.hpp"
 #include "RequestParser.hpp"
 #include "SDUtils.hpp"
@@ -49,7 +49,7 @@
 // SD15/SDXL CLIP runs on MNN (CPU); Anima's CLIP (clip.bin) runs on QNN/HTP
 // (the C++ side still does the qwen token_emb lookup -> input_embedding).
 struct ServerOptions {
-  enum class ModelType { kSd15Cpu, kSd15Npu, kSdxl, kAnima };
+  enum class ModelType { kSd15Cpu, kSd15Npu, kSdxl, kSdxlMnn, kAnima };
 
   int port = 8081;
   std::string listen_address = "127.0.0.1";
@@ -67,15 +67,15 @@ struct ServerOptions {
   bool convert_mode = false;
   bool convert_clip_skip_2 = false;
 
-  bool isSdxl() const { return type == ModelType::kSdxl; }
+  bool isSdxl() const { return type == ModelType::kSdxl || type == ModelType::kSdxlMnn; }
   bool isAnima() const { return type == ModelType::kAnima; }
-  bool isMnn() const { return type == ModelType::kSd15Cpu; }
+  bool isMnn() const { return type == ModelType::kSd15Cpu || type == ModelType::kSdxlMnn; }
 };
 
 static void showHelp() {
   std::cout
       << "Usage:\n"
-         "  stable_diffusion_core --type <sd15cpu|sd15npu|sdxl> "
+         "  stable_diffusion_core --type <sd15cpu|sd15npu|sdxl|sdxlmnn> "
          "--model_dir <dir> [--lib_dir <dir>] [options]\n"
          "  stable_diffusion_core --upscaler_mode [--lib_dir <dir>] "
          "[options]\n"
@@ -83,7 +83,7 @@ static void showHelp() {
          "\n"
          "Modes:\n"
          "  --type <type>          Model format: sd15cpu (MNN), sd15npu "
-         "(QNN), sdxl (QNN), anima (QNN)\n"
+         "(QNN), sdxl (QNN), sdxlmnn (MNN), anima (QNN)\n"
          "  --upscaler_mode        Upscale-only server, no diffusion model\n"
          "  --convert <dir>        Convert model.safetensors in <dir> to MNN "
          "and exit\n"
@@ -232,6 +232,8 @@ static ServerOptions processCommandLine(int argc, char **argv) {
 
   if (typeStr == "sd15cpu")
     opts.type = ServerOptions::ModelType::kSd15Cpu;
+  else if (typeStr == "sdxlmnn")
+    opts.type = ServerOptions::ModelType::kSdxlMnn;
   else if (typeStr == "sdxl")
     opts.type = ServerOptions::ModelType::kSdxl;
   else if (typeStr == "sd15npu")
@@ -358,6 +360,10 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
       return std::make_unique<PipelineSd15Npu>(
           text_encoder, opts.model_dir, clip_path, unet_path, vae_decoder_path,
           vae_encoder_path, opts.patch_path, opts.use_v_pred);
+    case ServerOptions::ModelType::kSdxlMnn:
+      return std::make_unique<PipelineSdxlMnn>(
+          text_encoder, opts.model_dir, clip_path, clip2_path, unet_path,
+          vae_decoder_path, vae_encoder_path, opts.use_v_pred, opts.lowram);
     case ServerOptions::ModelType::kSdxl:
     default:
       return std::make_unique<PipelineSdxl>(
@@ -662,12 +668,15 @@ static void registerTokenizeEndpoint(httplib::Server &svr,
       std::string text = json.value("prompt", std::string());
       // Anima counts with the T5 tokenizer against the context length (512),
       // far longer than CLIP's 77.
-      const int max_len = text_encoder->isAnima() ? anima_text_seq_len : 77;
+      const int chunks = text_encoder->max_chunks_ == 0
+          ? text_encoder->contextLength(text) / 77 : text_encoder->max_chunks_;
+      const int max_len = text_encoder->isAnima() ? anima_text_seq_len
+          : chunks * 75 + 2;
 
       TokenizeInfo info = text_encoder->tokenizeInfo(text, max_len);
 
       nlohmann::json resp = {{"count", info.count},
-                             {"max_length", max_len},
+                             {"max_length", text_encoder->max_chunks_ == 0 ? 0 : max_len},
                              {"overflow_offset", info.overflow_offset}};
       res.status = 200;
       res.set_content(resp.dump(), "application/json");
@@ -704,7 +713,17 @@ int main(int argc, char **argv) {
     if (!opts.lib_dir.empty() && !qnn_runtime::init(opts.lib_dir))
       showHelpAndExit("Failed get QNN system func ptrs.");
   } else {
-    text_encoder = std::make_unique<TextEncoder>(opts.isSdxl(), opts.isAnima());
+    const std::filesystem::path model_dir(opts.model_dir);
+    const bool fixed_chunks = opts.isSdxl() && !opts.isMnn() &&
+        std::ifstream(model_dir / "qnn_context.txt").peek() != std::ifstream::traits_type::eof();
+    int max_chunks = opts.isMnn() ? 0 : 1;
+    if (opts.isSdxl()) {
+      if (opts.isMnn()) max_chunks = 0;
+      else if (fixed_chunks) max_chunks = 3;
+      else if (std::filesystem::exists(model_dir / "154.patch"))
+        max_chunks = std::filesystem::exists(model_dir / "231.patch") ? 3 : 2;
+    }
+    text_encoder = std::make_unique<TextEncoder>(opts.isSdxl(), opts.isAnima(), max_chunks, fixed_chunks);
     try {
       const std::filesystem::path mdir(opts.model_dir);
       text_encoder->loadTokenizer((mdir / "tokenizer.json").string());

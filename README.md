@@ -9,6 +9,9 @@ _Also supports CPU/GPU inference_
 
 </div>
 
+See [model package formats](docs/MODEL_PACKAGES.md) for SDXL MNN/QNN imports and
+long prompts, and [building from source](BUILDING.md) for native dependencies.
+
 ## About this Repo
 
 This project is **now open sourced and completely free**. Hope you enjoy it!
@@ -23,7 +26,8 @@ If you like it, please consider [sponsor](#-support-this-project) this project.
 > - SD1.5 models are supported on Snapdragon NPUs with Hexagon V68 architecture or newer.
 > - SDXL models are supported on Snapdragon 8 Gen 3 and newer devices.
 >
-> If your chip is outside the above scope, you can only run SD1.5 on CPU/GPU.
+> CPU/GPU inference supports SD1.5 and imported SDXL MNN packages. Large SDXL
+> models require substantially more memory than SD1.5.
 >
 > You can join our [telegram group](https://t.me/local_dream) for discussion or help with testing.
 

@@ -57,7 +57,7 @@ class BackendService : Service() {
     companion object {
         private const val TAG = "BackendService"
         private const val EXECUTABLE_NAME = "libstable_diffusion_core.so"
-        private const val RUNTIME_DIR = "runtime_libs"
+        private const val RUNTIME_DIR = "runtime_libs_qnn_2_50_0_260828"
         private const val NOTIFICATION_ID = 2
         private const val CHANNEL_ID = "backend_service_channel"
 
@@ -458,7 +458,7 @@ class BackendService : Service() {
                     "8081",
                 )
             }
-            if (backendType != "sd15cpu" && backendType != BACKEND_TYPE_UPSCALER) {
+            if (backendType != "sd15cpu" && backendType != "sdxlmnn" && backendType != BACKEND_TYPE_UPSCALER) {
                 command += listOf("--lib_dir", runtimeDir.absolutePath)
             }
             if (!useImg2img && backendType != BACKEND_TYPE_UPSCALER) {
@@ -500,7 +500,7 @@ class BackendService : Service() {
             // SDXL and Anima are the large NPU formats that benefit from
             // per-stage load/release. They share the same backend --lowram flag
             // but keep separate UI toggles so each can opt in independently.
-            if (backendType == "sdxl" && preferences.getBoolean("sdxl_lowram", true)) {
+            if ((backendType == "sdxl" || backendType == "sdxlmnn") && preferences.getBoolean("sdxl_lowram", true)) {
                 command += "--lowram"
             }
             if (backendType == "anima" && preferences.getBoolean("anima_lowram", true)) {

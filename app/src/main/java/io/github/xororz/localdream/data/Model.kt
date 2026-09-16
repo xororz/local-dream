@@ -141,7 +141,7 @@ data class Model(
     val backendType: String
         get() = when {
             isAnima -> "anima"
-            isSdxl -> "sdxl"
+            isSdxl -> if (runOnCpu) "sdxlmnn" else "sdxl"
             runOnCpu -> "sd15cpu"
             else -> "sd15npu"
         }
@@ -468,7 +468,7 @@ class ModelRepository private constructor(private val context: Context) {
                         customModels.add(createCustomModel(dir, isNpu = true, isAnima = true))
 
                     sdxlFile.exists() ->
-                        customModels.add(createCustomModel(dir, isNpu = true, isSdxl = true))
+                        customModels.add(createCustomModel(dir, isNpu = !File(dir, "unet.mnn").exists(), isSdxl = true))
 
                     finishedFile.exists() ->
                         customModels.add(createCustomModel(dir, isNpu = false))

@@ -252,7 +252,7 @@
 
     <!-- Custom Model -->
     <string name="add_custom_model">カスタムモデルを追加</string>
-    <string name="add_custom_npu_model">カスタムNPUモデルを追加</string>
+    <string name="add_custom_npu_model">モデルZIPをインポート</string>
     <string name="custom_model">カスタムモデル</string>
     <string name="custom_model_name">モデル名</string>
     <string name="custom_model_name_hint">モデル名を入力</string>
@@ -271,14 +271,14 @@
     <string name="file_selected">ファイルを選択</string>
     <string name="add_model">モデルを追加</string>
     <string name="custom_model_hint">SD1.5アーキテクチャセーフテンソルモデルファイルのみをサポートします</string>
-    <string name="custom_npu_model_hint">NPUモデルファイルを含むZIPファイルを選択してください。Qualcommデバイスでのみ利用可能です。https://huggingface.co/xororz/sd-qnn や https://huggingface.co/xororz/sdxl-qnn 、Hugging Faceの他の場所でモデルを見つけられます。</string>
+    <string name="custom_npu_model_hint">QNNまたはSDXL MNNモデルのZIPをインポートします。QNNには対応するQualcommデバイスが必要です。MNNはCPU/GPUで動作します。</string>
     <string name="converting">変換中…</string>
     <string name="model_conversion_success">モデル変換完了!</string>
     <string name="model_conversion_failed">変換に失敗しました: %s</string>
-    <string name="npu_model_added_success">NPUモデルの追加に成功しました！</string>
-    <string name="npu_model_add_failed">NPUモデルの追加に失敗しました: %s</string>
+    <string name="npu_model_added_success">モデルを追加しました！</string>
+    <string name="npu_model_add_failed">モデルのインポートに失敗しました: %s</string>
     <string name="preparing_model">モデルを準備しています…</string>
-    <string name="preparing_npu_model">NPUモデルを準備しています…</string>
+    <string name="preparing_npu_model">モデルを準備しています…</string>
     <string name="extracting_zip_file">ZIPファイルを解凍しています…</string>
     <string name="copying_model_file">モデルファイルをコピーしています…</string>
     <string name="copying_base_files">ベースファイルをコピーしています…</string>

@@ -1,0 +1,12 @@
+diff --git a/include/xtensor/xexpression_traits.hpp b/include/xtensor/xexpression_traits.hpp
+index 205de67a..61f6620b 100644
+--- a/include/xtensor/xexpression_traits.hpp
++++ b/include/xtensor/xexpression_traits.hpp
+@@ -106,2 +106 @@ namespace xt
+-#if defined(__GNUC__) && (__GNUC__ > 6)
+-#if __cplusplus == 201703L
++#ifdef __cpp_template_template_args
+@@ -114,2 +113 @@ namespace xt
+-#endif  // __cplusplus == 201703L
+-#endif  // __GNUC__ && (__GNUC__ > 6)
++#endif  // __cpp_template_template_args
