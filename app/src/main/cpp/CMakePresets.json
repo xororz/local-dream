@@ -18,7 +18,10 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_POLICY_VERSION_MINIMUM": "3.10"
       },
-      "toolchainFile": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake"
+      "toolchainFile": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake",
+      "environment": {
+        "ANDROID_NDK_ROOT": "/data/android-ndk-r28"
+      }
     },
     {
       "name": "android-debug",

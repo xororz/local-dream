@@ -28,7 +28,6 @@ detekt {
 android {
     namespace = "io.github.xororz.localdream"
     compileSdk = 37
-    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "io.github.xororz.localdream"
@@ -36,7 +35,7 @@ android {
 //        minSdk = 31
         targetSdk = 36
         versionCode = 74
-        versionName = "2.8.1"
+        versionName = "3.0.0-alpha.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -76,7 +75,7 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
-//            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
