@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -e
-bash patches/apply.sh
+# The presets set CMAKE_POLICY_VERSION_MINIMUM because MNN, msgpack and
+# sentencepiece still declare cmake_minimum_required below what CMake 4
+# accepts. Keeps the pinned submodules buildable as-is, with no working-tree
+# patches to carry.
 cmake --preset android-release "$@"
 cmake --build --preset android-release
 

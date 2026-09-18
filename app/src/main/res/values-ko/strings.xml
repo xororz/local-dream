@@ -271,7 +271,7 @@
     <string name="file_selected">파일을 선택했습니다</string>
     <string name="add_model">모델 추가</string>
     <string name="custom_model_hint">SD1.5 아키텍처의 .safetensors 모델 파일만 지원합니다</string>
-    <string name="custom_npu_model_hint">QNN 또는 SDXL MNN 모델 ZIP을 가져옵니다. QNN은 지원되는 Qualcomm 기기가 필요하며, MNN은 CPU/GPU에서 실행됩니다.</string>
+    <string name="custom_npu_model_hint">QNN 또는 SDXL MNN 모델 ZIP을 가져옵니다. QNN은 지원되는 Qualcomm 기기가 필요하며, MNN은 CPU/GPU에서 실행됩니다. 일부 모델은 https://huggingface.co/xororz/sd-qnn 및 https://huggingface.co/xororz/sdxl-qnn 또는 Hugging Face의 다른 곳에서 찾을 수 있습니다.</string>
     <string name="converting">변환 중…</string>
     <string name="model_conversion_success">모델 변환에 성공했습니다!</string>
     <string name="model_conversion_failed">변환 실패: %s</string>

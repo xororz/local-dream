@@ -15,7 +15,8 @@
         "ANDROID_NATIVE_API_LEVEL": "21",
         "CMAKE_SYSTEM_VERSION": "21",
         "CMAKE_ANDROID_NDK": "$env{ANDROID_NDK_ROOT}",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.10"
       },
       "toolchainFile": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake"
     },

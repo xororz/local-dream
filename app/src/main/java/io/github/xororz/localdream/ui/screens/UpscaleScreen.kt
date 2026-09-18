@@ -50,6 +50,7 @@ import io.github.xororz.localdream.data.RemoteRepository
 import io.github.xororz.localdream.data.UpscalerRepository
 import io.github.xororz.localdream.navigation.popBackStackIfResumed
 import io.github.xororz.localdream.remote.RemoteProtocol
+import io.github.xororz.localdream.service.BackendService
 import io.github.xororz.localdream.service.BackgroundGenerationService
 import io.github.xororz.localdream.service.ModelDownloadService
 import io.github.xororz.localdream.ui.components.BlockingProgressOverlay
@@ -835,11 +836,7 @@ sealed class BackendState {
 }
 
 fun prepareRuntimeDir(context: Context): File {
-    val runtimeDir = File(context.filesDir, "runtime_libs_qnn_2_50_0_260828").apply {
-        if (!exists()) {
-            mkdirs()
-        }
-    }
+    val runtimeDir = BackendService.prepareRuntimeDirRoot(context.filesDir)
 
     try {
         val qnnlibsAssets = context.assets.list("qnnlibs")

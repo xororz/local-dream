@@ -9,9 +9,6 @@ _Also supports CPU/GPU inference_
 
 </div>
 
-See [model package formats](docs/MODEL_PACKAGES.md) for SDXL MNN/QNN imports and
-long prompts, and [building from source](BUILDING.md) for native dependencies.
-
 ## About this Repo
 
 This project is **now open sourced and completely free**. Hope you enjoy it!

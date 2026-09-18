@@ -57,7 +57,9 @@ class BackendService : Service() {
     companion object {
         private const val TAG = "BackendService"
         private const val EXECUTABLE_NAME = "libstable_diffusion_core.so"
-        private const val RUNTIME_DIR = "runtime_libs_qnn_2_50_0_260828"
+        const val RUNTIME_DIR = "runtime_libs"
+        private const val RUNTIME_VERSION = "qnn_2_50_0_260828"
+        private const val RUNTIME_VERSION_FILE = ".runtime_version"
         private const val NOTIFICATION_ID = 2
         private const val CHANNEL_ID = "backend_service_channel"
 
@@ -83,6 +85,25 @@ class BackendService : Service() {
         // dir). Used by host mode so a controller's standalone upscale page
         // can run on this device's NPU.
         const val BACKEND_TYPE_UPSCALER = "upscaler"
+
+        // One reused dir, stamped with the SDK it holds. Per-file copying only
+        // refreshes libs whose size changed, so an SDK bump would otherwise
+        // leave same-size stale libs and libs the new SDK dropped behind;
+        // wiping on a stamp mismatch keeps the dir exactly one version's worth.
+        fun prepareRuntimeDirRoot(filesDir: File): File {
+            val runtimeDir = File(filesDir, RUNTIME_DIR)
+            val stamp = File(runtimeDir, RUNTIME_VERSION_FILE)
+            if (runtimeDir.exists() &&
+                runCatching { stamp.readText() }.getOrNull() != RUNTIME_VERSION
+            ) {
+                Log.i(TAG, "Runtime dir holds another SDK version, wiping")
+                runtimeDir.deleteRecursively()
+            }
+            if (!runtimeDir.exists()) runtimeDir.mkdirs()
+            runCatching { stamp.writeText(RUNTIME_VERSION) }
+                .onFailure { Log.w(TAG, "Write runtime version stamp failed", it) }
+            return runtimeDir
+        }
 
         private object StateHolder {
             val _backendState = MutableStateFlow<BackendState>(BackendState.Idle)
@@ -329,11 +350,7 @@ class BackendService : Service() {
 
     private fun prepareRuntimeDir() {
         try {
-            runtimeDir = File(filesDir, RUNTIME_DIR).apply {
-                if (!exists()) {
-                    mkdirs()
-                }
-            }
+            runtimeDir = prepareRuntimeDirRoot(filesDir)
 
             try {
                 val qnnlibsAssets = assets.list("qnnlibs")

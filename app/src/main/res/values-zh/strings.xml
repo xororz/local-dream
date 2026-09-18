@@ -271,7 +271,7 @@
     <string name="file_selected">文件已选择</string>
     <string name="add_model">添加模型</string>
     <string name="custom_model_hint">仅支持SD1.5架构的safetensors模型文件</string>
-    <string name="custom_npu_model_hint">导入 QNN 或 SDXL MNN 模型 ZIP。QNN 需要受支持的高通设备，MNN 可在 CPU/GPU 上运行。</string>
+    <string name="custom_npu_model_hint">导入 QNN 或 SDXL MNN 模型 ZIP。QNN 需要受支持的高通设备，MNN 可在 CPU/GPU 上运行。你可以在 https://huggingface.co/xororz/sd-qnn 、https://huggingface.co/xororz/sdxl-qnn 或 Hugging Face 其他地方找到一些模型。</string>
     <string name="converting">转换中…</string>
     <string name="model_conversion_success">模型转换成功！</string>
     <string name="model_conversion_failed">转换失败: %s</string>

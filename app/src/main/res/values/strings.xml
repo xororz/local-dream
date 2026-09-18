@@ -281,7 +281,7 @@
     <string name="file_selected">File Selected</string>
     <string name="add_model">Add Model</string>
     <string name="custom_model_hint">Only supports SD1.5 architecture safetensors model files</string>
-    <string name="custom_npu_model_hint">Import a QNN or SDXL MNN model ZIP. QNN requires a supported Qualcomm device. MNN runs on CPU/GPU.</string>
+    <string name="custom_npu_model_hint">Import a QNN or SDXL MNN model ZIP. QNN requires a supported Qualcomm device. MNN runs on CPU/GPU. You can find some models at https://huggingface.co/xororz/sd-qnn and https://huggingface.co/xororz/sdxl-qnn or elsewhere on Hugging Face.</string>
     <string name="converting">Converting…</string>
     <string name="model_conversion_success">Model conversion successful!</string>
     <string name="model_conversion_failed">Conversion failed: %s</string>

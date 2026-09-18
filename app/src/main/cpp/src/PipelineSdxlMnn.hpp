@@ -13,7 +13,10 @@ class PipelineSdxlMnn : public PipelineSdxl {
 
   bool initialize() override {
     std::ifstream tile_file(model_dir_ + "/vae_tile_size.txt");
-    if (tile_file.is_open()) tile_file >> tile_pixels_;
+    // A failed extraction zeroes the target since C++11, so parse into a
+    // scratch value and keep the default when the file is empty or garbage.
+    int tile_pixels = 0;
+    if (tile_file >> tile_pixels && tile_pixels > 0) tile_pixels_ = tile_pixels;
     if (!lowram_) loadClipsIfNeeded();
     return true;
   }
@@ -24,14 +27,22 @@ class PipelineSdxlMnn : public PipelineSdxl {
   int vaeTilePixelSize() const override { return tile_pixels_; }
 
   void beginDenoise(const GenerationRequest &req) override {
+    const int tokens = text_encoder_.contextLength(req.prompt, req.negative_prompt);
+    // The session is resized once at load and the model is released right
+    // after, so a live UNet can only serve the context length and backend it
+    // was built for. Everything else reuses it: beginDenoise runs once per
+    // request and twice per ultrafix pass, and a rebuild costs a multi-GB
+    // reload.
+    if (nets_[0] && mnn_unet_tokens_ == tokens && mnn_unet_opencl_ == req.use_opencl) return;
     nets_[0].reset();
     auto &net = loadStage(0, unet_path_, req);
     auto context = net.getSessionInput(sessions_[0], "encoder_hidden_states");
-    const int tokens = text_encoder_.contextLength(req.prompt, req.negative_prompt);
     net.resizeTensor(context, {1, tokens, 2048});
     net.resizeSession(sessions_[0]);
     if (req.use_opencl) net.updateCacheFile(sessions_[0]);
     net.releaseModel();
+    mnn_unet_tokens_ = tokens;
+    mnn_unet_opencl_ = req.use_opencl;
   }
 
   void runUnetStep(const GenerationRequest &, const float *latents_batch2,
@@ -140,6 +151,10 @@ class PipelineSdxlMnn : public PipelineSdxl {
   }
 
   int tile_pixels_ = 640;
+  // Only meaningful while nets_[0] is live; every reset path goes through the
+  // null check in beginDenoise.
+  int mnn_unet_tokens_ = 0;
+  bool mnn_unet_opencl_ = false;
   std::array<std::unique_ptr<MNN::Interpreter>, 3> nets_;
   std::array<MNN::Session *, 3> sessions_{};
 };

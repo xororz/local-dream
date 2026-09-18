@@ -105,6 +105,11 @@ class PipelineSdxl : public PipelineQnn {
 
     unet_->setSpillFillGroup(sf_bytes, nullptr);
     if (qnn_runtime::initializeApp("UNET", unet_) != EXIT_SUCCESS) return false;
+    // Record the context length this binary already carries: fixed-chunk
+    // packages ship one max_chunks-wide context, patched ones ship 77 and grow
+    // via .patch. Without it the first generate() on a fixed-chunk package sees
+    // a token mismatch and tears the whole group down to reload the same UNet.
+    unet_tokens_ = preloadedContextLength();
     if (sf_bytes) group_head = unet_->getContextHandle();
     logSpillFill("UNET", unet_);
 
@@ -187,19 +192,23 @@ class PipelineSdxl : public PipelineQnn {
     vae_encoder_.reset();
     vae_decoder_.reset();
     unet_.reset();
-    unet_tokens_ = tokens;
-    unet_ = qnn_runtime::createModel(unet_path_, "unet");
-    if (unet_ && !lowram_)
-      unet_->setSpillFillGroup(spillFillGroupBytes(), nullptr);
+    // Build into a local first: patching and bring-up can both throw, and a
+    // half-initialized unet_ left behind would be reused by the next request
+    // with the same token count and executed on empty graph info.
+    auto unet = qnn_runtime::createModel(unet_path_, "unet");
+    if (!unet) throw std::runtime_error("Failed create QNN UNET");
+    if (!lowram_) unet->setSpillFillGroup(spillFillGroupBytes(), nullptr);
     std::unique_ptr<qnn_runtime::PatchedModelBuffer> patched;
     if (tokens > 77 && !text_encoder_.fixed_chunks_) {
       patched = qnn_runtime::applyZstdPatchToBuffer(
           unet_path_, model_dir_ + "/" + std::to_string(tokens) + ".patch");
       if (!patched) throw std::runtime_error(unet_path_);
     }
-    if (qnn_runtime::initializeApp("UNET", unet_, patched ? patched->buffer.get() : nullptr,
+    if (qnn_runtime::initializeApp("UNET", unet, patched ? patched->buffer.get() : nullptr,
                                     patched ? patched->size : 0) != EXIT_SUCCESS)
       throw std::runtime_error("Failed init QNN UNET");
+    unet_ = std::move(unet);
+    unet_tokens_ = tokens;
     QNN_INFO("[lowram] SDXL UNET loaded");
   }
 
@@ -263,6 +272,11 @@ class PipelineSdxl : public PipelineQnn {
   }
 
  private:
+  // Context length of the unpatched unet binary on disk.
+  int preloadedContextLength() const {
+    return text_encoder_.fixed_chunks_ ? 77 * text_encoder_.max_chunks_ : 77;
+  }
+
   std::unique_ptr<QnnModel> createVaeModel(const std::string &path,
                                           const std::string &name) {
     auto model = qnn_runtime::createModel(path, name);
