@@ -88,6 +88,7 @@ inline size_t prefixBytesWithinBudget(const std::string &text, int budget,
 }
 
 struct ProcessedPrompt {
+  int eos_position = 76;
   std::vector<int> ids;                    // CLIP (pad 49407)
   std::vector<int> ids_2;                  // SDXL encoder 2 (pad 0)
   std::vector<float> weighted_embeddings;  // 77*768 (Anima: 512*1024 qwen emb)
@@ -99,6 +100,7 @@ struct ProcessedPrompt {
 };
 
 struct ProcessedPromptPair {
+  std::vector<int> eos_positions;  // Negative chunks followed by positive chunks.
   std::vector<int> ids;                      // negative + positive (2*77)
   std::vector<float> negative_embeddings;    // 77*768
   std::vector<float> positive_embeddings;    // 77*768
@@ -124,8 +126,19 @@ struct TokenizeInfo {
 // encoder 2).
 class TextEncoder {
  public:
-  explicit TextEncoder(bool sdxl, bool anima = false)
-      : sdxl_(sdxl), anima_(anima) {}
+  explicit TextEncoder(bool sdxl, bool anima = false, int max_chunks = 1,
+                       bool fixed_chunks = false)
+      : max_chunks_(max_chunks), fixed_chunks_(fixed_chunks), sdxl_(sdxl), anima_(anima), promptProcessor_(sdxl, max_chunks != 1) {}
+
+  int contextLength(const std::string &positive, const std::string &negative = "") {
+    if (anima_) return anima_text_seq_len;
+    const int content = std::max(tokenizeInfo(positive).count, tokenizeInfo(negative).count) - 2;
+    const int chunks = std::max(1, (content + 74) / 75);
+    return 77 * (fixed_chunks_ ? max_chunks_ : max_chunks_ == 0 ? chunks : std::min(chunks, max_chunks_));
+  }
+
+  int max_chunks_;
+  bool fixed_chunks_;
 
   bool isSdxl() const { return sdxl_; }
   bool isAnima() const { return anima_; }
@@ -184,104 +197,53 @@ class TextEncoder {
   }
 
   ProcessedPrompt processWeightedPrompt(const std::string &prompt_text,
-                                        int max_len = 77) {
+                                        int max_len = 77, int chunk = 0) {
     ProcessedPrompt result;
-
-    auto tokens = promptProcessor_.process(prompt_text);
-
-    const int dim1 = 768;
-    const int dim2 = text_embedding_size_2;
-
-    std::vector<float> embeddings(max_len * dim1, 0.0f);
-    std::vector<float> embeddings_2;
+    const int dim1 = text_embedding_size, dim2 = text_embedding_size_2;
+    std::vector<float> embeddings(max_len * dim1, 0.0f), embeddings_2;
     if (sdxl_) embeddings_2.assign(max_len * dim2, 0.0f);
-    std::vector<int> ids;
-    std::vector<float> weights;
-
-    int current_pos = 1;
-    ids.push_back(49406);  // BOS token
-
-    for (const auto &token : tokens) {
+    std::vector<int> ids(max_len, 49407);
+    std::vector<float> weights(max_len, 1.0f);
+    ids[0] = 49406;
+    int current_pos = 1, content_pos = 0, segment_start = 0;
+    for (const auto &token : promptProcessor_.process(prompt_text)) {
+      if ((sdxl_ || max_chunks_ != 1) && token.text == "BREAK" && !token.is_embedding) {
+        content_pos = segment_start + std::max(1, (content_pos - segment_start + 74) / 75) * 75;
+        segment_start = content_pos;
+        continue;
+      }
       if (current_pos >= max_len - 1) break;
-
-      if (token.is_embedding) {
-        int emb_tokens = 0;
-        if (!token.embedding_data.empty())
-          emb_tokens = token.embedding_data.size() / dim1;
-        else if (sdxl_ && !token.embedding_data_2.empty())
-          emb_tokens = token.embedding_data_2.size() / dim2;
-
-        for (int i = 0; i < emb_tokens && current_pos < max_len - 1; i++) {
-          ids.push_back(49407);
-          if (!token.embedding_data.empty()) {
-            for (int j = 0; j < dim1; j++) {
-              embeddings[current_pos * dim1 + j] =
-                  token.embedding_data[i * dim1 + j] * token.weight;
-            }
-          }
-          if (sdxl_ && !token.embedding_data_2.empty()) {
-            for (int j = 0; j < dim2; j++) {
-              embeddings_2[current_pos * dim2 + j] =
-                  token.embedding_data_2[i * dim2 + j] * token.weight;
-            }
-          }
-          weights.push_back(token.weight);
-          current_pos++;
+      const auto token_ids = token.is_embedding ? std::vector<int>() : tokenizer_->Encode(token.text);
+      const int count = token.is_embedding
+          ? (token.embedding_data.empty() ? token.embedding_data_2.size() / dim2
+                                          : token.embedding_data.size() / dim1)
+          : token_ids.size();
+      for (int i = 0; i < count; ++i, ++content_pos) {
+        if (content_pos < chunk * 75) continue;
+        if (content_pos >= chunk * 75 + max_len - 2) break;
+        ids[current_pos] = token.is_embedding ? 49407 : token_ids[i];
+        weights[sdxl_ ? current_pos : current_pos - 1] = token.weight;
+        if (token.is_embedding) {
+          for (int j = 0; j < dim1 && !token.embedding_data.empty(); ++j)
+            embeddings[current_pos * dim1 + j] = token.embedding_data[i * dim1 + j] * token.weight;
+          for (int j = 0; j < dim2 && sdxl_ && !token.embedding_data_2.empty(); ++j)
+            embeddings_2[current_pos * dim2 + j] = token.embedding_data_2[i * dim2 + j] * token.weight;
         }
-      } else {
-        std::vector<int> token_ids = tokenizer_->Encode(token.text);
-
-        for (int tid : token_ids) {
-          if (current_pos >= max_len - 1) break;
-          ids.push_back(tid);
-
-          if (current_pos < max_len) {
-            weights.push_back(token.weight);
-          }
-          current_pos++;
-        }
+        ++current_pos;
       }
     }
-
-    while (ids.size() < (size_t)max_len) {
-      ids.push_back(49407);  // PAD/EOS token
-      weights.push_back(1.0f);
-    }
-
-    if (ids.size() > (size_t)max_len) {
-      ids.resize(max_len);
-    }
-
     result.ids = ids;
-
-    // SDXL encoder 2 uses pad id 0 instead of 49407 after the first EOS.
+    result.eos_position = current_pos;
     if (sdxl_) {
-      std::vector<int> ids2 = ids;
-      int eos_pos = -1;
-      for (int i = 1; i < max_len; i++) {
-        if (ids2[i] == 49407) {
-          eos_pos = i;
-          break;
-        }
-      }
-      if (eos_pos >= 0) {
-        for (int i = eos_pos + 1; i < max_len; i++) ids2[i] = 0;
-      }
-      result.ids_2 = ids2;
+      result.ids_2 = ids;
+      std::fill(result.ids_2.begin() + current_pos + 1, result.ids_2.end(), 0);
     }
-
-    if (!token_emb_.empty() && !pos_emb_.empty()) {
-      applyTokenAndPosEmb(ids, weights, token_emb_, pos_emb_, dim1, max_len,
-                          embeddings);
-    }
-
-    if (sdxl_ && !token_emb_2_.empty() && !pos_emb_2_.empty()) {
-      applyTokenAndPosEmb(result.ids_2, weights, token_emb_2_, pos_emb_2_, dim2,
-                          max_len, embeddings_2);
-    }
-
-    result.weighted_embeddings = embeddings;
-    result.weighted_embeddings_2 = embeddings_2;
+    if (!token_emb_.empty() && !pos_emb_.empty())
+      applyTokenAndPosEmb(ids, weights, token_emb_, pos_emb_, dim1, max_len, embeddings);
+    if (sdxl_ && !token_emb_2_.empty() && !pos_emb_2_.empty())
+      applyTokenAndPosEmb(result.ids_2, weights, token_emb_2_, pos_emb_2_, dim2, max_len, embeddings_2);
+    result.weighted_embeddings = std::move(embeddings);
+    result.weighted_embeddings_2 = std::move(embeddings_2);
     return result;
   }
 
@@ -368,29 +330,39 @@ class TextEncoder {
                                         int max_len = 77) {
     ProcessedPromptPair result;
 
-    auto pos_result = anima_ ? processAnimaPrompt(positive, max_len)
-                             : processWeightedPrompt(positive, max_len);
-    auto neg_result = anima_ ? processAnimaPrompt(negative, max_len)
-                             : processWeightedPrompt(negative, max_len);
-
-    result.ids.reserve(2 * max_len);
-    result.ids.insert(result.ids.end(), neg_result.ids.begin(),
-                      neg_result.ids.end());
-    result.ids.insert(result.ids.end(), pos_result.ids.begin(),
-                      pos_result.ids.end());
-
-    result.negative_embeddings = neg_result.weighted_embeddings;
-    result.positive_embeddings = pos_result.weighted_embeddings;
-    result.negative_embeddings_2 = neg_result.weighted_embeddings_2;
-    result.positive_embeddings_2 = pos_result.weighted_embeddings_2;
-
-    if (anima_) {
-      result.negative_qwen_mask = std::move(neg_result.qwen_mask);
-      result.positive_qwen_mask = std::move(pos_result.qwen_mask);
-      result.negative_t5_ids = std::move(neg_result.t5_ids);
-      result.positive_t5_ids = std::move(pos_result.t5_ids);
-      result.negative_t5_mask = std::move(neg_result.t5_mask);
-      result.positive_t5_mask = std::move(pos_result.t5_mask);
+    const int chunks = anima_ ? 1 : max_len / 77;
+    result.ids.resize(2 * max_len);
+    result.eos_positions.resize(2 * chunks);
+    for (int chunk = 0; chunk < chunks; ++chunk) {
+      const int clip_len = anima_ ? max_len : 77;
+      auto pos = anima_ ? processAnimaPrompt(positive, max_len)
+                        : processWeightedPrompt(positive, clip_len, chunk);
+      auto neg = anima_ ? processAnimaPrompt(negative, max_len)
+                        : processWeightedPrompt(negative, clip_len, chunk);
+      result.eos_positions[chunk] = neg.eos_position;
+      result.eos_positions[chunks + chunk] = pos.eos_position;
+      std::copy(neg.ids.begin(), neg.ids.end(), result.ids.begin() + chunk * clip_len);
+      std::copy(pos.ids.begin(), pos.ids.end(), result.ids.begin() + max_len + chunk * clip_len);
+      result.negative_embeddings.insert(
+          result.negative_embeddings.end(), neg.weighted_embeddings.begin(),
+          neg.weighted_embeddings.end());
+      result.positive_embeddings.insert(
+          result.positive_embeddings.end(), pos.weighted_embeddings.begin(),
+          pos.weighted_embeddings.end());
+      result.negative_embeddings_2.insert(
+          result.negative_embeddings_2.end(), neg.weighted_embeddings_2.begin(),
+          neg.weighted_embeddings_2.end());
+      result.positive_embeddings_2.insert(
+          result.positive_embeddings_2.end(), pos.weighted_embeddings_2.begin(),
+          pos.weighted_embeddings_2.end());
+      if (anima_) {
+        result.negative_qwen_mask = std::move(neg.qwen_mask);
+        result.positive_qwen_mask = std::move(pos.qwen_mask);
+        result.negative_t5_ids = std::move(neg.t5_ids);
+        result.positive_t5_ids = std::move(pos.t5_ids);
+        result.negative_t5_mask = std::move(neg.t5_mask);
+        result.positive_t5_mask = std::move(pos.t5_mask);
+      }
     }
 
     return result;
@@ -439,8 +411,13 @@ class TextEncoder {
     auto tokens = promptProcessor_.process(text);
     const int dim1 = 768;
     const int dim2 = text_embedding_size_2;
-    int content = 0;
+    int content = 0, segment_start = 0;
     for (const auto &token : tokens) {
+      if ((sdxl_ || max_chunks_ != 1) && token.text == "BREAK" && !token.is_embedding) {
+        content = segment_start + std::max(1, (content - segment_start + 74) / 75) * 75;
+        segment_start = content;
+        continue;
+      }
       int tc = 0;
       if (token.is_embedding) {
         if (!token.embedding_data.empty())
@@ -465,7 +442,8 @@ class TextEncoder {
       }
       content += tc;
     }
-    info.count = content + 2;  // BOS + EOS
+    info.count = (sdxl_ || max_chunks_ != 1) ? segment_start + std::max(1, content - segment_start) + 2
+                       : content + 2;  // Include an empty trailing BREAK chunk.
     return info;
   }
 

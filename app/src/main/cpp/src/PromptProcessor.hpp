@@ -35,6 +35,7 @@ class PromptProcessor {
   std::map<std::string, std::vector<float>> embeddings_2_;  // last-dim 1280
   std::string embeddings_dir_;
   bool sdxl_mode_ = false;
+  bool chunking_ = false;
 
   static std::string toLowerCase(const std::string &str) {
     std::string result = str;
@@ -257,7 +258,8 @@ class PromptProcessor {
   }
 
  public:
-  PromptProcessor() = default;
+  explicit PromptProcessor(bool sdxl = false, bool chunking = false)
+      : sdxl_mode_(sdxl), chunking_(sdxl || chunking) {}
 
   void loadEmbeddings(const std::string &embeddings_dir, bool sdxl_mode) {
     embeddings_dir_ = embeddings_dir;
@@ -345,8 +347,39 @@ class PromptProcessor {
     TokenNode tree = parsePromptTree(prompt);
 
     flattenTree(tree, 1.0f, tokens);
+    if (!chunking_) return tokens;
 
-    return tokens;
+    // BREAK is a CLIP chunk boundary, including inside weighted groups.
+    auto isWord = [](unsigned char c) {
+      return std::isalnum(c) || c == '_' || c >= 0x80;
+    };
+    std::vector<PromptToken> chunks;
+    for (const auto &token : tokens) {
+      if (token.is_embedding) {
+        chunks.push_back(token);
+        continue;
+      }
+      size_t start = 0;
+      auto append = [&](size_t begin, size_t end) {
+        if (begin == end) return;
+        auto part = token;
+        part.text = token.text.substr(begin, end - begin);
+        part.char_src.assign(token.char_src.begin() + begin, token.char_src.begin() + end);
+        part.source_start = part.char_src.front();
+        chunks.push_back(std::move(part));
+      };
+      for (size_t pos = 0; pos + 5 <= token.text.size(); ++pos) {
+        if (token.text.compare(pos, 5, "BREAK") != 0 ||
+            (pos > 0 && isWord(token.text[pos - 1])) ||
+            (pos + 5 < token.text.size() && isWord(token.text[pos + 5]))) continue;
+        append(start, pos);
+        append(pos, pos + 5);
+        start = pos + 5;
+        pos += 4;
+      }
+      append(start, token.text.size());
+    }
+    return chunks;
   }
 
   size_t getEmbeddingCount() const { return embeddings_.size(); }

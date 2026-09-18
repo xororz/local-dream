@@ -252,7 +252,7 @@
 
     <!-- Custom Model -->
     <string name="add_custom_model">사용자 지정 모델 추가</string>
-    <string name="add_custom_npu_model">사용자 지정 NPU 모델 추가</string>
+    <string name="add_custom_npu_model">모델 ZIP 가져오기</string>
     <string name="custom_model">사용자 지정 모델</string>
     <string name="custom_model_name">모델 이름</string>
     <string name="custom_model_name_hint">모델 이름 입력</string>
@@ -271,14 +271,14 @@
     <string name="file_selected">파일을 선택했습니다</string>
     <string name="add_model">모델 추가</string>
     <string name="custom_model_hint">SD1.5 아키텍처의 .safetensors 모델 파일만 지원합니다</string>
-    <string name="custom_npu_model_hint">NPU 모델 파일이 포함된 ZIP 파일을 선택하세요. Qualcomm 기기에서만 사용할 수 있습니다. https://huggingface.co/xororz/sd-qnn, https://huggingface.co/xororz/sdxl-qnn 또는 Hugging Face의 다른 곳에서 모델을 찾을 수 있습니다.</string>
+    <string name="custom_npu_model_hint">QNN 또는 SDXL MNN 모델 ZIP을 가져옵니다. QNN은 지원되는 Qualcomm 기기가 필요하며, MNN은 CPU/GPU에서 실행됩니다.</string>
     <string name="converting">변환 중…</string>
     <string name="model_conversion_success">모델 변환에 성공했습니다!</string>
     <string name="model_conversion_failed">변환 실패: %s</string>
-    <string name="npu_model_added_success">NPU 모델을 추가했습니다!</string>
-    <string name="npu_model_add_failed">NPU 모델 추가 실패: %s</string>
+    <string name="npu_model_added_success">모델을 추가했습니다!</string>
+    <string name="npu_model_add_failed">모델 가져오기 실패: %s</string>
     <string name="preparing_model">모델 준비 중…</string>
-    <string name="preparing_npu_model">NPU 모델 준비 중…</string>
+    <string name="preparing_npu_model">모델 준비 중…</string>
     <string name="extracting_zip_file">ZIP 파일 추출 중…</string>
     <string name="copying_model_file">모델 파일 복사 중…</string>
     <string name="copying_base_files">기본 파일 복사 중…</string>

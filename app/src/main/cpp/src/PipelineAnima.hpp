@@ -170,7 +170,6 @@ class PipelineAnima : public PipelineQnn {
 
   // --- generalization hooks ---
   int latentChannels() const override { return anima_latent_channels; }
-  int textSeqLen() const override { return anima_text_seq_len; }
   int textHiddenDim() const override { return anima_text_embedding_size; }
   int textPooledDim() const override { return 0; }
   // Anima caches its 512-token Qwen context like SDXL caches its 77-token CLIP;

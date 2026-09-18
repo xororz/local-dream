@@ -3662,7 +3662,7 @@ private fun PromptCountLabel(label: String, count: Int, max: Int, showCount: Boo
         Text(label)
         if (showCount) {
             Spacer(Modifier.width(6.dp))
-            Text("$count/$max")
+            Text(if (max == 0) "$count/∞" else "$count/$max")
         }
     }
 }

@@ -835,7 +835,7 @@ sealed class BackendState {
 }
 
 fun prepareRuntimeDir(context: Context): File {
-    val runtimeDir = File(context.filesDir, "runtime_libs").apply {
+    val runtimeDir = File(context.filesDir, "runtime_libs_qnn_2_50_0_260828").apply {
         if (!exists()) {
             mkdirs()
         }

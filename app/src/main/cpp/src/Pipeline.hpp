@@ -106,6 +106,7 @@ struct Conditioning {
   std::vector<float> time_ids;  // [2, 6]
   int hidden_dim = 0;
   int pooled_dim = 0;
+  int negative_chunks = 1, positive_chunks = 1;
   int seq_len = 77;  // 77 for CLIP (SD/SDXL), 512 for Qwen/T5 (Anima)
 
   float *negHidden() { return hidden.data(); }
@@ -234,8 +235,6 @@ class Pipeline {
   float vaeScale() const { return sdxl_ ? 0.13025f : 0.18215f; }
 
   // --- text-conditioning generalization hooks ----------------------------
-  // Context sequence length fed to the UNet: CLIP = 77, Anima (T5/Qwen) = 512.
-  virtual int textSeqLen() const { return 77; }
   // encoder_hidden_states feature dim: SD = 768, SDXL = 768+1280, Anima = 1024.
   virtual int textHiddenDim() const {
     return sdxl_ ? text_embedding_size + text_embedding_size_2
@@ -351,9 +350,11 @@ inline Conditioning Pipeline::encodePrompts(const GenerationRequest &req) {
   Conditioning cond;
   cond.hidden_dim = textHiddenDim();
   cond.pooled_dim = textPooledDim();
-  cond.seq_len = textSeqLen();
+  cond.seq_len = text_encoder_.contextLength(req.prompt, req.negative_prompt);
   cond.hidden.assign((size_t)batch_size * cond.seq_len * cond.hidden_dim, 0.0f);
   if (sdxl_) {
+    cond.negative_chunks = std::min(cond.seq_len / 77, std::max(1, (text_encoder_.tokenizeInfo(req.negative_prompt).count + 72) / 75));
+    cond.positive_chunks = std::min(cond.seq_len / 77, std::max(1, (text_encoder_.tokenizeInfo(req.prompt).count + 72) / 75));
     cond.pooled.assign((size_t)batch_size * cond.pooled_dim, 0.0f);
     cond.time_ids.assign((size_t)batch_size * 6, 0.0f);
     for (int b = 0; b < batch_size; b++) {
@@ -381,7 +382,7 @@ inline Conditioning Pipeline::encodePrompts(const GenerationRequest &req) {
 
   const uint32_t cache_mode =
       isAnima() ? prompt_cache::kModeAnima
-                : (sdxl_ ? prompt_cache::kModeSdxl : prompt_cache::kModeSd15);
+                : (sdxl_ ? (text_encoder_.fixed_chunks_ ? 4 : 3) : prompt_cache::kModeSd15);
 
   bool neg_hit =
       neg_cache_eligible &&

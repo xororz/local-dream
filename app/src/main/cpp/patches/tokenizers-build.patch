@@ -1,0 +1,17 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 715f153..be23c2f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -115 +115 @@ add_custom_command(
+-  POST_BUILD COMMAND
++  COMMAND
+diff --git a/rust/src/lib.rs b/rust/src/lib.rs
+index e8c94a3..3990ebd 100644
+--- a/rust/src/lib.rs
++++ b/rust/src/lib.rs
+@@ -218 +218 @@ extern "C" fn tokenizers_get_decode_str(
+-        *out_len = (*handle).decode_str.len();
++        *out_len = (&(*handle).decode_str).len();
+@@ -251 +251 @@ extern "C" fn tokenizers_id_to_token(
+-        *out_len = (*handle).id_to_token_result.len();
++        *out_len = (&(*handle).id_to_token_result).len();

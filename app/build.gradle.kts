@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -28,6 +30,7 @@ detekt {
 android {
     namespace = "io.github.xororz.localdream"
     compileSdk = 37
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "io.github.xororz.localdream"
@@ -164,3 +167,23 @@ dependencies {
     // (the standalone ktlint plugin's no-unused-imports does not flag them).
     detektPlugins(libs.detekt.formatting)
 }
+
+// The backend is an executable launched in a separate process, packaged as
+// a .so so Android extracts it into nativeLibraryDir.
+val nativeProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
+}
+val buildNativeCore by tasks.registering(Exec::class) {
+    workingDir("src/main/cpp")
+    val cmakeBin = nativeProperties.getProperty("cmake.dir")?.let { "$it/bin:" }.orEmpty()
+    environment("PATH", "${cmakeBin}${System.getProperty("user.home")}/.cargo/bin:${System.getenv("PATH")}")
+    environment("ANDROID_NDK_ROOT", androidComponents.sdkComponents.ndkDirectory.get().asFile.absolutePath)
+    val qnnSdk = nativeProperties.getProperty("qnn.sdk.dir") ?: System.getenv("QNN_SDK_ROOT")
+    commandLine(listOf("bash", "build.sh") + listOfNotNull(qnnSdk?.let { "-DQNN_SDK_ROOT=$it" }))
+    inputs.files(fileTree("src/main/cpp") { exclude("build/**", "**/.git/**") })
+    inputs.property("qnnSdk", qnnSdk.orEmpty())
+    outputs.file("src/main/jniLibs/arm64-v8a/libstable_diffusion_core.so")
+    outputs.dir("src/main/assets/qnnlibs")
+    outputs.dir("src/main/assets/licenses/qnn-2.50.0.260828")
+}
+tasks.named("preBuild").configure { dependsOn(buildNativeCore) }
