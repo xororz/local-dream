@@ -115,7 +115,6 @@ data class Model(
     val generationSize: Int = 512,
     val approximateSize: String = "1GB",
     val isDownloaded: Boolean = false,
-    val needsUpgrade: Boolean = false,
     // Defaults written in code for this model; only the fields it cares about.
     val codeDefaults: ModelConfig = ModelConfig(),
     // Defaults read from config.json in the model directory, if present.
@@ -124,8 +123,17 @@ data class Model(
     val isCustom: Boolean = false,
     val isSdxl: Boolean = false,
     val isAnima: Boolean = false,
-
+    // DiT packages run by libdit_engine.so: "zimage" or "klein", empty otherwise.
+    val ditKind: String = "",
+    // Files that make up a package downloaded file-by-file rather than as one
+    // zip, as "<path under baseUrl>|<name on disk>" pairs. Used by the DiT
+    // packages: they are too large to unpack from an archive on device, and
+    // their parts are pulled straight from the repositories that publish them
+    // instead of being rehosted.
+    val packageFiles: List<String> = emptyList(),
 ) {
+    val isDit: Boolean get() = ditKind.isNotEmpty()
+
     // Per-field priority: code defaults > config.json > global defaults.
     val defaults: GenerationDefaults
         get() = codeDefaults.withFallback(configDefaults).resolve()
@@ -137,9 +145,15 @@ data class Model(
     val usesFixedCanvas: Boolean
         get() = isSdxl || isAnima
 
+    // Z-Image and FLUX.2-Klein are DiT models with RoPE, so the run screen uses
+    // independent width/height controls instead of a fixed canvas plus padding.
+    val supportsFreeResolution: Boolean
+        get() = isDit
+
     // Backend --type value; each type implies the full model file layout.
     val backendType: String
         get() = when {
+            isDit -> ditKind
             isAnima -> "anima"
             isSdxl -> if (runOnCpu) "sdxlmnn" else "sdxl"
             runOnCpu -> "sd15cpu"
@@ -147,16 +161,34 @@ data class Model(
         }
 
     fun startDownload(context: Context) {
-        if (isCustom || fileUri.isEmpty()) return
+        // A multi-file package carries its sources in packageFiles instead.
+        if (isCustom || (fileUri.isEmpty() && packageFiles.isEmpty())) return
 
         val intent = Intent(context, ModelDownloadService::class.java).apply {
             action = ModelDownloadService.ACTION_START_DOWNLOAD
             putExtra(ModelDownloadService.EXTRA_MODEL_ID, id)
             putExtra(ModelDownloadService.EXTRA_MODEL_NAME, name)
-            putExtra(ModelDownloadService.EXTRA_FILE_URL, "${baseUrl.removeSuffix("/")}/$fileUri")
-            putExtra(ModelDownloadService.EXTRA_IS_ZIP, fileUri.endsWith(".zip"))
-            putExtra(ModelDownloadService.EXTRA_IS_NPU, !runOnCpu)
-            putExtra(ModelDownloadService.EXTRA_MODEL_TYPE, "sd")
+            if (packageFiles.isNotEmpty()) {
+                putExtra(ModelDownloadService.EXTRA_FILE_URL, baseUrl.removeSuffix("/"))
+                putExtra(
+                    ModelDownloadService.EXTRA_MODEL_TYPE,
+                    ModelDownloadService.TYPE_MULTI_FILE,
+                )
+                putStringArrayListExtra(
+                    ModelDownloadService.EXTRA_FILE_NAMES,
+                    ArrayList(packageFiles),
+                )
+                // Written only after every file lands, so a partial download
+                // is never picked up as an installed model.
+                putExtra(ModelDownloadService.EXTRA_MARKER_FILE, markerFileName(ditKind))
+            } else {
+                putExtra(
+                    ModelDownloadService.EXTRA_FILE_URL,
+                    "${baseUrl.removeSuffix("/")}/$fileUri",
+                )
+                putExtra(ModelDownloadService.EXTRA_IS_ZIP, fileUri.endsWith(".zip"))
+                putExtra(ModelDownloadService.EXTRA_MODEL_TYPE, ModelDownloadService.TYPE_SD)
+            }
         }
 
         context.startForegroundService(intent)
@@ -232,6 +264,28 @@ data class Model(
     companion object {
         private const val MODELS_DIR = "models"
 
+        // Where each part of a DiT package comes from, and the name the
+        // native side expects on disk (see PipelineDit). The weights are
+        // pulled from the repositories that publish them rather than rehosted:
+        // the FP8 DiTs are Apache-2.0 releases from their authors, and the
+        // Qwen3-4B text encoder and VAE come from the upstream Adreno packages
+        // already converted to the formats stable-diffusion.cpp reads.
+        val ZIMAGE_PACKAGE_FILES = listOf(
+            "Kijai/Z-Image_comfy_fp8_scaled/resolve/main/" +
+                "z-image-turbo_fp8_scaled_e4m3fn_KJ.safetensors|dit.safetensors",
+            "zhiyuanasad/z_image_turbo_adreno/resolve/main/llm.gguf|llm.gguf",
+            "zhiyuanasad/z_image_turbo_adreno/resolve/main/vae.safetensors|vae.safetensors",
+            "Tongyi-MAI/Z-Image-Turbo/resolve/main/tokenizer/tokenizer.json|tokenizer.json",
+        )
+
+        val KLEIN_PACKAGE_FILES = listOf(
+            "black-forest-labs/FLUX.2-klein-4b-fp8/resolve/main/" +
+                "flux-2-klein-4b-fp8.safetensors|dit.safetensors",
+            "zhiyuanasad/flux2_klein_adreno/resolve/main/llm.gguf|llm.gguf",
+            "zhiyuanasad/flux2_klein_adreno/resolve/main/vae.safetensors|vae.safetensors",
+            "Qwen/Qwen3-4B/resolve/main/tokenizer.json|tokenizer.json",
+        )
+
         fun isDeviceSupported(): Boolean {
             val soc = getDeviceSoc()
             return getChipsetSuffix(soc) != null
@@ -274,6 +328,28 @@ data class Model(
             return files != null && files.isNotEmpty()
         }
 
+        fun isDitPackageDownloaded(
+            context: Context,
+            modelId: String,
+            ditKind: String,
+            packageFiles: List<String>,
+        ): Boolean {
+            val modelDir = File(getModelsDir(context), modelId)
+            val marker = markerFileName(ditKind)
+            if (marker.isEmpty() || !File(modelDir, marker).isFile) return false
+            return packageFiles.all { entry ->
+                val remote = entry.substringBefore('|')
+                val local = entry.substringAfter('|', remote.substringAfterLast('/'))
+                File(modelDir, local).let { it.isFile && it.length() > 0L }
+            }
+        }
+
+        private fun markerFileName(ditKind: String): String = when (ditKind) {
+            "zimage" -> "ZIMAGE"
+            "klein" -> "KLEIN"
+            else -> ""
+        }
+
         // Upscalers store a single raw weight file; existence must match what
         // performUpscale() actually loads, not just a non-empty directory.
         const val UPSCALER_FILE_NAME = "upscaler.bin"
@@ -281,16 +357,6 @@ data class Model(
         fun isUpscalerDownloaded(context: Context, upscalerId: String): Boolean {
             val file = File(File(getModelsDir(context), upscalerId), UPSCALER_FILE_NAME)
             return file.exists() && file.length() > 0
-        }
-
-        fun needsModelUpgrade(context: Context, modelId: String, isNpu: Boolean): Boolean {
-            if (!isNpu) return false
-
-            val modelDir = File(getModelsDir(context), modelId)
-            if (!modelDir.exists()) return false
-
-            val vFile = File(modelDir, "v3")
-            return !vFile.exists()
         }
     }
 }
@@ -311,7 +377,6 @@ data class UpscalerModel(
             putExtra(ModelDownloadService.EXTRA_MODEL_NAME, name)
             putExtra(ModelDownloadService.EXTRA_FILE_URL, "${baseUrl.removeSuffix("/")}/$fileUri")
             putExtra(ModelDownloadService.EXTRA_IS_ZIP, false)
-            putExtra(ModelDownloadService.EXTRA_IS_NPU, false)
             putExtra(ModelDownloadService.EXTRA_MODEL_TYPE, "upscaler")
         }
 
@@ -462,8 +527,16 @@ class ModelRepository private constructor(private val context: Context) {
                 val npuCustomFile = File(dir, "npucustom")
                 val sdxlFile = File(dir, "SDXL")
                 val animaFile = File(dir, "ANIMA")
+                val zImageFile = File(dir, "ZIMAGE")
+                val kleinFile = File(dir, "KLEIN")
 
                 when {
+                    zImageFile.exists() && DitEngine.isSupportedDevice() ->
+                        customModels.add(createCustomModel(dir, isNpu = true, ditKind = "zimage"))
+
+                    kleinFile.exists() && DitEngine.isSupportedDevice() ->
+                        customModels.add(createCustomModel(dir, isNpu = true, ditKind = "klein"))
+
                     animaFile.exists() ->
                         customModels.add(createCustomModel(dir, isNpu = true, isAnima = true))
 
@@ -482,7 +555,13 @@ class ModelRepository private constructor(private val context: Context) {
         return customModels.sortedBy { it.name.lowercase() }
     }
 
-    private fun createCustomModel(modelDir: File, isNpu: Boolean = false, isSdxl: Boolean = false, isAnima: Boolean = false): Model {
+    private fun createCustomModel(
+        modelDir: File,
+        isNpu: Boolean = false,
+        isSdxl: Boolean = false,
+        isAnima: Boolean = false,
+        ditKind: String = "",
+    ): Model {
         val modelId = modelDir.name
         // Imported models have no code-level defaults: config.json (if
         // bundled in the zip) wins, the generic placeholder prompts below
@@ -506,6 +585,7 @@ class ModelRepository private constructor(private val context: Context) {
             isCustom = true,
             isSdxl = isSdxl,
             isAnima = isAnima,
+            ditKind = ditKind,
         )
     }
 
@@ -513,6 +593,10 @@ class ModelRepository private constructor(private val context: Context) {
         val customModels = scanCustomModels()
 
         val predefinedModels = mutableListOf<Model>().apply {
+            if (DitEngine.isSupportedDevice()) {
+                add(createZImageTurboModel())
+                add(createFlux2KleinModel())
+            }
             if (isSdxlCapableSoc(getDeviceSoc())) {
                 add(createIllustriousV16Model())
                 add(createIllustriousV16Dmd2Model())
@@ -540,6 +624,64 @@ class ModelRepository private constructor(private val context: Context) {
     private fun applyConfigDefaults(model: Model): Model {
         val config = ModelConfig.read(File(Model.getModelsDir(context), model.id)) ?: return model
         return model.copy(configDefaults = config.withFallback(model.configDefaults))
+    }
+
+    // Z-Image Turbo and FLUX.2/Klein: FP8 DiT plus a shared Qwen3-4B text
+    // encoder, fetched file-by-file because the packages are 7-9GB.
+    private fun createZImageTurboModel(): Model {
+        val id = "z_image_turbo"
+        return Model(
+            id = id,
+            name = "Z-Image Turbo",
+            description = context.getString(R.string.z_image_turbo_description),
+            baseUrl = baseUrl,
+            packageFiles = Model.ZIMAGE_PACKAGE_FILES,
+            generationSize = 1024,
+            approximateSize = "8.8GB",
+            isDownloaded = Model.isDitPackageDownloaded(
+                context,
+                id,
+                "zimage",
+                Model.ZIMAGE_PACKAGE_FILES,
+            ),
+            codeDefaults = ModelConfig(
+                prompt = "a lovely cat wearing black sunglasses, studio photo,",
+                negativePrompt = "",
+                steps = 8f,
+                cfg = 1f,
+                scheduler = "euler",
+            ),
+            runOnCpu = false,
+            ditKind = "zimage",
+        )
+    }
+
+    private fun createFlux2KleinModel(): Model {
+        val id = "flux2_klein_4b"
+        return Model(
+            id = id,
+            name = "FLUX.2 Klein 4B",
+            description = context.getString(R.string.flux2_klein_description),
+            baseUrl = baseUrl,
+            packageFiles = Model.KLEIN_PACKAGE_FILES,
+            generationSize = 1024,
+            approximateSize = "6.7GB",
+            isDownloaded = Model.isDitPackageDownloaded(
+                context,
+                id,
+                "klein",
+                Model.KLEIN_PACKAGE_FILES,
+            ),
+            codeDefaults = ModelConfig(
+                prompt = "a lovely cat wearing black sunglasses, studio photo,",
+                negativePrompt = "",
+                steps = 4f,
+                cfg = 1f,
+                scheduler = "euler",
+            ),
+            runOnCpu = false,
+            ditKind = "klein",
+        )
     }
 
     private fun isSdxlCapableSoc(soc: String): Boolean = soc in setOf("SM8750", "SM8750P", "SM8850", "SM8850P", "SM8845", "SM8650")
@@ -649,8 +791,6 @@ class ModelRepository private constructor(private val context: Context) {
         val fileUri = "xororz/sd-qnn/resolve/main/AnythingV5_qnn2.28_$suffix.zip"
 
         val isDownloaded = Model.isModelDownloaded(context, id, false)
-        val needsUpgrade = Model.needsModelUpgrade(context, id, true)
-
         return Model(
             id = id,
             name = "Anything V5.0",
@@ -659,7 +799,6 @@ class ModelRepository private constructor(private val context: Context) {
             fileUri = fileUri,
             approximateSize = "1.1GB",
             isDownloaded = isDownloaded,
-            needsUpgrade = needsUpgrade,
             codeDefaults = ModelConfig(
                 prompt = "masterpiece, best quality, 1girl, solo, cute, white hair,",
                 negativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
@@ -696,8 +835,6 @@ class ModelRepository private constructor(private val context: Context) {
         val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val fileUri = "xororz/sd-qnn/resolve/main/QteaMix_qnn2.28_$suffix.zip"
         val isDownloaded = Model.isModelDownloaded(context, id, false)
-        val needsUpgrade = Model.needsModelUpgrade(context, id, true)
-
         return Model(
             id = id,
             name = "QteaMix",
@@ -706,7 +843,6 @@ class ModelRepository private constructor(private val context: Context) {
             fileUri = fileUri,
             approximateSize = "1.1GB",
             isDownloaded = isDownloaded,
-            needsUpgrade = needsUpgrade,
             codeDefaults = ModelConfig(
                 prompt = "chibi, best quality, 1girl, solo, cute, pink hair,",
                 negativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
@@ -741,8 +877,6 @@ class ModelRepository private constructor(private val context: Context) {
         val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val fileUri = "xororz/sd-qnn/resolve/main/CuteYukiMix_qnn2.28_$suffix.zip"
         val isDownloaded = Model.isModelDownloaded(context, id, false)
-        val needsUpgrade = Model.needsModelUpgrade(context, id, true)
-
         return Model(
             id = id,
             name = "CuteYukiMix",
@@ -751,7 +885,6 @@ class ModelRepository private constructor(private val context: Context) {
             fileUri = fileUri,
             approximateSize = "1.1GB",
             isDownloaded = isDownloaded,
-            needsUpgrade = needsUpgrade,
             codeDefaults = ModelConfig(
                 prompt = "masterpiece, best quality, 1girl, solo, cute, white hair,",
                 negativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
@@ -786,8 +919,6 @@ class ModelRepository private constructor(private val context: Context) {
         val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val fileUri = "xororz/sd-qnn/resolve/main/AbsoluteReality_qnn2.28_$suffix.zip"
         val isDownloaded = Model.isModelDownloaded(context, id, false)
-        val needsUpgrade = Model.needsModelUpgrade(context, id, true)
-
         return Model(
             id = id,
             name = "Absolute Reality",
@@ -796,7 +927,6 @@ class ModelRepository private constructor(private val context: Context) {
             fileUri = fileUri,
             approximateSize = "1.1GB",
             isDownloaded = isDownloaded,
-            needsUpgrade = needsUpgrade,
             codeDefaults = ModelConfig(
                 prompt = "masterpiece, best quality, ultra-detailed, realistic, 8k, a cat on grass,",
                 negativePrompt = "worst quality, low quality, normal quality, poorly drawn, lowres, low resolution, signature, watermarks, ugly, out of focus, error, blurry, unclear photo, bad photo, unrealistic, semi realistic, pixelated, cartoon, anime, cgi, drawing, 2d, 3d, censored, duplicate,",
@@ -832,8 +962,6 @@ class ModelRepository private constructor(private val context: Context) {
         val suffix = Model.getChipsetSuffix(soc) ?: "min"
         val fileUri = "xororz/sd-qnn/resolve/main/ChilloutMix_qnn2.28_$suffix.zip"
         val isDownloaded = Model.isModelDownloaded(context, id, false)
-        val needsUpgrade = Model.needsModelUpgrade(context, id, true)
-
         return Model(
             id = id,
             name = "ChilloutMix",
@@ -842,7 +970,6 @@ class ModelRepository private constructor(private val context: Context) {
             fileUri = fileUri,
             approximateSize = "1.1GB",
             isDownloaded = isDownloaded,
-            needsUpgrade = needsUpgrade,
             codeDefaults = ModelConfig(
                 prompt = "RAW photo, best quality, realistic, photo-realistic, masterpiece, 1girl, upper body, facing front, portrait, white shirt",
                 negativePrompt = "paintings, cartoon, anime, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, skin spots, acnes, skin blemishes",
@@ -878,18 +1005,18 @@ class ModelRepository private constructor(private val context: Context) {
             models = withContext(Dispatchers.IO) {
                 current.map { model ->
                     if (model.id == modelId) {
-                        val isDownloaded =
-                            Model.isModelDownloaded(context, modelId, model.isCustom)
-                        val needsUpgrade = if (!model.runOnCpu) {
-                            Model.needsModelUpgrade(context, modelId, true)
+                        val isDownloaded = if (model.isDit) {
+                            Model.isDitPackageDownloaded(
+                                context,
+                                modelId,
+                                model.ditKind,
+                                model.packageFiles,
+                            )
                         } else {
-                            false
+                            Model.isModelDownloaded(context, modelId, model.isCustom)
                         }
                         applyConfigDefaults(
-                            model.copy(
-                                isDownloaded = isDownloaded,
-                                needsUpgrade = needsUpgrade,
-                            ),
+                            model.copy(isDownloaded = isDownloaded),
                         )
                     } else {
                         model
@@ -921,6 +1048,8 @@ class ModelRepository private constructor(private val context: Context) {
             // SD 1.5 CPU
             "anythingv5cpu", "qteamixcpu", "cuteyukimixcpu",
             "absoluterealitycpu", "chilloutmixcpu",
+            // DiT
+            "z_image_turbo", "flux2_klein_4b",
         )
 
         fun isReservedModelId(id: String): Boolean = id in RESERVED_MODEL_IDS

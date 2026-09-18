@@ -176,6 +176,8 @@
     <string name="generation_params">生成参数</string>
     <string name="steps">生成步数: %d</string>
     <string name="image_size">图像尺寸: %1$dx%2$d</string>
+    <string name="width">宽</string>
+    <string name="height">高</string>
     <string name="random_seed">随机种子 (可选)</string>
     <string name="use_last_seed">使用上次的种子 (%s)</string>
     <string name="batch_count">批次数量: %d</string>
@@ -340,9 +342,6 @@
     <string name="downloading_model">正在下载 %s</string>
     <string name="download_complete">下载完成</string>
     <string name="download_failed">下载失败</string>
-    <string name="update">更新</string>
-    <string name="upgrade_model">升级模型</string>
-    <string name="upgrade_model_hint">%s 有新版本可用，是否要升级？</string>
     <string name="download_background_hint">下载将在后台继续进行，您可以切换到其他应用</string>
     <string name="switch_resolution">切换分辨率</string>
     <string name="switch_resolution_hint">切换分辨率将重启后端服务，当前生成会被中断。是否继续？</string>
@@ -430,6 +429,9 @@
     <string name="save_failed_detail">保存失败: %s</string>
     <string name="img2img_failed_detail">img2img 失败: %s</string>
     <string name="failed_to_start_backend">启动后端失败: %s</string>
+    <string name="dit_engine_missing">DiT 引擎未安装</string>
+    <string name="z_image_turbo_description">6B DiT，8 步。</string>
+    <string name="flux2_klein_description">4B DiT，4 步。</string>
     <string name="executable_not_found">未找到可执行文件: %s</string>
     <string name="cannot_open_file">无法打开所选文件</string>
     <string name="only_qualcomm_npu">仅高通设备支持自定义 NPU 模型</string>

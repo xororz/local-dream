@@ -185,6 +185,8 @@
     <string name="generation_params">Generation Params</string>
     <string name="steps">Steps: %d</string>
     <string name="image_size">Image Size: %1$dx%2$d</string>
+    <string name="width">Width</string>
+    <string name="height">Height</string>
     <string name="random_seed">Random Seed (Optional)</string>
     <string name="use_last_seed">Use Last Seed (%s)</string>
     <string name="batch_count">Batch Count: %d</string>
@@ -350,9 +352,6 @@
     <string name="downloading_model">Downloading %s</string>
     <string name="download_complete">Download complete</string>
     <string name="download_failed">Download failed</string>
-    <string name="update">Update</string>
-    <string name="upgrade_model">Upgrade Model</string>
-    <string name="upgrade_model_hint">A new version of %s is available. Do you want to upgrade?</string>
     <string name="download_background_hint">Download continues in the background. You can switch to other apps.</string>
     <string name="switch_resolution">Switch Resolution</string>
     <string name="switch_resolution_hint">Switching resolution will restart the backend service and interrupt current generation. Continue?</string>
@@ -440,6 +439,9 @@
     <string name="save_failed_detail">Save failed: %s</string>
     <string name="img2img_failed_detail">img2img failed: %s</string>
     <string name="failed_to_start_backend">Failed to start backend: %s</string>
+    <string name="dit_engine_missing">DiT engine not installed</string>
+    <string name="z_image_turbo_description">6B DiT, 8 steps.</string>
+    <string name="flux2_klein_description">4B DiT, 4 steps.</string>
     <string name="executable_not_found">Executable not found: %s</string>
     <string name="cannot_open_file">Cannot open the selected file</string>
     <string name="only_qualcomm_npu">Only Qualcomm devices support custom NPU models</string>

@@ -53,6 +53,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun AdvancedSettingsDialog(
     isSdxl: Boolean,
+    isDit: Boolean = false,
     runOnCpu: Boolean,
     useImg2img: Boolean,
     isRunning: Boolean,
@@ -71,6 +72,8 @@ internal fun AdvancedSettingsDialog(
     onAspectRatioSelected: (String) -> Unit,
     onCustomAspectRatioClick: () -> Unit,
     onResolutionSelected: (Resolution) -> Unit,
+    onDitWidthChange: (Float) -> Unit = {},
+    onDitHeightChange: (Float) -> Unit = {},
     onSchedulerChange: (String) -> Unit,
     onStepsChange: (Float) -> Unit,
     onCfgChange: (Float) -> Unit,
@@ -119,8 +122,9 @@ internal fun AdvancedSettingsDialog(
                     .verticalScroll(rememberScrollState())
                     .padding(vertical = 4.dp),
             ) {
-                // Aspect ratio needs the VAE encoder (inpaint-based padding),
-                // which --no_img2img does not load.
+                // On SDXL the aspect ratio is inpaint-based padding, so it
+                // needs the VAE encoder that --no_img2img skips. DiT models get
+                // width and height directly instead.
                 if (isSdxl && useImg2img) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
@@ -171,7 +175,41 @@ internal fun AdvancedSettingsDialog(
                         }
                     }
                 }
-                if (!runOnCpu && !isSdxl && availableResolutions.isNotEmpty()) {
+                if (isDit) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            stringResource(R.string.image_size, currentWidth, currentHeight),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            stringResource(R.string.width),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = currentWidth.toFloat(),
+                            onValueChange = onDitWidthChange,
+                            valueRange = DIT_MIN_SIZE.toFloat()..DIT_MAX_SIZE.toFloat(),
+                            steps = DIT_SIZE_STEPS,
+                            enabled = !isRunning,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            stringResource(R.string.height),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = currentHeight.toFloat(),
+                            onValueChange = onDitHeightChange,
+                            valueRange = DIT_MIN_SIZE.toFloat()..DIT_MAX_SIZE.toFloat(),
+                            steps = DIT_SIZE_STEPS,
+                            enabled = !isRunning,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                if (!runOnCpu && !isSdxl && !isDit && availableResolutions.isNotEmpty()) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             stringResource(R.string.resolution),

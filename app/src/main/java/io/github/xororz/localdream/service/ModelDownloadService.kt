@@ -13,6 +13,7 @@ import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.utils.Http
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.cancellation.CancellationException
@@ -54,8 +55,21 @@ class ModelDownloadService : Service() {
         const val EXTRA_MODEL_NAME = "model_name"
         const val EXTRA_FILE_URL = "file_url"
         const val EXTRA_IS_ZIP = "is_zip"
-        const val EXTRA_IS_NPU = "is_npu"
-        const val EXTRA_MODEL_TYPE = "model_type" // "sd" or "upscaler"
+        const val EXTRA_MODEL_TYPE = "model_type"
+        const val TYPE_SD = "sd"
+        const val TYPE_UPSCALER = "upscaler"
+
+        // Package downloaded as individual files instead of one zip. A DiT
+        // package is 7-9GB, and unzipping one needs the archive and its
+        // contents on disk at the same time; fetching the files straight into
+        // the model directory halves the space a download needs and lets an
+        // interrupted one resume at file granularity.
+        const val TYPE_MULTI_FILE = "multi_file"
+
+        // TYPE_MULTI_FILE only: file names under EXTRA_FILE_URL, and an empty
+        // marker file to create once they all arrived.
+        const val EXTRA_FILE_NAMES = "file_names"
+        const val EXTRA_MARKER_FILE = "marker_file"
     }
 
     sealed class DownloadState {
@@ -84,11 +98,20 @@ class ModelDownloadService : Service() {
                 val modelName = intent.getStringExtra(EXTRA_MODEL_NAME) ?: modelId
                 val fileUrl = intent.getStringExtra(EXTRA_FILE_URL) ?: return START_NOT_STICKY
                 val isZip = intent.getBooleanExtra(EXTRA_IS_ZIP, false)
-                val isNpu = intent.getBooleanExtra(EXTRA_IS_NPU, false)
-                val modelType = intent.getStringExtra(EXTRA_MODEL_TYPE) ?: "sd"
+                val modelType = intent.getStringExtra(EXTRA_MODEL_TYPE) ?: TYPE_SD
+                val fileNames = intent.getStringArrayListExtra(EXTRA_FILE_NAMES)
+                val markerFile = intent.getStringExtra(EXTRA_MARKER_FILE)
 
                 startForeground(NOTIFICATION_ID, createNotification(modelName, 0f))
-                startDownload(modelId, modelName, fileUrl, isZip, isNpu, modelType)
+                startDownload(
+                    modelId = modelId,
+                    modelName = modelName,
+                    fileUrl = fileUrl,
+                    isZip = isZip,
+                    modelType = modelType,
+                    fileNames = fileNames.orEmpty(),
+                    markerFile = markerFile,
+                )
             }
 
             ACTION_CANCEL_DOWNLOAD -> {
@@ -103,8 +126,9 @@ class ModelDownloadService : Service() {
         modelName: String,
         fileUrl: String,
         isZip: Boolean,
-        isNpu: Boolean,
         modelType: String,
+        fileNames: List<String> = emptyList(),
+        markerFile: String? = null,
     ) {
         downloadJob?.cancel()
         downloadJob = serviceScope.launch {
@@ -120,12 +144,25 @@ class ModelDownloadService : Service() {
                 }
                 tempDir.mkdirs()
 
+                if (modelType == TYPE_MULTI_FILE) {
+                    downloadPackageFiles(modelId, modelName, fileUrl, fileNames, markerFile)
+                    _downloadState.value = DownloadState.Success(modelId)
+                    updateNotification(modelName, 100f, true)
+                    withContext(Dispatchers.Main) {
+                        kotlinx.coroutines.delay(2000)
+                        _downloadState.value = DownloadState.Idle
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                    }
+                    return@launch
+                }
+
                 tempFile = File(tempDir, "${modelId}_${System.currentTimeMillis()}.tmp")
 
                 downloadFile(fileUrl, tempFile, modelId, modelName)
 
                 when (modelType) {
-                    "sd" -> {
+                    TYPE_SD -> {
                         if (isZip) {
                             val modelDir = File(getModelsDir(), modelId)
 
@@ -147,14 +184,10 @@ class ModelDownloadService : Service() {
                             }
                             extractTempDir.delete()
                             extractTempDir = null
-
-                            if (isNpu) {
-                                File(modelDir, "v3").createNewFile()
-                            }
                         }
                     }
 
-                    "upscaler" -> {
+                    TYPE_UPSCALER -> {
                         val upscalerDir = File(getModelsDir(), modelId).apply {
                             if (!exists()) mkdirs()
                         }
@@ -211,7 +244,87 @@ class ModelDownloadService : Service() {
         }
     }
 
-    private suspend fun downloadFile(url: String, destFile: File, modelId: String, modelName: String) = withContext(Dispatchers.IO) {
+    /**
+     * Fetches each file of a package straight into the model directory.
+     *
+     * A file that is already there at its published size is kept, so a
+     * download interrupted after 6 of 8GB resumes on the next attempt instead
+     * of starting over. Progress is reported across the whole package, using
+     * the sizes a HEAD request reports up front.
+     */
+    private suspend fun downloadPackageFiles(
+        modelId: String,
+        modelName: String,
+        baseUrl: String,
+        fileNames: List<String>,
+        markerFile: String?,
+    ) = withContext(Dispatchers.IO) {
+        require(fileNames.isNotEmpty()) { "empty package file list" }
+        val modelDir = File(getModelsDir(), modelId).apply { mkdirs() }
+        val base = baseUrl.removeSuffix("/")
+
+        // Entries are "<remote path>|<name on disk>": the parts of a package
+        // can come from different repositories, and the names they are
+        // published under are not the ones the backend looks for.
+        val parts = fileNames.map { entry ->
+            val remote = entry.substringBefore('|')
+            val local = entry.substringAfter('|', remote.substringAfterLast('/'))
+            remote to local
+        }
+
+        val sizes = parts.associate { (remote, _) -> remote to remoteSize("$base/$remote") }
+        val totalBytes = sizes.values.sumOf { it.coerceAtLeast(0L) }
+        var completedBytes = 0L
+
+        for ((remote, local) in parts) {
+            val dest = File(modelDir, local)
+            val expected = sizes[remote] ?: -1L
+            if (dest.exists() && expected > 0 && dest.length() == expected) {
+                completedBytes += expected
+                Log.i(TAG, "Package file already complete: $local")
+                continue
+            }
+            val part = File(modelDir, "$local.part")
+            downloadFile(
+                url = "$base/$remote",
+                destFile = part,
+                modelId = modelId,
+                modelName = modelName,
+                packageOffset = completedBytes,
+                packageTotal = totalBytes,
+            )
+            if (dest.exists()) dest.delete()
+            if (!part.renameTo(dest)) throw IOException("Failed to install $local")
+            completedBytes += if (expected > 0) expected else dest.length()
+        }
+
+        // Written last: it is what marks the package complete to the scanner,
+        // so an interrupted download never looks like an installed model.
+        if (!markerFile.isNullOrEmpty()) File(modelDir, markerFile).createNewFile()
+    }
+
+    /** Published size of a remote file, or -1 when the server does not say. */
+    private fun remoteSize(url: String): Long {
+        val request = Request.Builder().url(url).head().build()
+        return runCatching {
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    response.header("Content-Length")?.toLongOrNull() ?: -1L
+                } else {
+                    -1L
+                }
+            }
+        }.getOrDefault(-1L)
+    }
+
+    private suspend fun downloadFile(
+        url: String,
+        destFile: File,
+        modelId: String,
+        modelName: String,
+        packageOffset: Long = 0L,
+        packageTotal: Long = 0L,
+    ) = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(url)
             .build()
@@ -238,8 +351,10 @@ class ModelDownloadService : Service() {
                         val currentTime = System.currentTimeMillis()
                         if (currentTime - lastUpdateTime >= 500 || downloadedBytes == totalBytes) {
                             lastUpdateTime = currentTime
-                            val progress = if (totalBytes > 0) {
-                                downloadedBytes.toFloat() / totalBytes
+                            val reportedDone = packageOffset + downloadedBytes
+                            val reportedTotal = if (packageTotal > 0) packageTotal else totalBytes
+                            val progress = if (reportedTotal > 0) {
+                                reportedDone.toFloat() / reportedTotal
                             } else {
                                 0f
                             }
@@ -247,8 +362,8 @@ class ModelDownloadService : Service() {
                             _downloadState.value = DownloadState.Downloading(
                                 modelId,
                                 progress,
-                                downloadedBytes,
-                                totalBytes,
+                                reportedDone,
+                                reportedTotal,
                             )
 
                             updateNotification(modelName, progress)

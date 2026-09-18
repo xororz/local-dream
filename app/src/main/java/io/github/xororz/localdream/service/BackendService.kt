@@ -7,6 +7,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.github.xororz.localdream.BuildConfig
 import io.github.xororz.localdream.R
+import io.github.xororz.localdream.data.DitEngine
+import io.github.xororz.localdream.data.DitResolution
 import io.github.xororz.localdream.data.Model
 import java.io.File
 import java.io.IOException
@@ -85,6 +87,10 @@ class BackendService : Service() {
         // dir). Used by host mode so a controller's standalone upscale page
         // can run on this device's NPU.
         const val BACKEND_TYPE_UPSCALER = "upscaler"
+
+        // --type values served by the downloadable DiT engine.
+        fun isDitBackend(backendType: String): Boolean = backendType == "zimage" ||
+            backendType == "klein"
 
         // One reused dir, stamped with the SDK it holds. Per-file copying only
         // refreshes libs whose size changed, so an SDK bump would otherwise
@@ -209,8 +215,16 @@ class BackendService : Service() {
         // Backend type is decided by the caller (it already has the Model);
         // re-deriving it here would require a full model-directory scan.
         val backendType = intent.getStringExtra("backendType") ?: return null
-        val width = intent.getIntExtra("width", 512)
-        val height = intent.getIntExtra("height", 512)
+        val requestedWidth = intent.getIntExtra("width", 512)
+        val requestedHeight = intent.getIntExtra("height", 512)
+        val width = if (isDitBackend(backendType)) DitResolution.snap(requestedWidth) else requestedWidth
+        val height = if (isDitBackend(backendType)) DitResolution.snap(requestedHeight) else requestedHeight
+        if (width != requestedWidth || height != requestedHeight) {
+            Log.w(
+                TAG,
+                "unsupported DiT resolution ${requestedWidth}x$requestedHeight; using ${width}x$height",
+            )
+        }
         // Host mode is read from RemoteHostService's in-process state, not a
         // persisted flag: a crash can never leave a stale "expose the port"
         // bit behind, and a config-equality check below forces a restart when
@@ -378,6 +392,25 @@ class BackendService : Service() {
                     targetLib.setExecutable(true, true)
                 }
                 Log.i(TAG, "QNN libraries prepared in runtime directory")
+
+                // The DiT engine's Hexagon skels share this directory: it is
+                // already on the DSP search path, and they are only useful on
+                // the devices whose HTP version the engine covers.
+                if (DitEngine.isSupportedDevice()) {
+                    assets.list("ditlibs")?.forEach { fileName ->
+                        val target = File(runtimeDir, fileName)
+                        val assetSize =
+                            assets.open("ditlibs/$fileName").use { it.available().toLong() }
+                        if (!target.exists() || target.length() != assetSize) {
+                            assets.open("ditlibs/$fileName").use { input ->
+                                target.outputStream().use { output -> input.copyTo(output) }
+                            }
+                            Log.d(TAG, "Copied $fileName from assets to runtime directory")
+                        }
+                        target.setReadable(true, true)
+                        target.setExecutable(true, true)
+                    }
+                }
             } catch (e: IOException) {
                 Log.e(TAG, "Failed to prepare QNN libraries from assets", e)
                 throw RuntimeException("Failed to prepare QNN libraries from assets", e)
@@ -475,7 +508,19 @@ class BackendService : Service() {
                     "8081",
                 )
             }
-            if (backendType != "sd15cpu" && backendType != "sdxlmnn" && backendType != BACKEND_TYPE_UPSCALER) {
+            // DiT types load libdit_engine.so and its FastRPC skel from the
+            // native library directory they ship in, not the QNN runtime dir.
+            val ditEngineDir = if (isDitBackend(backendType)) DitEngine.dir(this) else null
+            if (ditEngineDir != null) {
+                if (!DitEngine.isInstalled(this)) {
+                    Log.e(TAG, "DiT engine missing at $ditEngineDir")
+                    updateState(BackendState.Error(getString(R.string.dit_engine_missing)))
+                    return false
+                }
+                command += listOf("--lib_dir", ditEngineDir.absolutePath)
+            } else if (backendType != "sd15cpu" && backendType != "sdxlmnn" &&
+                backendType != BACKEND_TYPE_UPSCALER
+            ) {
                 command += listOf("--lib_dir", runtimeDir.absolutePath)
             }
             if (!useImg2img && backendType != BACKEND_TYPE_UPSCALER) {
@@ -565,6 +610,26 @@ class BackendService : Service() {
             val systemLibPathsStr = systemLibPaths.joinToString(":")
             env["LD_LIBRARY_PATH"] = systemLibPathsStr
             env["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
+            if (ditEngineDir != null) {
+                // ggml-hexagon asks FastRPC for its skel by bare name, so both
+                // the runtime directory holding the skels and the platform
+                // defaults have to be on the DSP search path; dropping the
+                // defaults would leave the skel unable to resolve the libraries
+                // it links against.
+                val dspPath = listOf(
+                    runtimeDir.absolutePath,
+                    "/vendor/lib/rfsa/adsp",
+                    "/vendor/dsp/cdsp",
+                    "/dsp",
+                ).joinToString(";")
+                env["ADSP_LIBRARY_PATH"] = dspPath
+                env["DSP_LIBRARY_PATH"] = dspPath
+                // The engine detects the HTP version over FastRPC itself, so
+                // GGML_HEXAGON_ARCH stays unset: pinning it here would have to
+                // be revisited for every new part, and an override that
+                // disagrees with the hardware loads the wrong skel.
+                Log.i(TAG, "DiT engine: ADSP_LIBRARY_PATH=$dspPath")
+            }
 
             Log.d(TAG, "COMMAND: ${command.joinToString(" ")}")
             Log.d(TAG, "DIR: $runtimeDir")

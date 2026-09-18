@@ -12,6 +12,7 @@
 #include "MnnUtils.hpp"
 #include "Pipeline.hpp"
 #include "PipelineAnima.hpp"
+#include "PipelineDit.hpp"
 #include "PipelineSd15Cpu.hpp"
 #include "PipelineSd15Npu.hpp"
 #include "PipelineSdxlMnn.hpp"
@@ -49,7 +50,7 @@
 // SD15/SDXL CLIP runs on MNN (CPU); Anima's CLIP (clip.bin) runs on QNN/HTP
 // (the C++ side still does the qwen token_emb lookup -> input_embedding).
 struct ServerOptions {
-  enum class ModelType { kSd15Cpu, kSd15Npu, kSdxl, kSdxlMnn, kAnima };
+  enum class ModelType { kSd15Cpu, kSd15Npu, kSdxl, kSdxlMnn, kAnima, kZImage, kFlux2Klein };
 
   int port = 8081;
   std::string listen_address = "127.0.0.1";
@@ -65,17 +66,28 @@ struct ServerOptions {
   bool anima_seq_dit = false;  // (anima+lowram) never co-resident DiT halves
   bool upscaler_mode = false;
   bool convert_mode = false;
+  // Run all three DiT modules on the Hexagon NPU. The Android catalog only
+  // exposes these models on the SM8750-and-newer devices validated upstream.
+  std::string dit_backend = "diffusion=HTP0,te=HTP0,vae=HTP0";
+  std::string dit_params_backend;
+  int dit_threads = 4;
+  int dit_vae_tile_size = 64;
   bool convert_clip_skip_2 = false;
 
   bool isSdxl() const { return type == ModelType::kSdxl || type == ModelType::kSdxlMnn; }
   bool isAnima() const { return type == ModelType::kAnima; }
   bool isMnn() const { return type == ModelType::kSd15Cpu || type == ModelType::kSdxlMnn; }
+  // DiT formats served by libdit_engine.so: no fixed canvas, no QNN contexts.
+  bool isDit() const {
+    return type == ModelType::kZImage || type == ModelType::kFlux2Klein;
+  }
 };
 
 static void showHelp() {
   std::cout
       << "Usage:\n"
-         "  stable_diffusion_core --type <sd15cpu|sd15npu|sdxl|sdxlmnn> "
+         "  stable_diffusion_core --type "
+         "<sd15cpu|sd15npu|sdxl|sdxlmnn|anima|zimage|klein> "
          "--model_dir <dir> [--lib_dir <dir>] [options]\n"
          "  stable_diffusion_core --upscaler_mode [--lib_dir <dir>] "
          "[options]\n"
@@ -83,7 +95,8 @@ static void showHelp() {
          "\n"
          "Modes:\n"
          "  --type <type>          Model format: sd15cpu (MNN), sd15npu "
-         "(QNN), sdxl (QNN), sdxlmnn (MNN), anima (QNN)\n"
+         "(QNN), sdxl (QNN), sdxlmnn (MNN), anima (QNN), zimage/klein "
+         "(DiT engine)\n"
          "  --upscaler_mode        Upscale-only server, no diffusion model\n"
          "  --convert <dir>        Convert model.safetensors in <dir> to MNN "
          "and exit\n"
@@ -102,7 +115,9 @@ static void showHelp() {
          "  --listen_all           Listen on 0.0.0.0 instead of 127.0.0.1\n"
          "  --no_img2img           Do not load the VAE encoder\n"
          "  --use_v_pred           v-prediction model\n"
-         "  --lowram               (sdxl/anima) load/release models per stage\n"
+         "  --lowram               (sdxl/anima) load/release models per stage;\n"
+         "                         (zimage/klein) stream the text encoder from "
+         "disk\n"
          "  --anima_seq_dit        (anima+lowram) never keep both DiT halves "
          "resident; for 12GB devices\n"
          "  --clip_skip_2          (convert) export CLIP with skip 2\n"
@@ -240,6 +255,10 @@ static ServerOptions processCommandLine(int argc, char **argv) {
     opts.type = ServerOptions::ModelType::kSd15Npu;
   else if (typeStr == "anima")
     opts.type = ServerOptions::ModelType::kAnima;
+  else if (typeStr == "zimage")
+    opts.type = ServerOptions::ModelType::kZImage;
+  else if (typeStr == "klein")
+    opts.type = ServerOptions::ModelType::kFlux2Klein;
   else
     showHelpAndExit(typeStr.empty() ? "Missing --type"
                                     : "Invalid --type: " + typeStr);
@@ -294,6 +313,35 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
   const std::filesystem::path dir(opts.model_dir);
   const bool sdxl = opts.isSdxl();
   const bool anima = opts.isAnima();
+
+  // Z-Image / FLUX.2-Klein: the engine reads the weights itself, so the core
+  // only checks that the package is complete and hands over the paths. The
+  // engine .so ships in the APK's native library directory. Its FastRPC skels
+  // are copied from assets into the shared runtime directory at app startup.
+  if (opts.isDit()) {
+    std::string dit_path = (dir / "dit.safetensors").string();
+    std::string llm_path = (dir / "llm.gguf").string();
+    std::string vae_path = (dir / "vae.safetensors").string();
+    for (const auto &p : {dit_path, llm_path, vae_path}) {
+      if (!std::filesystem::exists(p)) showHelpAndExit("File not found: " + p);
+    }
+    if (opts.lib_dir.empty()) showHelpAndExit("Missing --lib_dir for DiT");
+    // The text encoder is a 4B LLM used once per request; streaming its
+    // parameters from disk trades a few seconds for the headroom the DiT
+    // itself needs on 12GB devices.
+    const std::string params_backend =
+        opts.lowram ? "te=disk" : opts.dit_params_backend;
+    const std::string engine_path =
+        (std::filesystem::path(opts.lib_dir) / "libdit_engine.so").string();
+    if (!std::filesystem::exists(engine_path))
+      showHelpAndExit("DiT engine not installed: " + engine_path);
+    return std::make_unique<PipelineDit>(
+        text_encoder, opts.model_dir, engine_path, dit_path, llm_path, vae_path,
+        opts.type == ServerOptions::ModelType::kZImage ? DIT_MODEL_Z_IMAGE
+                                                       : DIT_MODEL_FLUX2_KLEIN,
+        opts.dit_backend, params_backend, opts.dit_threads,
+        opts.dit_vae_tile_size);
+  }
 
   // Anima: Qwen "CLIP" (clip.bin, QNN) + split DiT (unet_part1/2.bin) + 16-ch
   // VAE. The Qwen text encoder uses RoPE internally, so there is no
@@ -716,7 +764,9 @@ int main(int argc, char **argv) {
     const std::filesystem::path model_dir(opts.model_dir);
     const bool fixed_chunks = opts.isSdxl() && !opts.isMnn() &&
         std::ifstream(model_dir / "qnn_context.txt").peek() != std::ifstream::traits_type::eof();
-    int max_chunks = opts.isMnn() ? 0 : 1;
+    // The DiT models use the Qwen3 tokenizer with no 77-token chunking, so
+    // /tokenize should count the prompt whole like the MNN formats do.
+    int max_chunks = (opts.isMnn() || opts.isDit()) ? 0 : 1;
     if (opts.isSdxl()) {
       if (opts.isMnn()) max_chunks = 0;
       else if (fixed_chunks) max_chunks = 3;
@@ -736,13 +786,18 @@ int main(int argc, char **argv) {
     }
 
     pipeline = createPipeline(opts, *text_encoder);
-    text_encoder->loadEmbeddingTables(opts.model_dir);
+    // The embedding tables and textual inversions belong to the CLIP encoders
+    // the core runs itself; a DiT package ships neither, and its text encoder
+    // lives inside the engine.
+    if (!opts.isDit()) text_encoder->loadEmbeddingTables(opts.model_dir);
 
     // Textual-inversion embeddings live two levels above the model dir.
     std::filesystem::path embeddingsPath =
         std::filesystem::path(opts.model_dir).parent_path().parent_path() /
         "embeddings";
-    if (std::filesystem::exists(embeddingsPath)) {
+    if (opts.isDit()) {
+      // no-op: see above
+    } else if (std::filesystem::exists(embeddingsPath)) {
       try {
         text_encoder->loadTextualInversions(embeddingsPath.string());
         QNN_INFO("Loaded %zu embeddings (SDXL=%d) from %s",
@@ -778,7 +833,7 @@ int main(int argc, char **argv) {
                                  opts.nsfw_threshold);
     }
 
-    if (!opts.isMnn()) {
+    if (!opts.isMnn() && !opts.isDit()) {
       if (opts.lib_dir.empty()) showHelpAndExit("Missing --lib_dir for QNN");
       if (!qnn_runtime::init(opts.lib_dir))
         showHelpAndExit("Failed get QNN system func ptrs.");

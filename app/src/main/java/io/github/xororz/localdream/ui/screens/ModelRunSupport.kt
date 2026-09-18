@@ -14,6 +14,7 @@ import androidx.compose.runtime.Immutable
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
+import io.github.xororz.localdream.data.DitResolution
 import io.github.xororz.localdream.data.GenerationMode
 import io.github.xororz.localdream.remote.RemoteApiClient
 import io.github.xororz.localdream.remote.RemoteProtocol
@@ -239,6 +240,22 @@ fun computeAspectTargetSize(usesFixedCanvas: Boolean, aspectRatio: String, canva
         Pair(tw, canvasMax)
     }
 }
+
+/**
+ * Width and height a DiT model will actually run.
+ *
+ * The 256-pixel step is the set verified to stay correct on the optimized HTP
+ * VAE path. Smaller increments can produce displaced image bands on rectangular
+ * canvases even though the model architecture itself accepts those dimensions.
+ */
+const val DIT_MIN_SIZE = DitResolution.MIN_SIZE
+const val DIT_MAX_SIZE = DitResolution.MAX_SIZE
+const val DIT_SIZE_STEP = DitResolution.SIZE_STEP
+
+/** Slider positions between DIT_MIN_SIZE and DIT_MAX_SIZE, exclusive of both. */
+const val DIT_SIZE_STEPS = DitResolution.SLIDER_STEPS
+
+fun snapDitSize(value: Float): Int = DitResolution.snap(value)
 
 /**
  * GCD-reduces (width, height) into a "W:H" aspect-ratio string.
@@ -501,9 +518,19 @@ internal fun bitmapToBase64Jpeg(bitmap: Bitmap, quality: Int = 95): String {
 }
 
 /** Default generation canvas side length for a model class. */
-internal fun defaultGenerationSize(usesFixedCanvas: Boolean, runOnCpu: Boolean): Int = when {
+internal fun defaultGenerationSize(
+    usesFixedCanvas: Boolean,
+    runOnCpu: Boolean,
+    isDit: Boolean = false,
+): Int = when {
+    // 1024 in 4-8 steps is where these turbo models are quick enough to feel
+    // interactive; 1536 and 2048 stay available in the resolution picker.
+    isDit -> 1024
+
     usesFixedCanvas -> 1024
+
     runOnCpu -> 256
+
     else -> 512
 }
 

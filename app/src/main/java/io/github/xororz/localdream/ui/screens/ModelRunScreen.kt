@@ -316,8 +316,16 @@ fun ModelRunScreen(
                 prompt = "",
                 negativePrompt = "",
                 generationTime = "",
-                width = defaultGenerationSize(model?.usesFixedCanvas == true, model?.runOnCpu == true),
-                height = defaultGenerationSize(model?.usesFixedCanvas == true, model?.runOnCpu == true),
+                width = defaultGenerationSize(
+                    model?.usesFixedCanvas == true,
+                    model?.runOnCpu == true,
+                    model?.isDit == true,
+                ),
+                height = defaultGenerationSize(
+                    model?.usesFixedCanvas == true,
+                    model?.runOnCpu == true,
+                    model?.isDit == true,
+                ),
                 runOnCpu = model?.runOnCpu ?: false,
             ),
         )
@@ -376,10 +384,22 @@ fun ModelRunScreen(
     }
 
     var currentWidth by remember {
-        mutableIntStateOf(defaultGenerationSize(model?.usesFixedCanvas == true, model?.runOnCpu == true))
+        mutableIntStateOf(
+            defaultGenerationSize(
+                model?.usesFixedCanvas == true,
+                model?.runOnCpu == true,
+                model?.isDit == true,
+            ),
+        )
     }
     var currentHeight by remember {
-        mutableIntStateOf(defaultGenerationSize(model?.usesFixedCanvas == true, model?.runOnCpu == true))
+        mutableIntStateOf(
+            defaultGenerationSize(
+                model?.usesFixedCanvas == true,
+                model?.runOnCpu == true,
+                model?.isDit == true,
+            ),
+        )
     }
     var availableResolutions by remember { mutableStateOf<List<Resolution>>(emptyList()) }
     var showResolutionChangeDialog by remember { mutableStateOf(false) }
@@ -629,6 +649,23 @@ fun ModelRunScreen(
             val newSize = rounded.coerceIn(128, 512)
             currentWidth = newSize
             currentHeight = newSize
+            saveAllFields()
+        }
+    }
+    // DiT models take the requested size directly, so width and height are two
+    // plain controls; aspectRatio is kept in step for the img2img crop and for
+    // whatever reads it back from history.
+    val onDitWidthChange = remember {
+        { value: Float ->
+            currentWidth = snapDitSize(value)
+            aspectRatio = inferAspectRatioString(currentWidth, currentHeight)
+            saveAllFields()
+        }
+    }
+    val onDitHeightChange = remember {
+        { value: Float ->
+            currentHeight = snapDitSize(value)
+            aspectRatio = inferAspectRatioString(currentWidth, currentHeight)
             saveAllFields()
         }
     }
@@ -1223,7 +1260,7 @@ fun ModelRunScreen(
     }
 
     LaunchedEffect(modelId, model?.runOnCpu) {
-        if (model?.runOnCpu == false && !model.usesFixedCanvas) {
+        if (model?.runOnCpu == false && !model.usesFixedCanvas && !model.isDit) {
             val baseResolution = Resolution(512, 512)
             // Remote models report the host's patch resolutions in the
             // catalog; local ones are scanned from the model directory.
@@ -1265,13 +1302,25 @@ fun ModelRunScreen(
 
             currentWidth = when {
                 model.usesFixedCanvas -> 1024
-                prefs.width == -1 -> defaultGenerationSize(usesFixedCanvas = false, runOnCpu = model.runOnCpu)
-                else -> prefs.width
+
+                prefs.width == -1 -> defaultGenerationSize(
+                    usesFixedCanvas = false,
+                    runOnCpu = model.runOnCpu,
+                    isDit = model.isDit,
+                )
+
+                else -> if (model.isDit) snapDitSize(prefs.width.toFloat()) else prefs.width
             }
             currentHeight = when {
                 model.usesFixedCanvas -> 1024
-                prefs.height == -1 -> defaultGenerationSize(usesFixedCanvas = false, runOnCpu = model.runOnCpu)
-                else -> prefs.height
+
+                prefs.height == -1 -> defaultGenerationSize(
+                    usesFixedCanvas = false,
+                    runOnCpu = model.runOnCpu,
+                    isDit = model.isDit,
+                )
+
+                else -> if (model.isDit) snapDitSize(prefs.height.toFloat()) else prefs.height
             }
 
             // Preferences are keyed by bare modelId and shared with a local
@@ -1279,7 +1328,7 @@ fun ModelRunScreen(
             // the HOST doesn't have (e.g. 768 saved locally, host only has
             // 512). Sending it would make the host silently fall back to 512
             // while this screen still generates at 768 - shape mismatch.
-            if (isRemote && !model.usesFixedCanvas && !model.runOnCpu) {
+            if (isRemote && !model.usesFixedCanvas && !model.runOnCpu && !model.isDit) {
                 val allowed = listOf(Resolution(512, 512)) +
                     remoteRepository.resolutionsFor(modelId)
                 if (allowed.none { it.width == currentWidth && it.height == currentHeight }) {
@@ -1288,7 +1337,9 @@ fun ModelRunScreen(
                 }
             }
 
-            if (isFirstRun) {
+            if (isFirstRun ||
+                (model.isDit && (prefs.width != currentWidth || prefs.height != currentHeight))
+            ) {
                 saveAllFields()
             }
 
@@ -1654,10 +1705,12 @@ fun ModelRunScreen(
                         width = defaultGenerationSize(
                             model?.usesFixedCanvas == true,
                             model?.runOnCpu == true,
+                            model?.isDit == true,
                         ),
                         height = defaultGenerationSize(
                             model?.usesFixedCanvas == true,
                             model?.runOnCpu == true,
+                            model?.isDit == true,
                         ),
                         denoiseStrength = defaults.denoiseStrength,
                         useOpenCL = useOpenCL,
@@ -1814,6 +1867,9 @@ fun ModelRunScreen(
                             if (showAdvancedSettings) {
                                 AdvancedSettingsDialog(
                                     isSdxl = model?.usesFixedCanvas == true,
+                                    isDit = model?.isDit == true,
+                                    onDitWidthChange = onDitWidthChange,
+                                    onDitHeightChange = onDitHeightChange,
                                     runOnCpu = model?.runOnCpu ?: false,
                                     useImg2img = useImg2img,
                                     isRunning = isRunning,

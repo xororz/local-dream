@@ -203,6 +203,7 @@ class RemoteRepository private constructor(private val context: Context) {
                 isCustom = info.isCustom,
                 isSdxl = info.isSdxl,
                 isAnima = info.isAnima,
+                ditKind = info.ditKind,
             )
         }
     }

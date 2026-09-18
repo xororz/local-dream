@@ -1,0 +1,10 @@
+/* The engine is dlopened into a process that already links MNN, QNN and their
+   own copies of common third-party code. Exporting stable-diffusion.cpp and
+   ggml symbols would expose thousands of names to interposition, so only the
+   ABI entry point stays global. */
+{
+  global:
+    dit_engine_get_api;
+  local:
+    *;
+};

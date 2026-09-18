@@ -176,6 +176,8 @@
     <string name="generation_params">생성 파라미터</string>
     <string name="steps">스텝: %d</string>
     <string name="image_size">이미지 크기: %1$dx%2$d</string>
+    <string name="width">너비</string>
+    <string name="height">높이</string>
     <string name="random_seed">랜덤 시드(선택 사항)</string>
     <string name="use_last_seed">마지막 시드 사용 (%s)</string>
     <string name="batch_count">배치 수: %d</string>
@@ -340,9 +342,6 @@
     <string name="downloading_model">%s 다운로드 중</string>
     <string name="download_complete">다운로드 완료</string>
     <string name="download_failed">다운로드 실패</string>
-    <string name="update">업데이트</string>
-    <string name="upgrade_model">모델 업그레이드</string>
-    <string name="upgrade_model_hint">%s의 새 버전을 사용할 수 있습니다. 업그레이드하시겠습니까?</string>
     <string name="download_background_hint">다운로드는 백그라운드에서 계속됩니다. 다른 앱으로 전환해도 됩니다.</string>
     <string name="switch_resolution">해상도 변경</string>
     <string name="switch_resolution_hint">해상도를 변경하면 백엔드 서비스가 다시 시작되고 현재 생성이 중단됩니다. 계속하시겠습니까?</string>
@@ -430,6 +429,9 @@
     <string name="save_failed_detail">저장 실패: %s</string>
     <string name="img2img_failed_detail">img2img 실패: %s</string>
     <string name="failed_to_start_backend">백엔드 시작 실패: %s</string>
+    <string name="dit_engine_missing">DiT 엔진이 설치되지 않았습니다</string>
+    <string name="z_image_turbo_description">6B DiT, 8 스텝.</string>
+    <string name="flux2_klein_description">4B DiT, 4 스텝.</string>
     <string name="executable_not_found">실행 파일을 찾을 수 없습니다: %s</string>
     <string name="cannot_open_file">선택한 파일을 열 수 없습니다</string>
     <string name="only_qualcomm_npu">사용자 지정 NPU 모델은 Qualcomm 기기만 지원합니다</string>

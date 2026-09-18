@@ -13,6 +13,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.github.xororz.localdream.BuildConfig
 import io.github.xororz.localdream.R
+import io.github.xororz.localdream.data.DitResolution
 import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.data.ModelRepository
 import io.github.xororz.localdream.data.PatchScanner
@@ -177,6 +178,17 @@ class RemoteHostService : Service() {
                         JSONObject().put("error", "model not found"),
                     )
                 backendType = model.backendType
+                if (model.isDit &&
+                    (!DitResolution.isSupported(width) || !DitResolution.isSupported(height))
+                ) {
+                    return RemoteHostServer.Response(
+                        400,
+                        JSONObject().put(
+                            "error",
+                            "DiT resolution must be 512..2048 in 256-pixel steps",
+                        ),
+                    )
+                }
             }
             val intent = Intent(this@RemoteHostService, BackendService::class.java).apply {
                 putExtra("modelId", modelId)
@@ -268,7 +280,7 @@ class RemoteHostService : Service() {
 
     private fun toRemoteInfo(context: Context, model: Model): RemoteModelInfo {
         val defaults = model.defaults
-        val resolutions = if (!model.runOnCpu && !model.usesFixedCanvas) {
+        val resolutions = if (!model.runOnCpu && !model.usesFixedCanvas && !model.isDit) {
             val patches = PatchScanner.scanAvailableResolutions(context, model.id)
             (listOf(Pair(512, 512)) + patches.map { Pair(it.width, it.height) })
                 .distinct()
@@ -282,6 +294,7 @@ class RemoteHostService : Service() {
             runOnCpu = model.runOnCpu,
             isSdxl = model.isSdxl,
             isAnima = model.isAnima,
+            ditKind = model.ditKind,
             isCustom = model.isCustom,
             generationSize = model.generationSize,
             defaults = RemoteModelDefaults(

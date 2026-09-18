@@ -28,3 +28,6 @@
 [submodule "app/src/main/cpp/3rdparty/tokenizers-cpp"]
 	path = app/src/main/cpp/3rdparty/tokenizers-cpp
 	url = https://github.com/xororz/tokenizers-cpp.git
+[submodule "app/src/main/cpp/3rdparty/stable-diffusion.cpp"]
+	path = app/src/main/cpp/3rdparty/stable-diffusion.cpp
+	url = https://github.com/happyyzy/stable-diffusion.cpp.git

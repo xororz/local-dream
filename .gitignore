@@ -19,3 +19,4 @@ app/src/main/assets/licenses/qnn-*
 .kotlin/
 
 app/src/main/cpp/build/
+app/src/main/assets/ditlibs

@@ -188,8 +188,11 @@ class Pipeline {
 
   // Mutates `req` only to release the decoded image buffer once it is no
   // longer needed (a ~190 MB allocation at ultrafix sizes).
-  GenerationResult generate(GenerationRequest &req,
-                            const ProgressCallback &progress_callback);
+  //
+  // Virtual for PipelineDit, whose engine owns the whole txt2img round trip
+  // and so replaces this instead of filling in the stage hooks below.
+  virtual GenerationResult generate(GenerationRequest &req,
+                                    const ProgressCallback &progress_callback);
 
  protected:
   // --- stage hooks -------------------------------------------------------

@@ -40,6 +40,7 @@ Local Dream is built on top of many excellent open-source projects. Sincere than
 
 - **[Qualcomm QNN SDK](https://www.qualcomm.com/developer/software/qualcomm-ai-engine-direct-sdk)** - NPU model execution
 - **[alibaba/MNN](https://github.com/alibaba/MNN/)** - CPU model execution
+- **[happyyzy/stable-diffusion.cpp](https://github.com/happyyzy/stable-diffusion.cpp)** - Deep performance optimizations for on-device DiT inference
 - **[xtensor-stack](https://github.com/xtensor-stack)** - Tensor operations & scheduling
 - **[mlc-ai/tokenizers-cpp](https://github.com/mlc-ai/tokenizers-cpp)** - Text tokenization
 - **[yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib)** - HTTP server
