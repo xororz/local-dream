@@ -355,7 +355,11 @@ internal fun AdvancedSettingsDialog(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                if (runOnCpu) {
+                // The free 128-512 slider belongs to SD1.5 CPU. SDXL MNN also runs
+                // on CPU/GPU but renders on the fixed 1024 canvas like every other
+                // SDXL package, so it must not be offered a range it cannot use.
+                // The runtime picker below stays for both.
+                if (runOnCpu && !isSdxl) {
                     Column {
                         Text(
                             stringResource(
@@ -373,6 +377,8 @@ internal fun AdvancedSettingsDialog(
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
+                }
+                if (runOnCpu) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,

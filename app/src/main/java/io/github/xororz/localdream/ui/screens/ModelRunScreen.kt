@@ -1468,8 +1468,13 @@ fun ModelRunScreen(
                         prompt = generationParamsTmp.prompt,
                         negativePrompt = generationParamsTmp.negativePrompt,
                         generationTime = genTime,
-                        width = if (model?.runOnCpu == true) generationParamsTmp.width else state.bitmap.width,
-                        height = if (model?.runOnCpu == true) generationParamsTmp.height else state.bitmap.height,
+                        // The result bitmap is the source of truth: SDXL crops a
+                        // non-1:1 aspect out of its 1024 canvas, so the requested
+                        // size is not what came back. (This used to read the
+                        // request for runOnCpu models, which was only ever right
+                        // while SD1.5 CPU was the sole CPU format.)
+                        width = state.bitmap.width,
+                        height = state.bitmap.height,
                         runOnCpu = model?.runOnCpu ?: false,
                         denoiseStrength = generationParamsTmp.denoiseStrength,
                         useOpenCL = generationParamsTmp.useOpenCL,
