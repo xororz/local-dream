@@ -432,6 +432,10 @@
     <string name="dit_engine_missing">DiT エンジンがインストールされていません</string>
     <string name="z_image_turbo_description">6B DiT、8 ステップ。</string>
     <string name="flux2_klein_description">4B DiT、4 ステップ。</string>
+    <string name="flux_edit">編集</string>
+    <string name="flux_base_image">ベース画像</string>
+    <string name="flux_reference_images">参照画像</string>
+    <string name="flux_add_reference">参照画像を追加</string>
     <string name="executable_not_found">実行ファイルが見つかりません: %s</string>
     <string name="cannot_open_file">選択したファイルを開けません</string>
     <string name="only_qualcomm_npu">カスタム NPU モデルは Qualcomm デバイスのみ対応しています</string>

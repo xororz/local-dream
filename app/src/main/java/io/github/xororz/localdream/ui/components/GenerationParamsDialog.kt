@@ -116,7 +116,10 @@ fun GenerationParamsDialog(
                             stringResource(R.string.basic_mode, mode.name.lowercase()),
                             style = MaterialTheme.typography.bodyMedium,
                         )
-                        if (mode != GenerationMode.TXT2IMG) {
+                        if (mode == GenerationMode.IMG2IMG ||
+                            mode == GenerationMode.INPAINT ||
+                            mode == GenerationMode.ULTRAFIX
+                        ) {
                             Text(
                                 stringResource(R.string.basic_denoise, params.denoiseStrength),
                                 style = MaterialTheme.typography.bodyMedium,

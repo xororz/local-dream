@@ -21,6 +21,9 @@ data class ModelConfig(
     val steps: Float? = null,
     val cfg: Float? = null,
     val scheduler: String? = null,
+    // Code-level only (not read from config.json): models whose img2img
+    // semantics differ, like Klein's reference edit, pick their own default.
+    val denoiseStrength: Float? = null,
 ) {
     /** Field-by-field merge: values from this win, [other] fills the nulls. */
     fun withFallback(other: ModelConfig): ModelConfig = ModelConfig(
@@ -29,6 +32,7 @@ data class ModelConfig(
         steps = steps ?: other.steps,
         cfg = cfg ?: other.cfg,
         scheduler = scheduler ?: other.scheduler,
+        denoiseStrength = denoiseStrength ?: other.denoiseStrength,
     )
 
     /** Fill any remaining nulls from the global defaults. */
@@ -38,6 +42,7 @@ data class ModelConfig(
         steps = steps ?: global.steps,
         cfg = cfg ?: global.cfg,
         scheduler = scheduler ?: global.scheduler,
+        denoiseStrength = denoiseStrength ?: global.denoiseStrength,
     )
 
     companion object {

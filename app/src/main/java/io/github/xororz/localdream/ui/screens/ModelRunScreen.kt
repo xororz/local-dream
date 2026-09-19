@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BitmapRegionDecoder
+import android.graphics.ImageDecoder
 import android.graphics.Rect as AndroidRect
 import android.net.Uri
 import android.os.Build
@@ -18,6 +19,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -58,6 +60,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Brush
@@ -77,7 +80,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -168,6 +174,7 @@ import io.github.xororz.localdream.utils.saveImageFromFile
 import java.io.File
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -176,6 +183,13 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
+
+private data class FluxReferenceSelection(
+    val uri: Uri,
+    val bitmap: Bitmap,
+    val base64: String,
+)
 
 @SuppressLint("DefaultLocale")
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -233,6 +247,7 @@ fun ModelRunScreen(
     } else {
         remember(modelRepository.models) { modelRepository.models.find { it.id == modelId } }
     }
+    val isFlux2Klein = model?.ditKind == "klein"
     LaunchedEffect(Unit) {
         if (!isRemote) {
             modelRepository.ensureLoaded()
@@ -341,6 +356,11 @@ fun ModelRunScreen(
     var showCustomAspectRatioDialog by remember { mutableStateOf(false) }
     var currentBatchIndex by remember { mutableIntStateOf(0) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    val fluxReferenceImages = remember { mutableStateListOf<FluxReferenceSelection>() }
+    // Klein references are independent of the base image, so they track their
+    // own decode state instead of sharing base64EncodeDone.
+    var fluxReferencesLoading by remember { mutableStateOf(false) }
+    var showKleinEditMenu by remember { mutableStateOf(false) }
     var base64EncodeDone by remember { mutableStateOf(false) }
     var returnedSeed by remember { mutableStateOf<Long?>(null) }
     var isRunning by remember { mutableStateOf(false) }
@@ -586,6 +606,8 @@ fun ModelRunScreen(
 
     fun clearImg2imgState() {
         selectedImageUri = null
+        fluxReferenceImages.clear()
+        File(context.filesDir, "flux_references.json").delete()
         croppedBitmap = null
         drawingOverlayBitmap = null
         maskBitmap = null
@@ -1027,11 +1049,99 @@ fun ModelRunScreen(
         }
     }
 
+    // Appends to the current reference set, so references can be picked in
+    // several rounds. There is deliberately no count limit: each reference
+    // lengthens the DiT sequence, and how many fit is left to the user.
+    // Appends to the current reference set, so references can be picked in
+    // several rounds. There is deliberately no count limit: each reference
+    // lengthens the DiT sequence, and how many fit is left to the user.
+    fun processFluxReferences(uris: List<Uri>) {
+        val existing = fluxReferenceImages.map { it.uri }.toSet()
+        val selected = uris.distinct().filterNot { it in existing }
+        if (selected.isEmpty() || fluxReferencesLoading) return
+        scope.launch {
+            fluxReferencesLoading = true
+            try {
+                val decoded = withContext(Dispatchers.IO) {
+                    selected.map { uri ->
+                        val source = ImageDecoder.createSource(context.contentResolver, uri)
+                        val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                            val maxPixels = 1024L * 1024L
+                            val pixels = info.size.width.toLong() * info.size.height
+                            if (pixels > maxPixels) {
+                                val scale = sqrt(maxPixels.toDouble() / pixels)
+                                decoder.setTargetSize(
+                                    (info.size.width * scale).roundToInt().coerceAtLeast(1),
+                                    (info.size.height * scale).roundToInt().coerceAtLeast(1),
+                                )
+                            }
+                        }
+                        FluxReferenceSelection(
+                            uri = uri,
+                            bitmap = bitmap,
+                            // Reference conditioning is VAE-encoded rather than
+                            // pasted back pixel-for-pixel, so high-quality JPEG
+                            // keeps the payloads small without visible cost.
+                            base64 = bitmapToBase64Jpeg(bitmap, 95),
+                        )
+                    }
+                }
+                fluxReferenceImages.addAll(decoded)
+            } catch (e: Exception) {
+                Toast.makeText(
+                    context,
+                    msgSaveFailed.format(e.message ?: msgUnknownError),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } finally {
+                fluxReferencesLoading = false
+            }
+        }
+    }
+
+    fun removeFluxReference(index: Int) {
+        if (index in fluxReferenceImages.indices) fluxReferenceImages.removeAt(index)
+    }
+
+    // Drops only the Klein base image (and its mask), keeping the references.
+    fun clearBaseImageState() {
+        selectedImageUri = null
+        croppedBitmap = null
+        drawingOverlayBitmap = null
+        maskBitmap = null
+        isInpaintMode = false
+        cropRect = null
+        savedPathHistory = null
+        base64EncodeDone = false
+        hasOriginalImageForStitch = false
+    }
+
+    // A DiT base image is cropped to the exact output size, so any size change
+    // (sliders, imported params, restored preferences) invalidates it and its
+    // mask; the user has to crop again. References have no size tie and stay.
+    LaunchedEffect(currentWidth, currentHeight) {
+        val base = croppedBitmap
+        if (model?.isDit == true && base != null &&
+            (base.width != currentWidth || base.height != currentHeight)
+        ) {
+            clearBaseImageState()
+        }
+    }
+
     val photoPickerLauncher = rememberLauncherForActivityResult(
         PickVisualMedia(),
     ) { uri ->
         uri?.let { processSelectedImage(it) }
     }
+
+    val fluxPhotoPickerLauncher = rememberLauncherForActivityResult(
+        PickMultipleVisualMedia(),
+    ) { uris -> processFluxReferences(uris) }
+
+    val fluxContentPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetMultipleContents(),
+    ) { uris -> processFluxReferences(uris) }
 
     // Places an imported (already size-validated and resized) local image
     // into the result slot as the UltraFix source. Synthetic params: only the
@@ -1075,6 +1185,14 @@ fun ModelRunScreen(
                 msgMediaPermissionHint,
                 Toast.LENGTH_SHORT,
             ).show()
+        }
+    }
+
+    fun onAddFluxReferencesClick() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            fluxPhotoPickerLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+        } else {
+            fluxContentPickerLauncher.launch("image/*")
         }
     }
 
@@ -1292,7 +1410,7 @@ fun ModelRunScreen(
             steps = if (isFirstRun) defaults.steps else prefs.steps
             cfg = if (isFirstRun) defaults.cfg else prefs.cfg
             seed = prefs.seed
-            denoiseStrength = prefs.denoiseStrength
+            denoiseStrength = if (isFirstRun) defaults.denoiseStrength else prefs.denoiseStrength
             useOpenCL = prefs.useOpenCL
             batchCounts = prefs.batchCounts
             scheduler = if (isFirstRun) defaults.scheduler else prefs.scheduler
@@ -1456,8 +1574,14 @@ fun ModelRunScreen(
                     pendingUltrafix = false
                     val currentGenerationMode = when {
                         wasUltrafix -> GenerationMode.ULTRAFIX
+
+                        isFlux2Klein && (selectedImageUri != null || fluxReferenceImages.isNotEmpty()) ->
+                            GenerationMode.EDIT
+
                         isInpaintMode -> GenerationMode.INPAINT
+
                         selectedImageUri != null -> GenerationMode.IMG2IMG
+
                         else -> GenerationMode.TXT2IMG
                     }
 
@@ -1831,23 +1955,69 @@ fun ModelRunScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 if (useImg2img) {
-                                    TextButton(
-                                        onClick = { onSelectImageClick() },
-                                        contentPadding = PaddingValues(
-                                            horizontal = 8.dp,
-                                            vertical = 8.dp,
-                                        ),
-                                    ) {
-                                        Text(
-                                            "img2img",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            modifier = Modifier.padding(end = 4.dp),
-                                        )
-                                        Icon(
-                                            Icons.Default.Image,
-                                            contentDescription = "select image",
-                                            modifier = Modifier.size(20.dp),
-                                        )
+                                    // Klein takes a base image and any number of
+                                    // references through one entry; a menu picks
+                                    // which one to add.
+                                    Box {
+                                        TextButton(
+                                            onClick = {
+                                                if (isFlux2Klein) {
+                                                    showKleinEditMenu = true
+                                                } else {
+                                                    onSelectImageClick()
+                                                }
+                                            },
+                                            contentPadding = PaddingValues(
+                                                horizontal = 8.dp,
+                                                vertical = 8.dp,
+                                            ),
+                                        ) {
+                                            Text(
+                                                if (isFlux2Klein) {
+                                                    stringResource(R.string.flux_edit)
+                                                } else {
+                                                    "img2img"
+                                                },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                modifier = Modifier.padding(end = 4.dp),
+                                            )
+                                            Icon(
+                                                Icons.Default.Image,
+                                                contentDescription = "select image",
+                                                modifier = Modifier.size(20.dp),
+                                            )
+                                        }
+                                        DropdownMenu(
+                                            expanded = showKleinEditMenu,
+                                            onDismissRequest = { showKleinEditMenu = false },
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.flux_base_image)) },
+                                                leadingIcon = {
+                                                    Icon(Icons.Default.Image, contentDescription = null)
+                                                },
+                                                onClick = {
+                                                    showKleinEditMenu = false
+                                                    onSelectImageClick()
+                                                },
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(stringResource(R.string.flux_reference_images))
+                                                },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        Icons.Default.AddPhotoAlternate,
+                                                        contentDescription = null,
+                                                    )
+                                                },
+                                                enabled = !fluxReferencesLoading,
+                                                onClick = {
+                                                    showKleinEditMenu = false
+                                                    onAddFluxReferencesClick()
+                                                },
+                                            )
+                                        }
                                     }
                                 }
                                 TextButton(
@@ -1956,8 +2126,13 @@ fun ModelRunScreen(
                                     },
                                     onShare = {
                                         val currentMode = when {
+                                            isFlux2Klein && (selectedImageUri != null || fluxReferenceImages.isNotEmpty()) ->
+                                                GenerationMode.EDIT
+
                                             isInpaintMode -> GenerationMode.INPAINT
+
                                             selectedImageUri != null -> GenerationMode.IMG2IMG
+
                                             else -> GenerationMode.TXT2IMG
                                         }
                                         shareSourceParams = GenerationParameters(
@@ -2044,6 +2219,25 @@ fun ModelRunScreen(
                                     if (seed.isNotBlank()) 1 else batchCounts
 
                                 batchGenerationJob = coroutineScope.launch {
+                                    // Freeze the selected reference set for the
+                                    // whole batch and persist it immediately
+                                    // before the first service request. This
+                                    // also closes races with rapid thumbnail
+                                    // removals rewriting the scratch file.
+                                    val fluxReferencePayloads =
+                                        if (isFlux2Klein) {
+                                            fluxReferenceImages.map { it.base64 }
+                                        } else {
+                                            emptyList()
+                                        }
+                                    if (fluxReferencePayloads.isNotEmpty()) {
+                                        withContext(Dispatchers.IO) {
+                                            val json = JSONArray()
+                                            fluxReferencePayloads.forEach { json.put(it) }
+                                            File(context.filesDir, "flux_references.json")
+                                                .writeText(json.toString())
+                                        }
+                                    }
                                     for (i in 0 until actualBatchCount) {
                                         currentBatchIndex = i + 1
                                         Log.d(
@@ -2098,6 +2292,9 @@ fun ModelRunScreen(
                                             putExtra("aspect_ratio", aspectRatio)
                                             putExtra("batch_index", i)
                                             putExtra("backend_host", backendHost)
+                                            if (fluxReferencePayloads.isNotEmpty()) {
+                                                putExtra("has_reference_images", true)
+                                            }
                                             if (selectedImageUri != null && base64EncodeDone) {
                                                 putExtra("has_image", true)
                                                 if (isInpaintMode && maskBitmap != null) {
@@ -2162,7 +2359,8 @@ fun ModelRunScreen(
                                 }
                             },
                             enabled = serviceState !is GenerationState.Progress &&
-                                !isRunning && !isUpscaling && !isUltrafixPreparing,
+                                !isRunning && !isUpscaling && !isUltrafixPreparing &&
+                                (selectedImageUri == null || base64EncodeDone),
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.medium,
                         ) {
@@ -2286,7 +2484,8 @@ fun ModelRunScreen(
             }
 
             AnimatedVisibility(
-                visible = selectedImageUri != null && base64EncodeDone,
+                visible = (selectedImageUri != null && base64EncodeDone) ||
+                    fluxReferenceImages.isNotEmpty() || fluxReferencesLoading,
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut(),
             ) {
@@ -2296,92 +2495,107 @@ fun ModelRunScreen(
                         .padding(vertical = 8.dp),
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Start,
                     ) {
-                        Card(
-                            modifier = Modifier
-                                .size(100.dp),
-                            shape = MaterialTheme.shapes.small,
-                        ) {
-                            Box {
-                                croppedBitmap?.let { bitmap ->
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(
-                                            LocalContext.current,
+                        if (selectedImageUri != null) {
+                            Card(
+                                modifier = Modifier
+                                    .size(100.dp),
+                                shape = MaterialTheme.shapes.small,
+                            ) {
+                                Box {
+                                    croppedBitmap?.let { bitmap ->
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(
+                                                LocalContext.current,
+                                            )
+                                                .data(bitmap)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = "Cropped Image",
+                                            modifier = Modifier.fillMaxSize(),
                                         )
-                                            .data(bitmap)
-                                            .crossfade(true)
-                                            .build(),
-                                        contentDescription = "Cropped Image",
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                } ?: selectedImageUri?.let { uri ->
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(
-                                            LocalContext.current,
+                                    } ?: selectedImageUri?.let { uri ->
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(
+                                                LocalContext.current,
+                                            )
+                                                .data(uri)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = "Selected Image",
+                                            modifier = Modifier.fillMaxSize(),
                                         )
-                                            .data(uri)
-                                            .crossfade(true)
-                                            .build(),
-                                        contentDescription = "Selected Image",
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                }
-                                IconButton(
-                                    onClick = {
-                                        selectedImageUri = null
-                                        croppedBitmap = null
-                                        drawingOverlayBitmap = null
-                                        maskBitmap = null
-                                        isInpaintMode = false
-                                        cropRect = null
-                                        savedPathHistory = null
-                                        hasOriginalImageForStitch = false
-                                    },
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .background(
-                                            color = MaterialTheme.colorScheme.surface.copy(
-                                                alpha = 0.7f,
-                                            ),
-                                            shape = CircleShape,
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            if (isFlux2Klein) {
+                                                clearBaseImageState()
+                                            } else {
+                                                clearImg2imgState()
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .background(
+                                                color = MaterialTheme.colorScheme.surface.copy(
+                                                    alpha = 0.7f,
+                                                ),
+                                                shape = CircleShape,
+                                            )
+                                            .align(Alignment.TopEnd),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Clear,
+                                            contentDescription = "Remove Image",
+                                            modifier = Modifier.size(16.dp),
                                         )
-                                        .align(Alignment.TopEnd),
-                                ) {
-                                    Icon(
-                                        Icons.Default.Clear,
-                                        contentDescription = "Remove Image",
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                }
-                                IconButton(
-                                    onClick = {
-                                        showDrawScreen = true
-                                    },
-                                    enabled = !isRunning && croppedBitmap != null,
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .background(
-                                            color = MaterialTheme.colorScheme.surface.copy(
-                                                alpha = 0.7f,
-                                            ),
-                                            shape = CircleShape,
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            showDrawScreen = true
+                                        },
+                                        enabled = !isRunning && croppedBitmap != null,
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .background(
+                                                color = MaterialTheme.colorScheme.surface.copy(
+                                                    alpha = 0.7f,
+                                                ),
+                                                shape = CircleShape,
+                                            )
+                                            .align(Alignment.TopStart),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Draw,
+                                            contentDescription = "Draw Image",
+                                            modifier = Modifier.size(16.dp),
                                         )
-                                        .align(Alignment.TopStart),
-                                ) {
-                                    Icon(
-                                        Icons.Default.Draw,
-                                        contentDescription = "Draw Image",
-                                        modifier = Modifier.size(16.dp),
-                                    )
+                                    }
+                                    // Klein's base image is always reference 1.
+                                    if (isFlux2Klein) {
+                                        Text(
+                                            "1",
+                                            modifier = Modifier
+                                                .align(Alignment.BottomStart)
+                                                .background(
+                                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+                                                    CircleShape,
+                                                )
+                                                .padding(horizontal = 7.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelMedium,
+                                        )
+                                    }
                                 }
                             }
                         }
 
                         AnimatedVisibility(
-                            visible = croppedBitmap != null && !isInpaintMode,
+                            visible = selectedImageUri != null && croppedBitmap != null && !isInpaintMode,
                             enter = fadeIn() + expandHorizontally(),
                             exit = fadeOut() + shrinkHorizontally(),
                         ) {
@@ -2409,7 +2623,7 @@ fun ModelRunScreen(
                         }
 
                         AnimatedVisibility(
-                            visible = isInpaintMode && maskBitmap != null,
+                            visible = selectedImageUri != null && isInpaintMode && maskBitmap != null,
                             enter = fadeIn() + expandHorizontally(),
                             exit = fadeOut() + shrinkHorizontally(),
                         ) {
@@ -2460,6 +2674,87 @@ fun ModelRunScreen(
                                             )
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        if (isFlux2Klein) {
+                            // The base image is always reference 1, so the
+                            // user's references are numbered after it.
+                            val firstNumber = if (selectedImageUri != null) 2 else 1
+                            fluxReferenceImages.forEachIndexed { index, reference ->
+                                if (index > 0 || selectedImageUri != null) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+                                Card(
+                                    modifier = Modifier.size(100.dp),
+                                    shape = MaterialTheme.shapes.small,
+                                ) {
+                                    Box {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(reference.bitmap)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = "Reference image ${firstNumber + index}",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop,
+                                        )
+                                        IconButton(
+                                            onClick = { removeFluxReference(index) },
+                                            enabled = !isRunning,
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .background(
+                                                    color = MaterialTheme.colorScheme.surface.copy(
+                                                        alpha = 0.7f,
+                                                    ),
+                                                    shape = CircleShape,
+                                                )
+                                                .align(Alignment.TopEnd),
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Clear,
+                                                contentDescription = "Remove reference image",
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                        Text(
+                                            "${firstNumber + index}",
+                                            modifier = Modifier
+                                                .align(Alignment.BottomStart)
+                                                .background(
+                                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+                                                    CircleShape,
+                                                )
+                                                .padding(horizontal = 7.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelMedium,
+                                        )
+                                    }
+                                }
+                            }
+                            // Same affordance as the mask button: a small FAB
+                            // after the thumbnails rather than another card.
+                            Spacer(modifier = Modifier.width(12.dp))
+                            SmallFloatingActionButton(
+                                onClick = {
+                                    if (!isRunning && !fluxReferencesLoading) {
+                                        onAddFluxReferencesClick()
+                                    }
+                                },
+                            ) {
+                                if (fluxReferencesLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.AddPhotoAlternate,
+                                        contentDescription = stringResource(
+                                            R.string.flux_add_reference,
+                                        ),
+                                    )
                                 }
                             }
                         }

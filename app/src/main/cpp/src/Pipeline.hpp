@@ -41,6 +41,12 @@
 //   img_data:       [1,3,H,W] float, -1..1
 //   mask_data:      [1,4,H/8,W/8] float, 0..1 (latent-space mask)
 //   mask_data_full: [1,3,H,W] float, 0..1 (pixel-space mask)
+struct ReferenceImage {
+  std::vector<uint8_t> rgb;
+  int width = 0;
+  int height = 0;
+};
+
 struct GenerationRequest {
   std::string prompt;
   std::string negative_prompt;
@@ -59,6 +65,10 @@ struct GenerationRequest {
   std::vector<float> img_data;
   std::vector<float> mask_data;
   std::vector<float> mask_data_full;
+  // Clean reference images for native multimodal editing. These are separate
+  // from img_data: a reference is appended to the DiT token sequence instead
+  // of being noised into the generation latent.
+  std::vector<ReferenceImage> reference_images;
 
   // Wire encoding for images sent back to the client: "raw" (RGB bytes),
   // "jpeg" or "png", each base64-wrapped inside the SSE JSON. Raw stays the
@@ -169,6 +179,7 @@ class Pipeline {
   // Loads whatever the format keeps resident. Returns false on failure.
   virtual bool initialize() = 0;
   virtual bool supportsImg2Img() const = 0;
+  virtual bool supportsReferenceEditing() const { return false; }
   bool isSdxl() const { return sdxl_; }
   // Anima runs the same fixed-1024 graphs as SDXL but isn't an SDXL pipeline;
   // the request parser uses this to force the 1024 canvas.

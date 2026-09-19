@@ -8,6 +8,7 @@ enum class GenerationMode {
     TXT2IMG,
     IMG2IMG,
     INPAINT,
+    EDIT,
     ULTRAFIX,
     UNKNOWN,
     ;
@@ -17,6 +18,7 @@ enum class GenerationMode {
             "TXT2IMG" -> TXT2IMG
             "IMG2IMG" -> IMG2IMG
             "INPAINT" -> INPAINT
+            "EDIT" -> EDIT
             "ULTRAFIX" -> ULTRAFIX
             else -> UNKNOWN
         }

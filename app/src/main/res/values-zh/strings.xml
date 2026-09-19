@@ -432,6 +432,10 @@
     <string name="dit_engine_missing">DiT 引擎未安装</string>
     <string name="z_image_turbo_description">6B DiT，8 步。</string>
     <string name="flux2_klein_description">4B DiT，4 步。</string>
+    <string name="flux_edit">编辑</string>
+    <string name="flux_base_image">底图</string>
+    <string name="flux_reference_images">参考图</string>
+    <string name="flux_add_reference">添加参考图</string>
     <string name="executable_not_found">未找到可执行文件: %s</string>
     <string name="cannot_open_file">无法打开所选文件</string>
     <string name="only_qualcomm_npu">仅高通设备支持自定义 NPU 模型</string>

@@ -442,6 +442,10 @@
     <string name="dit_engine_missing">DiT engine not installed</string>
     <string name="z_image_turbo_description">6B DiT, 8 steps.</string>
     <string name="flux2_klein_description">4B DiT, 4 steps.</string>
+    <string name="flux_edit">Edit</string>
+    <string name="flux_base_image">Base</string>
+    <string name="flux_reference_images">Reference</string>
+    <string name="flux_add_reference">Add reference image</string>
     <string name="executable_not_found">Executable not found: %s</string>
     <string name="cannot_open_file">Cannot open the selected file</string>
     <string name="only_qualcomm_npu">Only Qualcomm devices support custom NPU models</string>

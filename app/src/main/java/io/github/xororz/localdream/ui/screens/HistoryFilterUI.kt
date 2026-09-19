@@ -200,6 +200,7 @@ fun HistoryFilterSheet(
                         GenerationMode.TXT2IMG to "txt2img",
                         GenerationMode.IMG2IMG to "img2img",
                         GenerationMode.INPAINT to "inpaint",
+                        GenerationMode.EDIT to "edit",
                         GenerationMode.ULTRAFIX to "ultrafix",
                     )
                     modeOptions.forEach { (mode, label) ->

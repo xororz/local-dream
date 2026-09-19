@@ -61,7 +61,9 @@ struct ServerOptions {
   std::string safety_checker_path;
   float nsfw_threshold = 0.5f;
   bool use_v_pred = false;
-  bool no_img2img = false;  // skip the VAE encoder entirely
+  // Modular pipelines skip their separate VAE encoder; DiT uses a monolithic
+  // VAE file, so the same switch gates img2img/inpaint requests there.
+  bool no_img2img = false;
   bool lowram = false;
   bool anima_seq_dit = false;  // (anima+lowram) never co-resident DiT halves
   bool upscaler_mode = false;
@@ -113,7 +115,8 @@ static void showHelp() {
          "Options:\n"
          "  --port <n>             HTTP port (default 8081)\n"
          "  --listen_all           Listen on 0.0.0.0 instead of 127.0.0.1\n"
-         "  --no_img2img           Do not load the VAE encoder\n"
+         "  --no_img2img           Disable img2img/inpaint; modular backends\n"
+         "                         also skip the VAE encoder\n"
          "  --use_v_pred           v-prediction model\n"
          "  --lowram               (sdxl/anima) load/release models per stage;\n"
          "                         (zimage/klein) stream the text encoder from "
@@ -340,7 +343,7 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
         opts.type == ServerOptions::ModelType::kZImage ? DIT_MODEL_Z_IMAGE
                                                        : DIT_MODEL_FLUX2_KLEIN,
         opts.dit_backend, params_backend, opts.dit_threads,
-        opts.dit_vae_tile_size);
+        opts.dit_vae_tile_size, !opts.no_img2img);
   }
 
   // Anima: Qwen "CLIP" (clip.bin, QNN) + split DiT (unet_part1/2.bin) + 16-ch
@@ -447,7 +450,8 @@ static void registerGenerateEndpoint(httplib::Server &svr, Pipeline *pipeline) {
       auto json = nlohmann::json::parse(request.body);
       auto req = std::make_shared<GenerationRequest>(parseGenerationRequest(
           json, pipeline->isSdxl(), pipeline->isAnima(),
-          pipeline->supportsImg2Img(), pipeline->supportsUltrafix()));
+          pipeline->supportsImg2Img(), pipeline->supportsReferenceEditing(),
+          pipeline->supportsUltrafix()));
 
       std::cout << "Req Rcvd: P:" << req->prompt
                 << " NP:" << req->negative_prompt << " S:" << req->steps

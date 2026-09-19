@@ -678,6 +678,9 @@ class ModelRepository private constructor(private val context: Context) {
                 steps = 4f,
                 cfg = 1f,
                 scheduler = "euler",
+                // 1.0 keeps the base image as a pure reference (or a full
+                // redraw inside a mask); lower values also start from it.
+                denoiseStrength = 1f,
             ),
             runOnCpu = false,
             ditKind = "klein",

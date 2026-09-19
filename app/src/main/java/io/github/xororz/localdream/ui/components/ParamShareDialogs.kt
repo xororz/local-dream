@@ -208,7 +208,10 @@ fun ReproduceParametersDialog(
             add(ParamShareField.CFG)
             if (params.seed != null) add(ParamShareField.SEED)
             add(ParamShareField.SCHEDULER)
-            if (params.mode != GenerationMode.TXT2IMG) {
+            if (params.mode == GenerationMode.IMG2IMG ||
+                params.mode == GenerationMode.INPAINT ||
+                params.mode == GenerationMode.ULTRAFIX
+            ) {
                 add(ParamShareField.DENOISE_STRENGTH)
             }
         }
@@ -411,8 +414,9 @@ fun ShareParamsFlow(
         list += ParamShareField.CFG
         if (source.seed != null) list += ParamShareField.SEED
         list += ParamShareField.SCHEDULER
-        if (source.mode != GenerationMode.UNKNOWN &&
-            source.mode != GenerationMode.TXT2IMG
+        if (source.mode == GenerationMode.IMG2IMG ||
+            source.mode == GenerationMode.INPAINT ||
+            source.mode == GenerationMode.ULTRAFIX
         ) {
             list += ParamShareField.DENOISE_STRENGTH
         }

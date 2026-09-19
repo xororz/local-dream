@@ -297,6 +297,27 @@ void decode_image(const std::vector<uint8_t> &image_binary,
   }
 }
 
+// Decode without forcing the image onto the output canvas. Native edit models
+// preserve each reference image's own aspect ratio and VAE-encode it separately.
+void decode_reference_image(const std::vector<uint8_t> &image_binary,
+                            std::vector<uint8_t> &output_pixels,
+                            int &output_width, int &output_height) {
+  int channels = 0;
+  uint8_t *decoded_data =
+      stbi_load_from_memory(image_binary.data(), image_binary.size(),
+                            &output_width, &output_height, &channels, 3);
+  if (!decoded_data) {
+    output_pixels.clear();
+    output_width = 0;
+    output_height = 0;
+    return;
+  }
+  output_pixels.assign(
+      decoded_data,
+      decoded_data + static_cast<size_t>(3) * output_width * output_height);
+  stbi_image_free(decoded_data);
+}
+
 void gaussianBlur(std::vector<uint8_t> &imageData, int width, int height,
                   int radius) {
   if (width <= 0 || height <= 0 || radius <= 0 || imageData.empty()) {

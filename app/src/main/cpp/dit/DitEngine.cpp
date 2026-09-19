@@ -6,9 +6,11 @@
 
 #include "DitEngine.h"
 
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "stable-diffusion.h"
 
@@ -26,6 +28,8 @@ struct ActiveGeneration {
   void *user_data = nullptr;
   dit_ctx *ctx = nullptr;
   bool cancelled = false;
+  bool sampling = false;
+  int sampling_steps = 0;
 };
 
 ActiveGeneration g_active;
@@ -46,12 +50,29 @@ struct dit_ctx {
 namespace {
 
 void forward_log(enum sd_log_level_t level, const char *text, void *) {
+  // stable-diffusion.cpp uses the same global progress callback for model
+  // loading, tiled VAE work and sampling. Its image pipeline emits these
+  // messages immediately around sd->sample(), so use them to preserve the
+  // stage across the otherwise phase-less callback ABI.
+  if (g_active.ctx && text) {
+    if (std::strstr(text, "generating image:")) {
+      g_active.sampling = true;
+    } else if (std::strstr(text, "sampling completed") ||
+               std::strstr(text, "Diffusion model sampling failed")) {
+      g_active.sampling = false;
+    }
+  }
   if (g_log_cb) g_log_cb(static_cast<int>(level), text ? text : "", g_log_user_data);
 }
 
 void forward_progress(int step, int steps, float time, void *) {
   if (!g_active.progress) return;
-  if (!g_active.progress(step, steps, time, g_active.user_data)) {
+  // A zero total marks non-sampling work. Still forward it so a disconnected
+  // client can cancel a long VAE encode/decode or lazy parameter load, but do
+  // not let those unrelated counters drive the UI progress bar.
+  const int routed_steps =
+      g_active.sampling && steps == g_active.sampling_steps ? steps : 0;
+  if (!g_active.progress(step, routed_steps, time, g_active.user_data)) {
     // The callback asked to stop. sd_cancel_generation only takes effect at
     // the next step boundary, so record it for the generate() return path.
     g_active.cancelled = true;
@@ -131,6 +152,46 @@ bool engine_generate(dit_ctx *ctx, const dit_gen_params *params, dit_progress_cb
     gen.strength = params->denoise_strength;
   }
 
+  if (params->mask_image && params->mask_width > 0 && params->mask_height > 0) {
+    if (!gen.init_image.data) {
+      ctx->last_error = "inpaint mask requires an init image";
+      return false;
+    }
+    if (params->mask_width != params->init_width ||
+        params->mask_height != params->init_height) {
+      ctx->last_error = "inpaint mask dimensions do not match init image";
+      return false;
+    }
+    gen.mask_image.width = static_cast<uint32_t>(params->mask_width);
+    gen.mask_image.height = static_cast<uint32_t>(params->mask_height);
+    gen.mask_image.channel = 1;
+    gen.mask_image.data = const_cast<uint8_t *>(params->mask_image);
+  }
+
+  std::vector<sd_image_t> reference_images;
+  if (params->reference_image_count > 0) {
+    if (!params->reference_images_rgb ||
+        !params->reference_widths || !params->reference_heights) {
+      ctx->last_error = "invalid reference images";
+      return false;
+    }
+    reference_images.reserve(params->reference_image_count);
+    for (int i = 0; i < params->reference_image_count; ++i) {
+      if (!params->reference_images_rgb[i] || params->reference_widths[i] <= 0 ||
+          params->reference_heights[i] <= 0) {
+        ctx->last_error = "invalid reference image";
+        return false;
+      }
+      reference_images.push_back(
+          {static_cast<uint32_t>(params->reference_widths[i]),
+           static_cast<uint32_t>(params->reference_heights[i]), 3,
+           const_cast<uint8_t *>(params->reference_images_rgb[i])});
+    }
+    gen.ref_images = reference_images.data();
+    gen.ref_images_count = static_cast<int>(reference_images.size());
+    gen.ref_image_args = "preset=flux2";
+  }
+
   if (params->vae_tile_size > 0) {
     gen.vae_tiling_params.enabled = true;
     gen.vae_tiling_params.tile_size_x = params->vae_tile_size;
@@ -138,7 +199,14 @@ bool engine_generate(dit_ctx *ctx, const dit_gen_params *params, dit_progress_cb
     gen.vae_tiling_params.target_overlap = params->vae_tile_overlap;
   }
 
-  g_active = ActiveGeneration{progress, preview, user_data, ctx, false};
+  int sampling_steps = std::max(1, params->steps);
+  if (gen.init_image.data && gen.strength < 1.0f) {
+    // stable-diffusion.cpp retains t_enc + 1 intervals after trimming.
+    const int t_enc = static_cast<int>(params->steps * gen.strength);
+    sampling_steps = std::clamp(t_enc + 1, 1, std::max(1, params->steps));
+  }
+  g_active = ActiveGeneration{progress, preview, user_data, ctx, false, false,
+                              sampling_steps};
   sd_set_progress_callback(progress ? forward_progress : nullptr, nullptr);
   if (preview && ctx->preview_interval > 0) {
     sd_set_preview_callback(forward_preview, PREVIEW_PROJ, ctx->preview_interval,

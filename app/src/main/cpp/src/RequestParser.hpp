@@ -23,6 +23,7 @@
 inline GenerationRequest parseGenerationRequest(const nlohmann::json &json,
                                                 bool sdxl, bool anima,
                                                 bool img2img_available,
+                                                bool reference_edit_available,
                                                 bool ultrafix_supported) {
   GenerationRequest req;
 
@@ -89,6 +90,37 @@ inline GenerationRequest parseGenerationRequest(const nlohmann::json &json,
   };
   req.preview_format = sanitize_format(json.value("preview_format", "raw"));
   req.output_format = sanitize_format(json.value("output_format", "raw"));
+
+  // Native multimodal edit inputs. Keep their aspect ratios: FLUX.2 encodes
+  // them as independent clean reference latents and positions them with its
+  // reference-token RoPE scheme. No count limit: each reference lengthens the
+  // DiT sequence, so memory, not the parser, bounds how many fit.
+  if (json.contains("reference_images")) {
+    if (!reference_edit_available)
+      throw std::invalid_argument("reference editing not available (disabled)");
+    const auto &refs = json["reference_images"];
+    if (!refs.is_array())
+      throw std::invalid_argument("'reference_images' must be an array");
+    if (refs.empty())
+      throw std::invalid_argument("reference_images must not be empty");
+    req.reference_images.reserve(refs.size());
+    for (const auto &encoded : refs) {
+      if (!encoded.is_string())
+        throw std::invalid_argument("reference image must be base64 text");
+      try {
+        const std::string dec_str = base64_decode(encoded.get<std::string>());
+        const std::vector<uint8_t> dec_buf(dec_str.begin(), dec_str.end());
+        ReferenceImage ref;
+        decode_reference_image(dec_buf, ref.rgb, ref.width, ref.height);
+        if (ref.rgb.empty() || ref.width <= 0 || ref.height <= 0)
+          throw std::runtime_error("Reference image decode failed");
+        req.reference_images.push_back(std::move(ref));
+      } catch (const std::exception &e) {
+        throw std::invalid_argument("Err proc reference image: " +
+                                    std::string(e.what()));
+      }
+    }
+  }
 
   const int sample_w = req.width / 8;
   const int sample_h = req.height / 8;

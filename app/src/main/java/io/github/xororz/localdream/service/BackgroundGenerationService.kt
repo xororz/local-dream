@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.first
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 
 class BackgroundGenerationService : Service() {
@@ -206,6 +207,17 @@ class BackgroundGenerationService : Service() {
         } else {
             null
         }
+        val referenceImages = if (intent.getBooleanExtra("has_reference_images", false)) {
+            try {
+                val refsFile = File(applicationContext.filesDir, "flux_references.json")
+                if (refsFile.exists()) JSONArray(refsFile.readText()) else null
+            } catch (e: Exception) {
+                Log.e("GenerationService", "Failed to read FLUX reference images", e)
+                null
+            }
+        } else {
+            null
+        }
 
         Log.d("GenerationService", "params: steps=$steps, cfg=$cfg, seed=$seed")
 
@@ -229,6 +241,7 @@ class BackgroundGenerationService : Service() {
                 effectiveHeight,
                 image,
                 mask,
+                referenceImages,
                 denoiseStrength,
                 useOpenCL,
                 scheduler,
@@ -255,6 +268,7 @@ class BackgroundGenerationService : Service() {
         effectiveHeight: Int,
         image: String?,
         mask: String?,
+        referenceImages: JSONArray?,
         denoiseStrength: Float,
         useOpenCL: Boolean,
         scheduler: String,
@@ -304,6 +318,7 @@ class BackgroundGenerationService : Service() {
                 seed?.let { put("seed", it) }
                 image?.let { put("image", it) }
                 mask?.let { put("mask", it) }
+                referenceImages?.let { put("reference_images", it) }
             }
 
             val request = Request.Builder()

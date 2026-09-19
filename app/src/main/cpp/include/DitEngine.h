@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define DIT_ENGINE_ABI_VERSION 1
+#define DIT_ENGINE_ABI_VERSION 3
 
 // Name of the single symbol the core resolves after dlopen.
 #define DIT_ENGINE_ENTRY_SYMBOL "dit_engine_get_api"
@@ -66,13 +66,28 @@ typedef struct {
   int init_width;
   int init_height;
   float denoise_strength;
+  // inpaint: single-channel mask, mask_width * mask_height bytes. White
+  // pixels are regenerated and black pixels retain the init image. NULL for
+  // plain txt2img/img2img.
+  const uint8_t *mask_image;
+  int mask_width;
+  int mask_height;
+  // Native DiT edit conditioning. Unlike init_image_rgb these images remain
+  // clean reference latents and do not shorten the sampling schedule. Any
+  // count is accepted; each one lengthens the DiT sequence.
+  const uint8_t *const *reference_images_rgb;
+  const int *reference_widths;
+  const int *reference_heights;
+  int reference_image_count;
   // VAE tiling for resolutions whose full decode does not fit; 0 disables.
   int vae_tile_size;
   float vae_tile_overlap;
 } dit_gen_params;
 
-// Called once per sampling step. Returning false asks the engine to cancel the
-// generation, which then fails with a cancelled status.
+// Called for sampling and for long auxiliary work so callers can still cancel
+// while weights/VAE tiles are running. total_steps is the effective sampling
+// step count during sampling, and 0 during auxiliary work. Returning false
+// asks the engine to cancel the generation.
 typedef bool (*dit_progress_cb)(int step, int total_steps, float step_seconds,
                                 void *user_data);
 
