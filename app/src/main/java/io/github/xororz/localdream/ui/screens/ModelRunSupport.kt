@@ -242,11 +242,8 @@ fun computeAspectTargetSize(usesFixedCanvas: Boolean, aspectRatio: String, canva
 }
 
 /**
- * Width and height a DiT model will actually run.
- *
- * The 256-pixel step is the set verified to stay correct on the optimized HTP
- * VAE path. Smaller increments can produce displaced image bands on rectangular
- * canvases even though the model architecture itself accepts those dimensions.
+ * Width and height a DiT model will actually run, snapped to
+ * [DitResolution.SIZE_STEP].
  */
 const val DIT_MIN_SIZE = DitResolution.MIN_SIZE
 const val DIT_MAX_SIZE = DitResolution.MAX_SIZE

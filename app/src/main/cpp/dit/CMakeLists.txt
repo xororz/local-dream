@@ -12,6 +12,30 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(SDCPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/stable-diffusion.cpp")
 
+# Local fixes on top of the pinned submodules, applied in place. A patch that
+# already reverse-applies is left alone, so reconfiguring is idempotent.
+function(apply_local_patch patch_file work_dir)
+    execute_process(
+        COMMAND git apply --reverse --check "${patch_file}"
+        WORKING_DIRECTORY "${work_dir}"
+        RESULT_VARIABLE already_applied
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if(NOT already_applied EQUAL 0)
+        execute_process(
+            COMMAND git apply "${patch_file}"
+            WORKING_DIRECTORY "${work_dir}"
+            RESULT_VARIABLE patch_result
+            ERROR_VARIABLE patch_error
+        )
+        if(NOT patch_result EQUAL 0)
+            message(FATAL_ERROR "${patch_file}: ${patch_error}")
+        endif()
+    endif()
+endfunction()
+apply_local_patch("${CMAKE_CURRENT_SOURCE_DIR}/stable-diffusion.cpp.patch" "${SDCPP_DIR}")
+apply_local_patch("${CMAKE_CURRENT_SOURCE_DIR}/ggml.patch" "${SDCPP_DIR}/ggml")
+
 set(GGML_HEXAGON ON CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)

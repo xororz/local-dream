@@ -185,7 +185,7 @@ class RemoteHostService : Service() {
                         400,
                         JSONObject().put(
                             "error",
-                            "DiT resolution must be 512..2048 in 256-pixel steps",
+                            "DiT resolution must be 512..2048 in ${DitResolution.SIZE_STEP}-pixel steps",
                         ),
                     )
                 }

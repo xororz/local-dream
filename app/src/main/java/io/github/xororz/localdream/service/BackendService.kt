@@ -397,11 +397,17 @@ class BackendService : Service() {
                 // already on the DSP search path, and they are only useful on
                 // the devices whose HTP version the engine covers.
                 if (DitEngine.isSupportedDevice()) {
+                    // Skel rebuilds often keep the exact (page-aligned) size,
+                    // so also refresh any copy older than the installed APK.
+                    val apkUpdateTime =
+                        packageManager.getPackageInfo(packageName, 0).lastUpdateTime
                     assets.list("ditlibs")?.forEach { fileName ->
                         val target = File(runtimeDir, fileName)
                         val assetSize =
                             assets.open("ditlibs/$fileName").use { it.available().toLong() }
-                        if (!target.exists() || target.length() != assetSize) {
+                        if (!target.exists() || target.length() != assetSize ||
+                            target.lastModified() < apkUpdateTime
+                        ) {
                             assets.open("ditlibs/$fileName").use { input ->
                                 target.outputStream().use { output -> input.copyTo(output) }
                             }

@@ -1,0 +1,43 @@
+diff --git a/src/ggml-hexagon/htp/conv2d-ops.c b/src/ggml-hexagon/htp/conv2d-ops.c
+index 3ee5eab4..8171cd70 100644
+--- a/src/ggml-hexagon/htp/conv2d-ops.c
++++ b/src/ggml-hexagon/htp/conv2d-ops.c
+@@ -856,7 +856,10 @@ static void conv2d_store_output_worker(unsigned int nth, unsigned int ith, void
+                         row0 = hvx_vec_add_f32_f32(
+                             row0, hvx_vmemu(st->residual + (dst - st->dst)));
+                     }
+-                    if (valid_count == HTP_CONV2D_TILE_W) {
++                    // An aligned vmem ignores the low address bits, so the
++                    // fast path also needs a 128-byte aligned destination;
++                    // rows are not aligned when ow is not a multiple of 32.
++                    if (valid_count == HTP_CONV2D_TILE_W && ((uintptr_t) dst & 127u) == 0) {
+                         Q6_vmem_QRIV_nt(all, (HVX_Vector *) dst, row0);
+                     } else {
+                         hvx_vec_store_u(dst, valid_count * sizeof(float), row0);
+@@ -868,7 +871,7 @@ static void conv2d_store_output_worker(unsigned int nth, unsigned int ith, void
+                             row1 = hvx_vec_add_f32_f32(
+                                 row1, hvx_vmemu(st->residual + (dst1 - st->dst)));
+                         }
+-                        if (valid_count == HTP_CONV2D_TILE_W) {
++                        if (valid_count == HTP_CONV2D_TILE_W && ((uintptr_t) dst1 & 127u) == 0) {
+                             Q6_vmem_QRIV_nt(all, (HVX_Vector *) dst1, row1);
+                         } else {
+                             hvx_vec_store_u(dst1, valid_count * sizeof(float), row1);
+diff --git a/src/ggml-hexagon/htp/cpy-ops.c b/src/ggml-hexagon/htp/cpy-ops.c
+index 2dd5412e..23c08f13 100644
+--- a/src/ggml-hexagon/htp/cpy-ops.c
++++ b/src/ggml-hexagon/htp/cpy-ops.c
+@@ -362,6 +362,13 @@ static inline void cpy_dma_sametype_sameshape(
+         (ne02 == 1 || (nb02 == ne01 * nb01 && nb2 == ne01 * nb1)) &&
+         (ne03 == 1 || (nb03 == ne02 * nb02 && nb3 == ne02 * nb2));
+ 
++    // The DMA engine bypasses the DSP data cache. Write back src so the DMA
++    // reads what earlier HVX ops produced, and clean+invalidate dst so neither
++    // a later cached read nor a later write-back of stale lines (e.g. from the
++    // memory's previous tenant) can shadow the bytes the DMA puts in DDR.
++    hex_l2flush((void *) src0->data, src0->size);
++    hex_l2flush((void *) dst->data, dst->size);
++
+     dma_queue * q = octx->ctx->dma[0];
+ 
+     if (contiguous_outer) {
