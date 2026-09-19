@@ -477,4 +477,22 @@
     <string name="ultrafix_import_output">출력 크기: %1$d×%2$d</string>
     <string name="ultrafix_import_scale">배율: %1$d%%</string>
     <string name="ultrafix_longpress_hint">팁: 업스케일 또는 UltraFix 버튼을 길게 누르면 로컬 이미지를 가져올 수 있습니다.</string>
+    <string name="draw_title">그리기</string>
+    <string name="draw_done">완료</string>
+    <string name="draw_original_background">원본 배경</string>
+    <string name="draw_clear_title">캔버스 지우기</string>
+    <string name="draw_clear_message">모든 그림을 삭제하시겠습니까?</string>
+    <string name="draw_clear_confirm">지우기</string>
+    <string name="draw_size">크기: %1$d</string>
+    <string name="draw_transparency">투명도: %1$d%%</string>
+    <string name="draw_blur">흐림: %1$d</string>
+    <string name="draw_pipette">색상 선택기</string>
+    <string name="draw_eraser">지우개</string>
+    <string name="draw_new_layer">새 레이어</string>
+    <string name="draw_zoom">확대/축소</string>
+    <string name="draw_touch_mode">터치 모드</string>
+    <string name="draw_clear_all">전체 지우기</string>
+    <string name="draw_select_color">색상 선택</string>
+    <string name="draw_result">결과:</string>
+    <string name="draw_select">선택</string>
 </resources>

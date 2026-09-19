@@ -91,11 +91,13 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.get
+import io.github.xororz.localdream.R
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -217,12 +219,12 @@ fun DrawScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Drawing") },
+                title = { Text(stringResource(R.string.draw_title)) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack, enabled = !isSaving) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.back),
                         )
                     }
                 },
@@ -266,7 +268,7 @@ fun DrawScreen(
                             }
                         },
                         enabled = !isSaving,
-                    ) { Text("Done") }
+                    ) { Text(stringResource(R.string.draw_done)) }
                 },
             )
         },
@@ -485,8 +487,8 @@ fun DrawScreen(
                                             val bitmapY = ((targetPoint.y - offsetY) / scale).toInt()
                                                 .coerceIn(0, originalBitmap.height - 1)
 
-                                            // Усредняем цвета в радиусе вокруг точки
-                                            val sampleRadius = 5 // Радиус выборки в пикселях
+                                            // Average the colors in a radius around the point
+                                            val sampleRadius = 5 // Sampling radius in pixels
                                             var totalRed = 0f
                                             var totalGreen = 0f
                                             var totalBlue = 0f
@@ -562,7 +564,7 @@ fun DrawScreen(
             ) {
                 Image(
                     bitmap = originalBitmap.asImageBitmap(),
-                    contentDescription = "Original Background",
+                    contentDescription = stringResource(R.string.draw_original_background),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -683,8 +685,8 @@ fun DrawScreen(
     if (showClearDialog) {
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
-            title = { Text(text = "Clear canvas") },
-            text = { Text(text = "Are you sure you want to delete all drawings?") },
+            title = { Text(text = stringResource(R.string.draw_clear_title)) },
+            text = { Text(text = stringResource(R.string.draw_clear_message)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -697,12 +699,12 @@ fun DrawScreen(
                         showClearDialog = false
                     },
                 ) {
-                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.draw_clear_confirm), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.cancel))
                 }
             },
         )
@@ -759,7 +761,10 @@ fun BrushToolsComponent(
                     valueRange = 5f..200f,
                     interactionSource = sizeInteractionSource,
                 )
-                Text(text = "Size: ${currentSize.toInt()}", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    text = stringResource(R.string.draw_size, currentSize.toInt()),
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                 Slider(
@@ -768,7 +773,10 @@ fun BrushToolsComponent(
                     valueRange = 0.1f..1f,
                     interactionSource = alphaInteractionSource,
                 )
-                Text(text = "Transp.: ${(currentAlpha * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    text = stringResource(R.string.draw_transparency, (currentAlpha * 100).toInt()),
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                 Slider(
@@ -777,7 +785,10 @@ fun BrushToolsComponent(
                     valueRange = 0f..100f,
                     interactionSource = blurInteractionSource,
                 )
-                Text(text = "Blur: ${currentBlur.toInt()}", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    text = stringResource(R.string.draw_blur, currentBlur.toInt()),
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
 
@@ -793,14 +804,14 @@ fun BrushToolsComponent(
                 onClick = onColorClick,
                 enabled = !isEraserMode && cloneMode == CloneMode.OFF,
                 colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = currentColor, // Цвет, когда кнопка активна
+                    containerColor = currentColor, // Color shown while the button is active
                     disabledContainerColor = currentColor.copy(alpha = 0.38f),
                 ),
             ) {}
 
             // Pipette
             FilledIconToggleButton(checked = isPickerMode, onCheckedChange = onPickerModeChange) {
-                Icon(imageVector = Icons.Default.Colorize, contentDescription = "Pipette")
+                Icon(imageVector = Icons.Default.Colorize, contentDescription = stringResource(R.string.draw_pipette))
             }
 
             // Stamp / Clone
@@ -821,17 +832,17 @@ fun BrushToolsComponent(
 
             // Eraser
             FilledIconToggleButton(checked = isEraserMode, onCheckedChange = onEraserModeChange) {
-                Icon(imageVector = Icons.Default.ContentCut, contentDescription = "Eraser")
+                Icon(imageVector = Icons.Default.ContentCut, contentDescription = stringResource(R.string.draw_eraser))
             }
 
             // New layer
             FilledIconToggleButton(checked = false, onCheckedChange = { onNewLayerClick() }) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = "New layer")
+                Icon(imageVector = Icons.Default.Add, contentDescription = stringResource(R.string.draw_new_layer))
             }
 
             // Undo
             FilledIconToggleButton(checked = false, onCheckedChange = { onUndo() }) {
-                Icon(imageVector = Icons.AutoMirrored.Default.Undo, contentDescription = "Undo")
+                Icon(imageVector = Icons.AutoMirrored.Default.Undo, contentDescription = stringResource(R.string.undo))
             }
         }
 
@@ -844,7 +855,7 @@ fun BrushToolsComponent(
         ) {
             // Zoom
             FilledIconToggleButton(checked = isZoomMode, onCheckedChange = onZoomModeChange) {
-                Icon(imageVector = Icons.Default.Search, contentDescription = "Zoom")
+                Icon(imageVector = Icons.Default.Search, contentDescription = stringResource(R.string.draw_zoom))
             }
 
             // Touch mode
@@ -852,12 +863,12 @@ fun BrushToolsComponent(
                 checked = !isTouchpadMode,
                 onCheckedChange = { isChecked -> onTouchpadModeChange(!isChecked) },
             ) {
-                Icon(imageVector = Icons.Default.TouchApp, contentDescription = "Touch mode")
+                Icon(imageVector = Icons.Default.TouchApp, contentDescription = stringResource(R.string.draw_touch_mode))
             }
 
             // Clear all
             FilledIconToggleButton(checked = false, onCheckedChange = { onClearAll() }) {
-                Icon(imageVector = Icons.Default.Delete, contentDescription = "Clear all")
+                Icon(imageVector = Icons.Default.Delete, contentDescription = stringResource(R.string.draw_clear_all))
             }
         }
     }
@@ -878,7 +889,7 @@ fun SimpleColorPickerDialog(initialColor: Color, onColorSelected: (Color) -> Uni
     val currentSelectedColor = remember(hue, saturation, value) { Color.hsv(hue, saturation, value) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Select color") },
+        title = { Text(stringResource(R.string.draw_select_color)) },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 Box(
@@ -962,7 +973,7 @@ fun SimpleColorPickerDialog(initialColor: Color, onColorSelected: (Color) -> Uni
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Result:")
+                    Text(stringResource(R.string.draw_result))
                     Box(
                         modifier = Modifier
                             .size(60.dp, 30.dp)
@@ -976,8 +987,8 @@ fun SimpleColorPickerDialog(initialColor: Color, onColorSelected: (Color) -> Uni
             Button(onClick = {
                 onColorSelected(currentSelectedColor)
                 onDismiss()
-            }) { Text("Select") }
+            }) { Text(stringResource(R.string.draw_select)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }

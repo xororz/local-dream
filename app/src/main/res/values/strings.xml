@@ -487,4 +487,22 @@
     <string name="ultrafix_import_output">Output size: %1$d×%2$d</string>
     <string name="ultrafix_import_scale">Scale: %1$d%%</string>
     <string name="ultrafix_longpress_hint">Tip: long-press the upscale or UltraFix button to import a local image.</string>
+    <string name="draw_title">Drawing</string>
+    <string name="draw_done">Done</string>
+    <string name="draw_original_background">Original background</string>
+    <string name="draw_clear_title">Clear canvas</string>
+    <string name="draw_clear_message">Are you sure you want to delete all drawings?</string>
+    <string name="draw_clear_confirm">Clear</string>
+    <string name="draw_size">Size: %1$d</string>
+    <string name="draw_transparency">Transp.: %1$d%%</string>
+    <string name="draw_blur">Blur: %1$d</string>
+    <string name="draw_pipette">Color picker</string>
+    <string name="draw_eraser">Eraser</string>
+    <string name="draw_new_layer">New layer</string>
+    <string name="draw_zoom">Zoom</string>
+    <string name="draw_touch_mode">Touch mode</string>
+    <string name="draw_clear_all">Clear all</string>
+    <string name="draw_select_color">Select color</string>
+    <string name="draw_result">Result:</string>
+    <string name="draw_select">Select</string>
 </resources>

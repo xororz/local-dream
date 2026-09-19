@@ -186,6 +186,26 @@ class Pipeline {
     nsfw_threshold_ = threshold;
   }
 
+  // Blanks an RGB result that the NSFW checker scores over the threshold.
+  // generate() runs this on its way out; any pipeline that overrides generate()
+  // has to call it too, or the filter build silently stops filtering.
+  void applySafetyChecker(std::vector<uint8_t> &rgb, int width, int height) {
+    if (!safety_interpreter_) return;
+    auto safety_start = std::chrono::high_resolution_clock::now();
+    float score = 0.0f;
+    if (safety_check(rgb, width, height, score, safety_interpreter_,
+                     safety_session_)) {
+      std::cout << "NSFW Score: " << score << std::endl;
+      if (score > nsfw_threshold_) {
+        QNN_WARN("NSFW detected (%.2f>%.2f).", score, nsfw_threshold_);
+        std::fill(rgb.begin(), rgb.end(), 255);
+      }
+    } else {
+      QNN_WARN("Safety check failed.");
+    }
+    std::cout << "Safety check dur: " << elapsedMs(safety_start) << "ms\n";
+  }
+
   // Mutates `req` only to release the decoded image buffer once it is no
   // longer needed (a ~190 MB allocation at ultrafix sizes).
   //
@@ -385,7 +405,9 @@ inline Conditioning Pipeline::encodePrompts(const GenerationRequest &req) {
 
   const uint32_t cache_mode =
       isAnima() ? prompt_cache::kModeAnima
-                : (sdxl_ ? (text_encoder_.fixed_chunks_ ? 4 : 3) : prompt_cache::kModeSd15);
+                : (sdxl_ ? (text_encoder_.fixed_chunks_ ? prompt_cache::kModeSdxlFixedChunks
+                                                      : prompt_cache::kModeSdxlChunked)
+                       : prompt_cache::kModeSd15);
 
   bool neg_hit =
       neg_cache_eligible &&
@@ -1175,6 +1197,11 @@ inline GenerationResult Pipeline::generate(
       current_step++;
     }
 
+    // The loop reports progress on entry, so the last denoising step has no
+    // iteration left to report it. Without this the bar sits at the second to
+    // last slot through the whole VAE decode and then jumps straight to done.
+    progress_callback(current_step, total_run_steps, "");
+
     endDenoise();
 
     // --- VAE Decode ---
@@ -1237,23 +1264,7 @@ inline GenerationResult Pipeline::generate(
     int final_height = req.height;
 
     // --- Safety Checker ---
-    if (safety_interpreter_) {
-      auto safety_start = std::chrono::high_resolution_clock::now();
-      float score = 0.0f;
-
-      if (safety_check(out_data, req.width, req.height, score,
-                       safety_interpreter_, safety_session_)) {
-        std::cout << "NSFW Score: " << score << std::endl;
-        if (score > nsfw_threshold_) {
-          QNN_WARN("NSFW detected (%.2f>%.2f).", score, nsfw_threshold_);
-          std::fill(out_data.begin(), out_data.end(), 255);
-        }
-      } else {
-        QNN_WARN("Safety check failed.");
-      }
-
-      std::cout << "Safety check dur: " << elapsedMs(safety_start) << "ms\n";
-    }
+    applySafetyChecker(out_data, final_width, final_height);
 
     current_step++;
     progress_callback(current_step, total_run_steps, "");

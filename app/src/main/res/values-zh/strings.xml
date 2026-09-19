@@ -477,4 +477,22 @@
     <string name="ultrafix_import_output">输出尺寸：%1$d×%2$d</string>
     <string name="ultrafix_import_scale">缩放：%1$d%%</string>
     <string name="ultrafix_longpress_hint">提示：长按超分或 UltraFix 按钮可导入本机图片。</string>
+    <string name="draw_title">绘制</string>
+    <string name="draw_done">完成</string>
+    <string name="draw_original_background">原图背景</string>
+    <string name="draw_clear_title">清空画布</string>
+    <string name="draw_clear_message">确定要删除所有绘制内容吗？</string>
+    <string name="draw_clear_confirm">清空</string>
+    <string name="draw_size">大小: %1$d</string>
+    <string name="draw_transparency">透明度: %1$d%%</string>
+    <string name="draw_blur">模糊: %1$d</string>
+    <string name="draw_pipette">取色器</string>
+    <string name="draw_eraser">橡皮擦</string>
+    <string name="draw_new_layer">新图层</string>
+    <string name="draw_zoom">缩放</string>
+    <string name="draw_touch_mode">触控模式</string>
+    <string name="draw_clear_all">全部清空</string>
+    <string name="draw_select_color">选择颜色</string>
+    <string name="draw_result">结果:</string>
+    <string name="draw_select">选择</string>
 </resources>

@@ -477,4 +477,22 @@
     <string name="ultrafix_import_output">出力サイズ：%1$d×%2$d</string>
     <string name="ultrafix_import_scale">拡大率：%1$d%%</string>
     <string name="ultrafix_longpress_hint">ヒント：アップスケールまたは UltraFix ボタンを長押しするとローカル画像を読み込めます。</string>
+    <string name="draw_title">描画</string>
+    <string name="draw_done">完了</string>
+    <string name="draw_original_background">元の背景</string>
+    <string name="draw_clear_title">キャンバスを消去</string>
+    <string name="draw_clear_message">すべての描画を削除しますか？</string>
+    <string name="draw_clear_confirm">消去</string>
+    <string name="draw_size">サイズ: %1$d</string>
+    <string name="draw_transparency">透明度: %1$d%%</string>
+    <string name="draw_blur">ぼかし: %1$d</string>
+    <string name="draw_pipette">スポイト</string>
+    <string name="draw_eraser">消しゴム</string>
+    <string name="draw_new_layer">新規レイヤー</string>
+    <string name="draw_zoom">ズーム</string>
+    <string name="draw_touch_mode">タッチモード</string>
+    <string name="draw_clear_all">すべて消去</string>
+    <string name="draw_select_color">色を選択</string>
+    <string name="draw_result">結果:</string>
+    <string name="draw_select">選択</string>
 </resources>

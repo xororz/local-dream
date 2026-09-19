@@ -155,7 +155,11 @@ class PipelineSdxl : public PipelineQnn {
                     prompts.negative_embeddings_2.data() + offset * text_embedding_size_2,
                     prompts.eos_positions[chunk],
                     cond.negHidden() + offset * cond.hidden_dim, pooled.data());
-        if (chunk + 1 == (text_encoder_.fixed_chunks_ ? cond.negative_chunks : cond.seq_len / 77))
+        // Take the pooled vector from the last chunk that holds actual prompt
+        // text, not the last padded one: the two sides can need a different
+        // number of chunks, and a short negative next to a long positive would
+        // otherwise be pooled from an empty chunk.
+        if (chunk + 1 == cond.negative_chunks)
           std::copy(pooled.begin(), pooled.end(), cond.negPooled());
       }
       if (need_positive) {
@@ -163,7 +167,7 @@ class PipelineSdxl : public PipelineQnn {
                     prompts.positive_embeddings_2.data() + offset * text_embedding_size_2,
                     prompts.eos_positions[cond.seq_len / 77 + chunk],
                     cond.posHidden() + offset * cond.hidden_dim, pooled.data());
-        if (chunk + 1 == (text_encoder_.fixed_chunks_ ? cond.positive_chunks : cond.seq_len / 77))
+        if (chunk + 1 == cond.positive_chunks)
           std::copy(pooled.begin(), pooled.end(), cond.posPooled());
       }
     }

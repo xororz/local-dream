@@ -89,6 +89,8 @@ class PipelineDit : public Pipeline {
                             const ProgressCallback &progress_callback) override {
     if (!ctx_ || !api_) throw std::runtime_error("DiT engine not initialized");
     if (req.prompt.empty()) throw std::invalid_argument("Prompt empty");
+    if (safety_interpreter_ && !safety_session_)
+      throw std::runtime_error("SafetyChecker missing");
 
     api_->set_preview_interval(
         ctx_, req.show_diffusion_process ? req.show_diffusion_stride : 0);
@@ -149,6 +151,9 @@ class PipelineDit : public Pipeline {
     result.image_data.assign(
         out_rgb, out_rgb + static_cast<size_t>(out_width) * out_height * 3);
     api_->free_image(out_rgb);
+    // generate() is overridden wholesale here, so the base class's safety pass
+    // never runs on its own; the filter build depends on this call.
+    applySafetyChecker(result.image_data, out_width, out_height);
     result.width = out_width;
     result.height = out_height;
     result.channels = 3;

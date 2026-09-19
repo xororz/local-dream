@@ -218,6 +218,7 @@ class ModelDownloadService : Service() {
                     stopSelf()
                 }
             } catch (e: CancellationException) {
+                discardPartialFiles(modelType, modelId)
                 // Cancellation (service reclaimed, a new download started, or
                 // explicit cancel) is not a download failure: re-throw so it is
                 // not surfaced as an "Error" state. Emitting Error here is what
@@ -229,6 +230,7 @@ class ModelDownloadService : Service() {
 
                 tempFile?.delete()
                 extractTempDir?.deleteRecursively()
+                discardPartialFiles(modelType, modelId)
 
                 _downloadState.value =
                     DownloadState.Error(modelId, e.message ?: getString(R.string.unknown_error))
@@ -301,6 +303,23 @@ class ModelDownloadService : Service() {
         // Written last: it is what marks the package complete to the scanner,
         // so an interrupted download never looks like an installed model.
         if (!markerFile.isNullOrEmpty()) File(modelDir, markerFile).createNewFile()
+    }
+
+    /**
+     * Drops the ".part" files a multi-file download leaves behind.
+     *
+     * Each part is written from the start rather than resumed, so a leftover
+     * one is dead weight - and at DiT package sizes that is gigabytes the user
+     * cannot see. Files that already finished keep their final name and stay,
+     * which is what lets the next attempt skip them.
+     */
+    private fun discardPartialFiles(modelType: String, modelId: String) {
+        if (modelType != TYPE_MULTI_FILE) return
+        val modelDir = File(getModelsDir(), modelId)
+        modelDir.listFiles { file -> file.isFile && file.name.endsWith(".part") }
+            ?.forEach { part ->
+                if (part.delete()) Log.i(TAG, "Removed partial file ${part.name}")
+            }
     }
 
     /** Published size of a remote file, or -1 when the server does not say. */

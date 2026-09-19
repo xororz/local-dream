@@ -22,6 +22,12 @@ constexpr uint32_t kModeSdxl = 1;
 // Anima (Qwen text encoder): 512-token context, no pooled output. Its own mode
 // keeps its files from ever colliding with a 77-token CLIP cache entry.
 constexpr uint32_t kModeAnima = 2;
+// SDXL chunked prompts: the cached tensors are seq_len-wide, so a package that
+// grows its context via .patch and one that ships a fixed multi-chunk context
+// must not read each other's files. kModeSdxl stays reserved for the original
+// single-chunk layout.
+constexpr uint32_t kModeSdxlChunked = 3;
+constexpr uint32_t kModeSdxlFixedChunks = 4;
 
 struct Header {
   char magic[4];
