@@ -60,7 +60,7 @@ class ModelDownloadService : Service() {
         const val TYPE_UPSCALER = "upscaler"
 
         // Package downloaded as individual files instead of one zip. A DiT
-        // package is 7-9GB, and unzipping one needs the archive and its
+        // package is many gigabytes, and unzipping one needs the archive and its
         // contents on disk at the same time; fetching the files straight into
         // the model directory halves the space a download needs and lets an
         // interrupted one resume at file granularity.

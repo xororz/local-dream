@@ -15,10 +15,10 @@ index 8f585ba..6909a9c 100644
              x = conv->forward(ctx, x);
          } else {
 diff --git a/src/model/common/ggml_block.hpp b/src/model/common/ggml_block.hpp
-index 185a9e1..60a4339 100644
+index 185a9e1..d70be42 100644
 --- a/src/model/common/ggml_block.hpp
 +++ b/src/model/common/ggml_block.hpp
-@@ -468,6 +468,7 @@ public:
+@@ -470,6 +470,7 @@ public:
                  return out;
              }
          }
@@ -26,15 +26,15 @@ index 185a9e1..60a4339 100644
          return ggml_ext_conv_2d(ctx->ggml_ctx,
                                  x,
                                  w,
-@@ -502,7 +503,65 @@ public:
+@@ -505,6 +506,44 @@ public:
          return try_forward_upscale(ctx, x, upscale_factor) != nullptr;
      }
  
 +    // Stride-2, unpadded 3x3 conv applied to x after a (0,1,0,1) zero pad, as
 +    // in the VAE encoder downsample. The HMX direct kernel only runs stride 1,
-+    // so compute the stride-1, pad-1 conv of the *unpadded* x and keep odd
-+    // rows/columns: out[i][j] = full[2i+1][2j+1] reads x[2i..2i+2][2j..2j+2],
-+    // and the pad-1 border supplies the same trailing zero row/column.
++    // so compute the stride-1, pad-1 conv of the unpadded x and keep odd
++    // rows/columns: out[i][j] = full[2i+1][2j+1] reads
++    // x[2i..2i+2][2j..2j+2], while pad-1 supplies the trailing zero edges.
 +    // Returns nullptr when the direct kernel cannot run it.
 +    ggml_tensor* try_forward_downsample2(GGMLRunnerContext* ctx, ggml_tensor* x) {
 +        const int64_t W = x->ne[0];
@@ -48,38 +48,44 @@ index 185a9e1..60a4339 100644
 +            return nullptr;
 +        }
 +
-+        ggml_tensor* full = ggml_conv_2d_direct_bias(ctx->ggml_ctx, params["weight"], x, params["bias"],
-+                                                     1, 1, 1, 1, 1, 1);  // [N, OC, H, W]
++        ggml_tensor* full = ggml_conv_2d_direct_bias(
++            ctx->ggml_ctx, params["weight"], x, params["bias"],
++            1, 1, 1, 1, 1, 1);  // [N, OC, H, W]
 +        if (!ggml_backend_supports_op(ctx->backend, full)) {
 +            return nullptr;
 +        }
 +
-+        const int64_t C  = full->ne[2];
-+        const int64_t N  = full->ne[3];
-+        const size_t es  = ggml_element_size(full);
++        const int64_t C = full->ne[2];
++        const int64_t N = full->ne[3];
++        const size_t es = ggml_element_size(full);
 +        // [N*OC*H/2, 2, W/2, 2] -> pick index 1 on both size-2 axes.
-+        full             = ggml_reshape_4d(ctx->ggml_ctx, full, 2, W / 2, 2, (H / 2) * C * N);
++        full = ggml_reshape_4d(ctx->ggml_ctx, full, 2, W / 2, 2, (H / 2) * C * N);
 +        ggml_tensor* out = ggml_view_4d(ctx->ggml_ctx, full,
 +                                        1, W / 2, 1, (H / 2) * C * N,
 +                                        2 * es, W * es, 2 * W * es,
 +                                        es + W * es);
-+        out              = ggml_cont(ctx->ggml_ctx, out);
-+        return ggml_reshape_4d(ctx->ggml_ctx, out, W / 2, H / 2, C, N);  // [N, OC, H/2, W/2]
++        out = ggml_cont(ctx->ggml_ctx, out);
++        return ggml_reshape_4d(ctx->ggml_ctx, out, W / 2, H / 2, C, N);
 +    }
 +
+     ggml_tensor* try_forward_upscale_add(GGMLRunnerContext* ctx,
+                                          ggml_tensor* x,
+                                          ggml_tensor* residual,
+@@ -517,4 +556,26 @@ public:
  private:
-+    // The Hexagon backend repacks every F16 1x1/3x3 conv weight with IC % 32
-+    // == 0 into the HMX tile layout at upload time, and only its direct conv
-+    // kernel reads that layout. Any other path (im2col + mul_mat) multiplies
-+    // by scrambled weights, so make that silent corruption visible.
++    // Hexagon repacks eligible F16 1x1/3x3 weights into the HMX tile layout at
++    // upload time, and only the direct conv kernel reads that layout. A fallback
++    // to im2col + mul_mat would otherwise silently multiply scrambled weights.
 +    void warn_if_hmx_weight_fallback(GGMLRunnerContext* ctx) {
 +        static bool warned = false;
 +        if (warned || ctx->backend == nullptr) {
 +            return;
 +        }
-+        const bool hmx_shape = (kernel_size == std::make_pair(1, 1) || kernel_size == std::make_pair(3, 3)) &&
-+                               in_channels % 32 == 0;
-+        const char* name     = ggml_backend_name(ctx->backend);
++        const bool hmx_shape =
++            (kernel_size == std::make_pair(1, 1) ||
++             kernel_size == std::make_pair(3, 3)) &&
++            in_channels % 32 == 0;
++        const char* name = ggml_backend_name(ctx->backend);
 +        if (hmx_shape && name != nullptr && std::string(name).rfind("HTP", 0) == 0) {
 +            warned = true;
 +            LOG_ERROR("%s: conv (k=%dx%d s=%dx%d p=%dx%d) falls back from the HMX direct kernel "
@@ -91,4 +97,4 @@ index 185a9e1..60a4339 100644
 +
      ggml_tensor* try_forward_upscale(GGMLRunnerContext* ctx,
                                       ggml_tensor* x,
-                                      int upscale_factor) {
+                                      int upscale_factor,

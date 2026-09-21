@@ -12,8 +12,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(SDCPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/stable-diffusion.cpp")
 
-# Local fixes on top of the pinned submodules, applied in place. A patch that
-# already reverse-applies is left alone, so reconfiguring is idempotent.
+# Local fixes that have not landed in the pinned upstream revisions. A patch
+# that already reverse-applies is left alone, so reconfiguring is idempotent.
 function(apply_local_patch patch_file work_dir)
     execute_process(
         COMMAND git apply --reverse --check "${patch_file}"

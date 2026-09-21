@@ -7,7 +7,9 @@
 #include "DitEngine.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -39,10 +41,44 @@ void *g_log_user_data = nullptr;
 
 std::string g_create_error;
 
+bool image_pixel_count(const sd_image_t &image, size_t *pixel_count) {
+  if (!pixel_count || image.width == 0 || image.height == 0) return false;
+  const size_t width = static_cast<size_t>(image.width);
+  const size_t height = static_cast<size_t>(image.height);
+  if (height > std::numeric_limits<size_t>::max() / width) return false;
+  const size_t pixels = width * height;
+  if (pixels > std::numeric_limits<size_t>::max() / 4) return false;
+  *pixel_count = pixels;
+  return true;
+}
+
+// Qwen Image 2.1 has a native RGBA VAE. Per-step preview callbacks still carry
+// RGB, so composite straight alpha over white for previews only. The final
+// result keeps the original RGBA allocation and channel count.
+void image_to_rgb(const sd_image_t &image, size_t pixel_count, uint8_t *rgb) {
+  if (image.channel == 3) {
+    std::memcpy(rgb, image.data, pixel_count * 3);
+    return;
+  }
+
+  for (size_t i = 0; i < pixel_count; ++i) {
+    const uint8_t *rgba = image.data + i * 4;
+    uint8_t *dst = rgb + i * 3;
+    const unsigned alpha = rgba[3];
+    for (size_t channel = 0; channel < 3; ++channel) {
+      dst[channel] = static_cast<uint8_t>(
+          (static_cast<unsigned>(rgba[channel]) * alpha +
+           255u * (255u - alpha) + 127u) /
+          255u);
+    }
+  }
+}
+
 }  // namespace
 
 struct dit_ctx {
   sd_ctx_t *sd = nullptr;
+  dit_model_kind kind = DIT_MODEL_Z_IMAGE;
   std::string last_error;
   int preview_interval = 0;
 };
@@ -82,8 +118,24 @@ void forward_progress(int step, int steps, float time, void *) {
 
 void forward_preview(int step, int frame_count, sd_image_t *frames, bool, void *) {
   if (!g_active.preview || frame_count < 1 || !frames || !frames[0].data) return;
-  g_active.preview(step, frames[0].data, static_cast<int>(frames[0].width),
-                   static_cast<int>(frames[0].height), g_active.user_data);
+  const sd_image_t &frame = frames[0];
+  size_t pixel_count = 0;
+  if (!image_pixel_count(frame, &pixel_count)) return;
+  if (frame.channel == 3) {
+    g_active.preview(step, frame.data, static_cast<int>(frame.width),
+                     static_cast<int>(frame.height), g_active.user_data);
+    return;
+  }
+  if (frame.channel != 4) return;
+
+  try {
+    std::vector<uint8_t> rgb(pixel_count * 3);
+    image_to_rgb(frame, pixel_count, rgb.data());
+    g_active.preview(step, rgb.data(), static_cast<int>(frame.width),
+                     static_cast<int>(frame.height), g_active.user_data);
+  } catch (...) {
+    // A preview is optional; allocation failure must not abort generation.
+  }
 }
 
 dit_ctx *engine_create(const dit_ctx_params *params) {
@@ -97,16 +149,22 @@ dit_ctx *engine_create(const dit_ctx_params *params) {
   sd_ctx_params_init(&sd_params);
   sd_params.diffusion_model_path = params->diffusion_model_path;
   sd_params.llm_path = params->llm_path;
+  sd_params.llm_vision_path = params->llm_vision_path;
   sd_params.vae_path = params->vae_path;
   sd_params.n_threads = params->n_threads > 0 ? params->n_threads : 4;
   sd_params.flash_attn = params->flash_attn;
   sd_params.diffusion_flash_attn = params->flash_attn;
   sd_params.vae_conv_direct = params->vae_conv_direct;
+  // Keep the upstream segment prefetch enabled: it overlaps loading/repacking
+  // the next graph segment with HTP execution. Component-level residency is
+  // controlled separately by params_backend=all=disk.
+  sd_params.disable_prefetch = false;
   if (params->backend && params->backend[0]) sd_params.backend = params->backend;
   if (params->params_backend && params->params_backend[0])
     sd_params.params_backend = params->params_backend;
 
   auto *ctx = new dit_ctx();
+  ctx->kind = params->kind;
   ctx->sd = new_sd_ctx(&sd_params);
   if (!ctx->sd) {
     g_create_error = "new_sd_ctx failed";
@@ -123,9 +181,9 @@ void engine_destroy(dit_ctx *ctx) {
 }
 
 bool engine_generate(dit_ctx *ctx, const dit_gen_params *params, dit_progress_cb progress,
-                     dit_preview_cb preview, void *user_data, uint8_t **out_rgb,
-                     int *out_width, int *out_height) {
-  if (!ctx || !ctx->sd || !params || !out_rgb) return false;
+                     dit_preview_cb preview, void *user_data, uint8_t **out_pixels,
+                     int *out_width, int *out_height, int *out_channels) {
+  if (!ctx || !ctx->sd || !params || !out_pixels || !out_channels) return false;
   ctx->last_error.clear();
 
   std::lock_guard<std::mutex> lock(g_gen_mutex);
@@ -189,7 +247,8 @@ bool engine_generate(dit_ctx *ctx, const dit_gen_params *params, dit_progress_cb
     }
     gen.ref_images = reference_images.data();
     gen.ref_images_count = static_cast<int>(reference_images.size());
-    gen.ref_image_args = "preset=flux2";
+    gen.ref_image_args =
+        ctx->kind == DIT_MODEL_QWEN_IMAGE_2_1 ? "preset=qwen" : "preset=flux2";
   }
 
   if (params->vae_tile_size > 0) {
@@ -228,20 +287,34 @@ bool engine_generate(dit_ctx *ctx, const dit_gen_params *params, dit_progress_cb
 
   if (!ok || image_count < 1 || !images || !images[0].data) {
     ctx->last_error = cancelled ? "cancelled" : "generate_image failed";
-    if (images) free(images);
+    if (images) free_sd_images(images, std::max(0, image_count));
     return false;
   }
 
-  *out_rgb = images[0].data;
-  if (out_width) *out_width = static_cast<int>(images[0].width);
-  if (out_height) *out_height = static_cast<int>(images[0].height);
-  // Only the array is owned here; the pixel buffer goes back through
-  // free_image() once the core has copied it out.
-  free(images);
+  sd_image_t &image = images[0];
+  size_t pixel_count = 0;
+  if (!image_pixel_count(image, &pixel_count) ||
+      (image.channel != 3 && image.channel != 4)) {
+    ctx->last_error = "unsupported generated image dimensions/channels: " +
+                      std::to_string(image.width) + "x" +
+                      std::to_string(image.height) + "x" +
+                      std::to_string(image.channel);
+    free_sd_images(images, image_count);
+    return false;
+  }
+
+  // Transfer the original interleaved allocation. In particular, preserve
+  // Qwen Image 2.1's native alpha channel for the core/Kotlin receiver.
+  *out_pixels = image.data;
+  *out_channels = static_cast<int>(image.channel);
+  image.data = nullptr;
+  if (out_width) *out_width = static_cast<int>(image.width);
+  if (out_height) *out_height = static_cast<int>(image.height);
+  free_sd_images(images, image_count);
   return true;
 }
 
-void engine_free_image(uint8_t *rgb) { free(rgb); }
+void engine_free_image(uint8_t *pixels) { free(pixels); }
 
 const char *engine_last_error(const dit_ctx *ctx) {
   if (!ctx) return g_create_error.c_str();

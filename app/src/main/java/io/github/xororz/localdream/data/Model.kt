@@ -123,7 +123,7 @@ data class Model(
     val isCustom: Boolean = false,
     val isSdxl: Boolean = false,
     val isAnima: Boolean = false,
-    // DiT packages run by libdit_engine.so: "zimage" or "klein", empty otherwise.
+    // DiT packages run by libdit_engine.so: "zimage", "klein" or "qwen21".
     val ditKind: String = "",
     // Files that make up a package downloaded file-by-file rather than as one
     // zip, as "<path under baseUrl>|<name on disk>" pairs. Used by the DiT
@@ -145,7 +145,7 @@ data class Model(
     val usesFixedCanvas: Boolean
         get() = isSdxl || isAnima
 
-    // Z-Image and FLUX.2-Klein are DiT models with RoPE, so the run screen uses
+    // These DiT models use RoPE, so the run screen uses
     // independent width/height controls instead of a fixed canvas plus padding.
     val supportsFreeResolution: Boolean
         get() = isDit
@@ -286,6 +286,18 @@ data class Model(
             "Qwen/Qwen3-4B/resolve/main/tokenizer.json|tokenizer.json",
         )
 
+        val QWEN_IMAGE_2_1_PACKAGE_FILES = listOf(
+            "leejet/Qwen-Image-2.1-GGUF/resolve/main/" +
+                "qwen_image_2.1-Q4_0.gguf|dit.gguf",
+            "bartowski/Qwen_Qwen3-VL-8B-Instruct-GGUF/resolve/main/" +
+                "Qwen_Qwen3-VL-8B-Instruct-Q4_0.gguf|llm.gguf",
+            "bartowski/Qwen_Qwen3-VL-8B-Instruct-GGUF/resolve/main/" +
+                "mmproj-Qwen_Qwen3-VL-8B-Instruct-f16.gguf|llm_vision.gguf",
+            "Qwen/Qwen3-VL-8B-Instruct/resolve/main/tokenizer.json|tokenizer.json",
+            "Comfy-Org/Qwen-Image-2.1/resolve/main/vae/" +
+                "qwen_image_2.1_vae_bf16.safetensors|vae.safetensors",
+        )
+
         fun isDeviceSupported(): Boolean {
             val soc = getDeviceSoc()
             return getChipsetSuffix(soc) != null
@@ -347,6 +359,7 @@ data class Model(
         private fun markerFileName(ditKind: String): String = when (ditKind) {
             "zimage" -> "ZIMAGE"
             "klein" -> "KLEIN"
+            "qwen21" -> "QWEN_IMAGE_2_1"
             else -> ""
         }
 
@@ -529,6 +542,7 @@ class ModelRepository private constructor(private val context: Context) {
                 val animaFile = File(dir, "ANIMA")
                 val zImageFile = File(dir, "ZIMAGE")
                 val kleinFile = File(dir, "KLEIN")
+                val qwenImage21File = File(dir, "QWEN_IMAGE_2_1")
 
                 when {
                     zImageFile.exists() && DitEngine.isSupportedDevice() ->
@@ -536,6 +550,9 @@ class ModelRepository private constructor(private val context: Context) {
 
                     kleinFile.exists() && DitEngine.isSupportedDevice() ->
                         customModels.add(createCustomModel(dir, isNpu = true, ditKind = "klein"))
+
+                    qwenImage21File.exists() && DitEngine.isSupportedDevice() ->
+                        customModels.add(createCustomModel(dir, isNpu = true, ditKind = "qwen21"))
 
                     animaFile.exists() ->
                         customModels.add(createCustomModel(dir, isNpu = true, isAnima = true))
@@ -596,6 +613,7 @@ class ModelRepository private constructor(private val context: Context) {
             if (DitEngine.isSupportedDevice()) {
                 add(createZImageTurboModel())
                 add(createFlux2KleinModel())
+                add(createQwenImage21Model())
             }
             if (isSdxlCapableSoc(getDeviceSoc())) {
                 add(createIllustriousV16Model())
@@ -626,8 +644,8 @@ class ModelRepository private constructor(private val context: Context) {
         return model.copy(configDefaults = config.withFallback(model.configDefaults))
     }
 
-    // Z-Image Turbo and FLUX.2/Klein: FP8 DiT plus a shared Qwen3-4B text
-    // encoder, fetched file-by-file because the packages are 7-9GB.
+    // DiT packages are fetched file-by-file because they are too large to
+    // unpack from an archive on device.
     private fun createZImageTurboModel(): Model {
         val id = "z_image_turbo"
         return Model(
@@ -684,6 +702,35 @@ class ModelRepository private constructor(private val context: Context) {
             ),
             runOnCpu = false,
             ditKind = "klein",
+        )
+    }
+
+    private fun createQwenImage21Model(): Model {
+        val id = "qwen_image_2_1"
+        return Model(
+            id = id,
+            name = "Qwen Image 2.1",
+            description = context.getString(R.string.qwen_image_2_1_description),
+            baseUrl = baseUrl,
+            packageFiles = Model.QWEN_IMAGE_2_1_PACKAGE_FILES,
+            generationSize = 1024,
+            approximateSize = "10.8GB",
+            isDownloaded = Model.isDitPackageDownloaded(
+                context,
+                id,
+                "qwen21",
+                Model.QWEN_IMAGE_2_1_PACKAGE_FILES,
+            ),
+            codeDefaults = ModelConfig(
+                prompt = "a lovely cat holding a sign that says 'Qwen Image 2.1',",
+                negativePrompt = "",
+                steps = 20f,
+                cfg = 1f,
+                scheduler = "euler",
+                denoiseStrength = 1f,
+            ),
+            runOnCpu = false,
+            ditKind = "qwen21",
         )
     }
 
@@ -1052,7 +1099,7 @@ class ModelRepository private constructor(private val context: Context) {
             "anythingv5cpu", "qteamixcpu", "cuteyukimixcpu",
             "absoluterealitycpu", "chilloutmixcpu",
             // DiT
-            "z_image_turbo", "flux2_klein_4b",
+            "z_image_turbo", "flux2_klein_4b", "qwen_image_2_1",
         )
 
         fun isReservedModelId(id: String): Boolean = id in RESERVED_MODEL_IDS

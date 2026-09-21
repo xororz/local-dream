@@ -90,13 +90,14 @@ class HistoryManager(private val context: Context) {
             val timestamp = System.currentTimeMillis()
             val historyDir = getHistoryDir(modelId)
 
-            // Upscaled and ultrafixed images are 4x-class resolutions; store
-            // them as JPEG (PNG would be tens of MB and seconds to encode).
+            // Upscaled and ultrafixed opaque images are 4x-class resolutions;
+            // store them as JPEG. Transparent Qwen results must remain PNG.
             val isUpscaled = upscalerId != null || mode == GenerationMode.ULTRAFIX
-            val ext = if (isUpscaled) "jpg" else "png"
+            val useJpeg = isUpscaled && !bitmap.hasAlpha()
+            val ext = if (useJpeg) "jpg" else "png"
             val imageFile = File(historyDir, "$timestamp.$ext")
             FileOutputStream(imageFile).use { out ->
-                if (isUpscaled) {
+                if (useJpeg) {
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                 } else {
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)

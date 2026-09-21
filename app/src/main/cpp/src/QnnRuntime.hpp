@@ -38,6 +38,8 @@ inline bool init(const std::string &lib_dir) {
   return g_initialized;
 }
 
+inline bool isInitialized() { return g_initialized; }
+
 inline std::unique_ptr<QnnModel> createModel(const std::string &modelPath,
                                              const std::string &modelName) {
   using namespace qnn::tools;

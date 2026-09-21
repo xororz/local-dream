@@ -47,16 +47,31 @@
 //   anima:   tokenizer.json tokenizer_t5.json token_emb.bin clip.bin
 //            unet_part1.bin unet_part2.bin vae_decoder.bin
 //            [vae_encoder.bin] (optional; enables img2img/inpaint)
+//   zimage/klein: tokenizer.json dit.safetensors llm.gguf vae.safetensors
+//   qwen21:  tokenizer.json dit.gguf llm.gguf llm_vision.gguf vae.safetensors
 // SD15/SDXL CLIP runs on MNN (CPU); Anima's CLIP (clip.bin) runs on QNN/HTP
 // (the C++ side still does the qwen token_emb lookup -> input_embedding).
 struct ServerOptions {
-  enum class ModelType { kSd15Cpu, kSd15Npu, kSdxl, kSdxlMnn, kAnima, kZImage, kFlux2Klein };
+  enum class ModelType {
+    kSd15Cpu,
+    kSd15Npu,
+    kSdxl,
+    kSdxlMnn,
+    kAnima,
+    kZImage,
+    kFlux2Klein,
+    kQwenImage21,
+  };
 
   int port = 8081;
   std::string listen_address = "127.0.0.1";
   ModelType type = ModelType::kSd15Npu;
   std::string model_dir;
   std::string lib_dir;
+  // Optional second library directory for DiT processes: --lib_dir keeps
+  // pointing at libdit_engine.so while this one supplies the QNN runtime used
+  // by the shared /upscale endpoint.
+  std::string qnn_lib_dir;
   std::string patch_path;
   std::string safety_checker_path;
   float nsfw_threshold = 0.5f;
@@ -71,7 +86,10 @@ struct ServerOptions {
   // Run all three DiT modules on the Hexagon NPU. The Android catalog only
   // exposes these models on the SM8750-and-newer devices validated upstream.
   std::string dit_backend = "diffusion=HTP0,te=HTP0,vae=HTP0";
-  std::string dit_params_backend;
+  // Load a component lazily and discard its parameters at runner_end(). This
+  // keeps TE, DiT and VAE weights from remaining co-resident between stages;
+  // intra-component segment prefetch remains enabled for throughput.
+  std::string dit_params_backend = "all=disk";
   int dit_threads = 4;
   int dit_vae_tile_size = 64;
   bool convert_clip_skip_2 = false;
@@ -81,7 +99,8 @@ struct ServerOptions {
   bool isMnn() const { return type == ModelType::kSd15Cpu || type == ModelType::kSdxlMnn; }
   // DiT formats served by libdit_engine.so: no fixed canvas, no QNN contexts.
   bool isDit() const {
-    return type == ModelType::kZImage || type == ModelType::kFlux2Klein;
+    return type == ModelType::kZImage || type == ModelType::kFlux2Klein ||
+           type == ModelType::kQwenImage21;
   }
 };
 
@@ -89,7 +108,7 @@ static void showHelp() {
   std::cout
       << "Usage:\n"
          "  stable_diffusion_core --type "
-         "<sd15cpu|sd15npu|sdxl|sdxlmnn|anima|zimage|klein> "
+         "<sd15cpu|sd15npu|sdxl|sdxlmnn|anima|zimage|klein|qwen21> "
          "--model_dir <dir> [--lib_dir <dir>] [options]\n"
          "  stable_diffusion_core --upscaler_mode [--lib_dir <dir>] "
          "[options]\n"
@@ -97,7 +116,8 @@ static void showHelp() {
          "\n"
          "Modes:\n"
          "  --type <type>          Model format: sd15cpu (MNN), sd15npu "
-         "(QNN), sdxl (QNN), sdxlmnn (MNN), anima (QNN), zimage/klein "
+         "(QNN), sdxl (QNN), sdxlmnn (MNN), anima (QNN), "
+         "zimage/klein/qwen21 "
          "(DiT engine)\n"
          "  --upscaler_mode        Upscale-only server, no diffusion model\n"
          "  --convert <dir>        Convert model.safetensors in <dir> to MNN "
@@ -107,7 +127,9 @@ static void showHelp() {
          "  --model_dir <dir>      Directory with the fixed per-type model "
          "files\n"
          "  --lib_dir <dir>        Directory with libQnnHtp.so / "
-         "libQnnSystem.so (QNN types)\n"
+         "libQnnSystem.so (QNN types), or libdit_engine.so (DiT)\n"
+         "  --qnn_lib_dir <dir>    QNN runtime directory for upscaling from a "
+         "DiT process\n"
          "  --patch <file>         zstd resolution patch for unet.bin "
          "(sd15npu)\n"
          "  --safety_checker <f>   NSFW checker MNN model\n"
@@ -118,9 +140,7 @@ static void showHelp() {
          "  --no_img2img           Disable img2img/inpaint; modular backends\n"
          "                         also skip the VAE encoder\n"
          "  --use_v_pred           v-prediction model\n"
-         "  --lowram               (sdxl/anima) load/release models per stage;\n"
-         "                         (zimage/klein) stream the text encoder from "
-         "disk\n"
+         "  --lowram               (sdxl/anima) load/release models per stage\n"
          "  --anima_seq_dit        (anima+lowram) never keep both DiT halves "
          "resident; for 12GB devices\n"
          "  --clip_skip_2          (convert) export CLIP with skip 2\n"
@@ -143,6 +163,7 @@ static ServerOptions processCommandLine(int argc, char **argv) {
     OPT_TYPE,
     OPT_MODEL_DIR,
     OPT_LIB_DIR,
+    OPT_QNN_LIB_DIR,
     OPT_PORT,
     OPT_LISTEN_ALL,
     OPT_NO_IMG2IMG,
@@ -162,6 +183,7 @@ static ServerOptions processCommandLine(int argc, char **argv) {
       {"type", pal::required_argument, NULL, OPT_TYPE},
       {"model_dir", pal::required_argument, NULL, OPT_MODEL_DIR},
       {"lib_dir", pal::required_argument, NULL, OPT_LIB_DIR},
+      {"qnn_lib_dir", pal::required_argument, NULL, OPT_QNN_LIB_DIR},
       {"port", pal::required_argument, NULL, OPT_PORT},
       {"listen_all", pal::no_argument, NULL, OPT_LISTEN_ALL},
       {"no_img2img", pal::no_argument, NULL, OPT_NO_IMG2IMG},
@@ -199,6 +221,9 @@ static ServerOptions processCommandLine(int argc, char **argv) {
         break;
       case OPT_LIB_DIR:
         opts.lib_dir = pal::g_optArg;
+        break;
+      case OPT_QNN_LIB_DIR:
+        opts.qnn_lib_dir = pal::g_optArg;
         break;
       case OPT_PORT:
         opts.port = std::stoi(pal::g_optArg);
@@ -262,6 +287,8 @@ static ServerOptions processCommandLine(int argc, char **argv) {
     opts.type = ServerOptions::ModelType::kZImage;
   else if (typeStr == "klein")
     opts.type = ServerOptions::ModelType::kFlux2Klein;
+  else if (typeStr == "qwen21")
+    opts.type = ServerOptions::ModelType::kQwenImage21;
   else
     showHelpAndExit(typeStr.empty() ? "Missing --type"
                                     : "Invalid --type: " + typeStr);
@@ -317,33 +344,43 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
   const bool sdxl = opts.isSdxl();
   const bool anima = opts.isAnima();
 
-  // Z-Image / FLUX.2-Klein: the engine reads the weights itself, so the core
+  // DiT models: the engine reads the weights itself, so the core
   // only checks that the package is complete and hands over the paths. The
   // engine .so ships in the APK's native library directory. Its FastRPC skels
   // are copied from assets into the shared runtime directory at app startup.
   if (opts.isDit()) {
-    std::string dit_path = (dir / "dit.safetensors").string();
+    std::string dit_path =
+        (dir / (opts.type == ServerOptions::ModelType::kQwenImage21
+                    ? "dit.gguf"
+                    : "dit.safetensors"))
+            .string();
     std::string llm_path = (dir / "llm.gguf").string();
+    std::string llm_vision_path =
+        opts.type == ServerOptions::ModelType::kQwenImage21
+            ? (dir / "llm_vision.gguf").string()
+            : "";
     std::string vae_path = (dir / "vae.safetensors").string();
     for (const auto &p : {dit_path, llm_path, vae_path}) {
       if (!std::filesystem::exists(p)) showHelpAndExit("File not found: " + p);
     }
+    if (!llm_vision_path.empty() && !std::filesystem::exists(llm_vision_path))
+      showHelpAndExit("File not found: " + llm_vision_path);
     if (opts.lib_dir.empty()) showHelpAndExit("Missing --lib_dir for DiT");
-    // The text encoder is a 4B LLM used once per request; streaming its
-    // parameters from disk trades a few seconds for the headroom the DiT
-    // itself needs on 12GB devices.
-    const std::string params_backend =
-        opts.lowram ? "te=disk" : opts.dit_params_backend;
     const std::string engine_path =
         (std::filesystem::path(opts.lib_dir) / "libdit_engine.so").string();
     if (!std::filesystem::exists(engine_path))
       showHelpAndExit("DiT engine not installed: " + engine_path);
+    const dit_model_kind kind =
+        opts.type == ServerOptions::ModelType::kZImage
+            ? DIT_MODEL_Z_IMAGE
+            : opts.type == ServerOptions::ModelType::kFlux2Klein
+                  ? DIT_MODEL_FLUX2_KLEIN
+                  : DIT_MODEL_QWEN_IMAGE_2_1;
     return std::make_unique<PipelineDit>(
-        text_encoder, opts.model_dir, engine_path, dit_path, llm_path, vae_path,
-        opts.type == ServerOptions::ModelType::kZImage ? DIT_MODEL_Z_IMAGE
-                                                       : DIT_MODEL_FLUX2_KLEIN,
-        opts.dit_backend, params_backend, opts.dit_threads,
-        opts.dit_vae_tile_size, !opts.no_img2img);
+        text_encoder, opts.model_dir, engine_path, dit_path, llm_path,
+        llm_vision_path, vae_path, kind, opts.dit_backend,
+        opts.dit_params_backend,
+        opts.dit_threads, opts.dit_vae_tile_size, !opts.no_img2img);
   }
 
   // Anima: Qwen "CLIP" (clip.bin, QNN) + split DiT (unet_part1/2.bin) + 16-ch
@@ -427,20 +464,21 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
 static std::string encodeResultImage(const GenerationResult &result,
                                      const std::string &format) {
   if (format == "jpeg") {
-    auto jpeg = encodeJPEG(result.image_data, result.width, result.height, 95);
+    auto jpeg = encodeJPEG(result.image_data, result.width, result.height, 95,
+                           result.channels);
     return base64_encode(std::string(jpeg.begin(), jpeg.end()));
   }
   if (format == "png") {
-    auto png = encodePNG(result.image_data, result.width, result.height);
+    auto png = encodePNG(result.image_data, result.width, result.height,
+                         result.channels);
     return base64_encode(std::string(png.begin(), png.end()));
   }
   return base64_encode(
       std::string(result.image_data.begin(), result.image_data.end()));
 }
 
-// Serializes generations: the pipelines share MNN sessions and the global IO
-// dimensions, so two requests must never run generate() concurrently (e.g. a
-// new request arriving while an aborted one is still winding down).
+// Serializes accelerator work. Besides sharing pipeline state, DiT generation
+// and QNN upscaling must not compete for HTP memory in the same process.
 static std::mutex g_generation_mutex;
 
 static void registerGenerateEndpoint(httplib::Server &svr, Pipeline *pipeline) {
@@ -557,6 +595,7 @@ static void registerGenerateEndpoint(httplib::Server &svr, Pipeline *pipeline) {
 static void registerUpscaleEndpoint(httplib::Server &svr) {
   svr.Post("/upscale", [](const httplib::Request &req, httplib::Response &res) {
     std::unique_ptr<QnnModel> tempUpscalerApp = nullptr;
+    std::unique_lock<std::mutex> inference_lock;
 
     try {
       if (!req.has_header("X-Image-Width")) {
@@ -592,6 +631,16 @@ static void registerUpscaleEndpoint(httplib::Server &svr) {
                original_width, original_height, upscaler_path.c_str(),
                is_mnn_model ? "MNN" : "QNN",
                is_mnn_model && use_opencl ? " (OpenCL)" : "");
+
+      if (!is_mnn_model && !qnn_runtime::isInitialized()) {
+        throw std::runtime_error(
+            "QNN runtime is not initialized for upscaling");
+      }
+
+      // Keep QNN upscaling and generation mutually exclusive. The upscaler is
+      // released at the end of this request, so it does not stay resident when
+      // the user returns to generation.
+      inference_lock = std::unique_lock<std::mutex>(g_generation_mutex);
 
       std::vector<uint8_t> image_data(req.body.begin(), req.body.end());
 
@@ -837,9 +886,11 @@ int main(int argc, char **argv) {
                                  opts.nsfw_threshold);
     }
 
-    if (!opts.isMnn() && !opts.isDit()) {
-      if (opts.lib_dir.empty()) showHelpAndExit("Missing --lib_dir for QNN");
-      if (!qnn_runtime::init(opts.lib_dir))
+    if (!opts.isMnn() && (!opts.isDit() || !opts.qnn_lib_dir.empty())) {
+      const std::string &qnn_lib_dir =
+          opts.qnn_lib_dir.empty() ? opts.lib_dir : opts.qnn_lib_dir;
+      if (qnn_lib_dir.empty()) showHelpAndExit("Missing QNN library directory");
+      if (!qnn_runtime::init(qnn_lib_dir))
         showHelpAndExit("Failed get QNN system func ptrs.");
     }
 

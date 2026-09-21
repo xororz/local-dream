@@ -432,6 +432,7 @@
     <string name="dit_engine_missing">DiT エンジンがインストールされていません</string>
     <string name="z_image_turbo_description">6B DiT、8 ステップ。</string>
     <string name="flux2_klein_description">4B DiT、4 ステップ。</string>
+    <string name="qwen_image_2_1_description">Q4_0 DiT + Qwen3-VL-8B、20 ステップ。</string>
     <string name="flux_edit">編集</string>
     <string name="flux_base_image">ベース画像</string>
     <string name="flux_reference_images">参照画像</string>

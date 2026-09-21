@@ -197,19 +197,40 @@ class Pipeline {
     nsfw_threshold_ = threshold;
   }
 
-  // Blanks an RGB result that the NSFW checker scores over the threshold.
+  // Blanks an RGB/RGBA result that the NSFW checker scores over the threshold.
   // generate() runs this on its way out; any pipeline that overrides generate()
   // has to call it too, or the filter build silently stops filtering.
-  void applySafetyChecker(std::vector<uint8_t> &rgb, int width, int height) {
+  void applySafetyChecker(std::vector<uint8_t> &pixels, int width, int height,
+                          int channels = 3) {
     if (!safety_interpreter_) return;
+    if (channels != 3 && channels != 4) {
+      QNN_WARN("Safety check skipped for unsupported channel count %d.", channels);
+      return;
+    }
+    std::vector<uint8_t> rgb;
+    const std::vector<uint8_t> *safety_pixels = &pixels;
+    if (channels == 4) {
+      const size_t pixel_count = static_cast<size_t>(width) * height;
+      rgb.resize(pixel_count * 3);
+      for (size_t i = 0; i < pixel_count; ++i) {
+        const unsigned alpha = pixels[i * 4 + 3];
+        for (size_t c = 0; c < 3; ++c) {
+          rgb[i * 3 + c] = static_cast<uint8_t>(
+              (static_cast<unsigned>(pixels[i * 4 + c]) * alpha +
+               255u * (255u - alpha) + 127u) /
+              255u);
+        }
+      }
+      safety_pixels = &rgb;
+    }
     auto safety_start = std::chrono::high_resolution_clock::now();
     float score = 0.0f;
-    if (safety_check(rgb, width, height, score, safety_interpreter_,
+    if (safety_check(*safety_pixels, width, height, score, safety_interpreter_,
                      safety_session_)) {
       std::cout << "NSFW Score: " << score << std::endl;
       if (score > nsfw_threshold_) {
         QNN_WARN("NSFW detected (%.2f>%.2f).", score, nsfw_threshold_);
-        std::fill(rgb.begin(), rgb.end(), 255);
+        std::fill(pixels.begin(), pixels.end(), 255);
       }
     } else {
       QNN_WARN("Safety check failed.");

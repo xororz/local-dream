@@ -432,6 +432,7 @@
     <string name="dit_engine_missing">DiT 엔진이 설치되지 않았습니다</string>
     <string name="z_image_turbo_description">6B DiT, 8 스텝.</string>
     <string name="flux2_klein_description">4B DiT, 4 스텝.</string>
+    <string name="qwen_image_2_1_description">Q4_0 DiT + Qwen3-VL-8B, 20 스텝.</string>
     <string name="flux_edit">편집</string>
     <string name="flux_base_image">기본 이미지</string>
     <string name="flux_reference_images">참조 이미지</string>

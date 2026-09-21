@@ -10,7 +10,7 @@
 #include "DitEngine.h"
 #include "Pipeline.hpp"
 
-// Z-Image Turbo and FLUX.2/Klein 4B, run by libdit_engine.so.
+// Z-Image Turbo, FLUX.2/Klein and Qwen Image 2.1, run by libdit_engine.so.
 //
 // Unlike every other pipeline here, this one owns no graphs and no scheduler:
 // the engine does the whole txt2img/img2img/inpaint round trip behind the DitEngine
@@ -24,13 +24,15 @@ class PipelineDit : public Pipeline {
  public:
   PipelineDit(TextEncoder &text_encoder, const std::string &model_dir,
               std::string engine_path, std::string diffusion_model_path,
-              std::string llm_path, std::string vae_path, dit_model_kind kind,
-              std::string backend, std::string params_backend, int n_threads,
-              int vae_tile_size, bool img2img_enabled)
+              std::string llm_path, std::string llm_vision_path,
+              std::string vae_path, dit_model_kind kind, std::string backend,
+              std::string params_backend, int n_threads, int vae_tile_size,
+              bool img2img_enabled)
       : Pipeline(text_encoder, model_dir, /*sdxl=*/false, /*use_v_pred=*/false),
         engine_path_(std::move(engine_path)),
         diffusion_model_path_(std::move(diffusion_model_path)),
         llm_path_(std::move(llm_path)),
+        llm_vision_path_(std::move(llm_vision_path)),
         vae_path_(std::move(vae_path)),
         kind_(kind),
         backend_(std::move(backend)),
@@ -67,6 +69,8 @@ class PipelineDit : public Pipeline {
     params.kind = kind_;
     params.diffusion_model_path = diffusion_model_path_.c_str();
     params.llm_path = llm_path_.c_str();
+    params.llm_vision_path =
+        llm_vision_path_.empty() ? nullptr : llm_vision_path_.c_str();
     params.vae_path = vae_path_.c_str();
     params.backend = backend_.c_str();
     params.params_backend = params_backend_.c_str();
@@ -89,7 +93,7 @@ class PipelineDit : public Pipeline {
 
   bool supportsImg2Img() const override { return img2img_enabled_; }
   bool supportsReferenceEditing() const override {
-    return img2img_enabled_ && kind_ == DIT_MODEL_FLUX2_KLEIN;
+    return img2img_enabled_ && isNativeEditModel();
   }
   bool supportsUltrafix() const override { return false; }
 
@@ -108,9 +112,9 @@ class PipelineDit : public Pipeline {
     if (req.has_mask &&
         (!req.img2img || req.mask_data_full.size() != 3 * pixel_count))
       throw std::invalid_argument("Invalid mask_data");
-    if (!req.reference_images.empty() && kind_ != DIT_MODEL_FLUX2_KLEIN)
+    if (!req.reference_images.empty() && !isNativeEditModel())
       throw std::invalid_argument(
-          "native reference editing is only supported by FLUX.2 Klein");
+          "native reference editing is not supported by this DiT model");
 
     api_->set_preview_interval(
         ctx_, req.show_diffusion_process ? req.show_diffusion_stride : 0);
@@ -129,17 +133,14 @@ class PipelineDit : public Pipeline {
     if (req.has_mask)
       mask_gray = planarMaskToGray(req.mask_data_full, req.width, req.height);
 
-    // FLUX.2 Klein is a unified generation/edit model. Its edit path consumes
-    // clean, separately VAE-encoded reference latents. The base image (already
-    // cropped to the output canvas) is always reference 1, so prompts can name
-    // it, followed by the user's extra references. A mask or a denoise strength
-    // below 1 additionally starts sampling from the base as the init latent,
-    // for a masked redraw or img2img; the reference copy is what keeps the
-    // result consistent with the base, which the noised init alone cannot. At
-    // strength 1 without a mask the init would be pure noise, so the base stays
-    // reference-only and the full distilled schedule runs.
-    const bool native_edit = kind_ == DIT_MODEL_FLUX2_KLEIN &&
-                             (!req.reference_images.empty() || req.img2img);
+    // Unified generation/edit models consume clean, separately VAE-encoded
+    // references (and Qwen also sends them through its VLM). The cropped base
+    // is reference 1, followed by the user's extra references. A mask or a
+    // denoise strength below 1 additionally starts from the base as an init
+    // latent. At strength 1 without a mask, the base stays reference-only and
+    // the complete schedule runs.
+    const bool native_edit =
+        isNativeEditModel() && (!req.reference_images.empty() || req.img2img);
     const bool edit_from_base =
         native_edit && req.img2img &&
         (req.has_mask || req.denoise_strength < 1.0f);
@@ -206,12 +207,14 @@ class PipelineDit : public Pipeline {
                         pre_sample_steps};
     const auto start = std::chrono::high_resolution_clock::now();
 
-    uint8_t *out_rgb = nullptr;
+    uint8_t *out_pixels = nullptr;
     int out_width = 0;
     int out_height = 0;
+    int out_channels = 0;
     const bool ok = api_->generate(ctx_, &params, &PipelineDit::forwardProgress,
                                    &PipelineDit::forwardPreview, &callbacks,
-                                   &out_rgb, &out_width, &out_height);
+                                   &out_pixels, &out_width, &out_height,
+                                   &out_channels);
     if (!ok) {
       // A progress callback that threw (client hung up) is reported by the
       // engine as a cancellation; rethrow the original so /generate answers
@@ -225,21 +228,27 @@ class PipelineDit : public Pipeline {
                            std::chrono::high_resolution_clock::now() - start)
                            .count();
 
+    if (out_channels != 3 && out_channels != 4) {
+      api_->free_image(out_pixels);
+      throw std::runtime_error("DiT returned unsupported channel count: " +
+                               std::to_string(out_channels));
+    }
     GenerationResult result;
     result.image_data.assign(
-        out_rgb, out_rgb + static_cast<size_t>(out_width) * out_height * 3);
-    api_->free_image(out_rgb);
+        out_pixels, out_pixels + static_cast<size_t>(out_width) * out_height *
+                                     out_channels);
+    api_->free_image(out_pixels);
     if (req.has_mask && req.user_supplied_mask) {
       if (out_width != req.width || out_height != req.height)
         throw std::runtime_error("DiT inpaint output size mismatch");
-      blendInpaintResult(result.image_data, req);
+      blendInpaintResult(result.image_data, out_channels, req);
     }
     // generate() is overridden wholesale here, so the base class's safety pass
     // never runs on its own; the filter build depends on this call.
-    applySafetyChecker(result.image_data, out_width, out_height);
+    applySafetyChecker(result.image_data, out_width, out_height, out_channels);
     result.width = out_width;
     result.height = out_height;
-    result.channels = 3;
+    result.channels = out_channels;
     result.generation_time_ms = static_cast<int>(total);
     result.first_step_time_ms = callbacks.first_step_ms;
     return result;
@@ -269,11 +278,16 @@ class PipelineDit : public Pipeline {
   }
 
  private:
-  // Both shipped models are guidance-distilled turbo variants and expect this
-  // fixed distilled-guidance value; cfg_scale stays the user-facing knob.
+  // Used by guidance-distilled DiTs; Qwen ignores this field. Qwen's default
+  // CFG scale is 1, which keeps sampling conditional-only.
   static constexpr float kDistilledGuidance = 3.5f;
   // 1536x1536 still decodes whole on the devices this runs on; 2048 does not.
   static constexpr long kTileAbovePixels = 1536L * 1536L;
+
+  bool isNativeEditModel() const {
+    return kind_ == DIT_MODEL_FLUX2_KLEIN ||
+           kind_ == DIT_MODEL_QWEN_IMAGE_2_1;
+  }
 
   struct Callbacks {
     GenerationRequest *req;
@@ -321,12 +335,14 @@ class PipelineDit : public Pipeline {
   // encode/decode round trip still changes its pixels slightly. Match the
   // built-in pipelines by blending the decoded result against the exact input
   // image before returning it to previews/history/export.
-  static void blendInpaintResult(std::vector<uint8_t> &rgb,
+  static void blendInpaintResult(std::vector<uint8_t> &pixels, int channels,
                                  const GenerationRequest &req) {
     const int width = req.width;
     const int height = req.height;
     const size_t plane = static_cast<size_t>(width) * height;
-    if (rgb.size() != 3 * plane || req.img_data.size() != 3 * plane ||
+    if ((channels != 3 && channels != 4) ||
+        pixels.size() != static_cast<size_t>(channels) * plane ||
+        req.img_data.size() != 3 * plane ||
         req.mask_data_full.size() != 3 * plane)
       throw std::invalid_argument("Invalid DiT inpaint buffers");
 
@@ -342,7 +358,7 @@ class PipelineDit : public Pipeline {
       const int x = static_cast<int>(i % width);
       for (int c = 0; c < 3; ++c)
         generated(c, y, x) =
-            static_cast<float>(rgb[i * 3 + c]) / 127.5f - 1.0f;
+            static_cast<float>(pixels[i * channels + c]) / 127.5f - 1.0f;
     }
 
     auto blended = laplacianPyramidBlend(original, generated, mask);
@@ -352,8 +368,16 @@ class PipelineDit : public Pipeline {
       const int x = static_cast<int>(i % width);
       for (int c = 0; c < 3; ++c) {
         const float v = (blended(c, y, x) + 1.0f) * 127.5f;
-        rgb[i * 3 + c] =
+        pixels[i * channels + c] =
             static_cast<uint8_t>(std::clamp(v, 0.0f, 255.0f));
+      }
+      if (channels == 4) {
+        const float mask_value =
+            std::clamp(req.mask_data_full[i], 0.0f, 1.0f);
+        const float alpha = mask_value * pixels[i * 4 + 3] +
+                            (1.0f - mask_value) * 255.0f;
+        pixels[i * 4 + 3] =
+            static_cast<uint8_t>(std::clamp(alpha, 0.0f, 255.0f));
       }
     }
   }
@@ -428,6 +452,7 @@ class PipelineDit : public Pipeline {
   const std::string engine_path_;
   const std::string diffusion_model_path_;
   const std::string llm_path_;
+  const std::string llm_vision_path_;
   const std::string vae_path_;
   const dit_model_kind kind_;
   const std::string backend_;

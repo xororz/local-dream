@@ -209,10 +209,10 @@ class BackgroundGenerationService : Service() {
         }
         val referenceImages = if (intent.getBooleanExtra("has_reference_images", false)) {
             try {
-                val refsFile = File(applicationContext.filesDir, "flux_references.json")
+                val refsFile = File(applicationContext.filesDir, "dit_references.json")
                 if (refsFile.exists()) JSONArray(refsFile.readText()) else null
             } catch (e: Exception) {
-                Log.e("GenerationService", "Failed to read FLUX reference images", e)
+                Log.e("GenerationService", "Failed to read DiT reference images", e)
                 null
             }
         } else {
@@ -432,6 +432,7 @@ class BackgroundGenerationService : Service() {
                                         message.optLong("seed", -1).takeIf { it != -1L }
                                     val resultWidth = message.optInt("width", 512)
                                     val resultHeight = message.optInt("height", 512)
+                                    val resultChannels = message.optInt("channels", 3)
                                     Log.d(
                                         "BgGenService",
                                         "JSON extraction took: ${System.currentTimeMillis() - extractStart}ms, Base64 length: ${base64Image.length}",
@@ -449,11 +450,29 @@ class BackgroundGenerationService : Service() {
                                         "Base64 decoding took: ${System.currentTimeMillis() - decodeStartTime}ms, decoded size: ${imageBytes.size} bytes",
                                     )
 
-                                    // 3. RGB conversion + Bitmap creation
+                                    // 3. Packed RGB/RGBA conversion + Bitmap creation.
+                                    // Qwen Image 2.1 returns its native alpha channel;
+                                    // the other backends continue to return RGB.
                                     val bitmapStartTime = System.currentTimeMillis()
                                     val bitmap = if (message.optString("format", "raw") == "raw") {
+                                        if (resultChannels != 3 && resultChannels != 4) {
+                                            throw IOException(
+                                                "Unsupported result channel count: $resultChannels",
+                                            )
+                                        }
+                                        val expectedBytes =
+                                            resultWidth.toLong() * resultHeight * resultChannels
+                                        if (expectedBytes > Int.MAX_VALUE || imageBytes.size != expectedBytes.toInt()) {
+                                            throw IOException(
+                                                "Invalid raw image size: expected $expectedBytes bytes, got ${imageBytes.size}",
+                                            )
+                                        }
                                         val pixels = IntArray(resultWidth * resultHeight)
-                                        rgbBytesToPixels(imageBytes, pixels)
+                                        if (resultChannels == 4) {
+                                            rgbaBytesToPixels(imageBytes, pixels)
+                                        } else {
+                                            rgbBytesToPixels(imageBytes, pixels)
+                                        }
                                         createBitmap(resultWidth, resultHeight).also {
                                             it.setPixels(
                                                 pixels,
@@ -464,6 +483,7 @@ class BackgroundGenerationService : Service() {
                                                 resultWidth,
                                                 resultHeight,
                                             )
+                                            it.setHasAlpha(resultChannels == 4)
                                         }
                                     } else {
                                         BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
@@ -564,6 +584,18 @@ class BackgroundGenerationService : Service() {
             val g = rgb[index + 1].toInt() and 0xFF
             val b = rgb[index + 2].toInt() and 0xFF
             pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        }
+    }
+
+    private fun rgbaBytesToPixels(rgba: ByteArray, pixels: IntArray) {
+        val count = minOf(pixels.size, rgba.size / 4)
+        for (i in 0 until count) {
+            val index = i * 4
+            val r = rgba[index].toInt() and 0xFF
+            val g = rgba[index + 1].toInt() and 0xFF
+            val b = rgba[index + 2].toInt() and 0xFF
+            val a = rgba[index + 3].toInt() and 0xFF
+            pixels[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
         }
     }
 

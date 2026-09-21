@@ -787,12 +787,22 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
                                 resultBitmap.let { bmp ->
                                     withContext(Dispatchers.IO) {
                                         try {
+                                            val usePng = bmp.hasAlpha()
                                             val tempFile = File(
                                                 context.cacheDir,
-                                                "upscaled_temp_${System.currentTimeMillis()}.jpg",
+                                                "upscaled_temp_${System.currentTimeMillis()}." +
+                                                    if (usePng) "png" else "jpg",
                                             )
                                             FileOutputStream(tempFile).use { out ->
-                                                bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                                                bmp.compress(
+                                                    if (usePng) {
+                                                        Bitmap.CompressFormat.PNG
+                                                    } else {
+                                                        Bitmap.CompressFormat.JPEG
+                                                    },
+                                                    if (usePng) 100 else 95,
+                                                    out,
+                                                )
                                             }
                                             upscaledImageUri = Uri.fromFile(tempFile)
                                         } catch (e: Exception) {

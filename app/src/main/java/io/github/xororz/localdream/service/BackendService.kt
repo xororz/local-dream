@@ -90,7 +90,7 @@ class BackendService : Service() {
 
         // --type values served by the downloadable DiT engine.
         fun isDitBackend(backendType: String): Boolean = backendType == "zimage" ||
-            backendType == "klein"
+            backendType == "klein" || backendType == "qwen21"
 
         // One reused dir, stamped with the SDK it holds. Per-file copying only
         // refreshes libs whose size changed, so an SDK bump would otherwise
@@ -524,6 +524,11 @@ class BackendService : Service() {
                     return false
                 }
                 command += listOf("--lib_dir", ditEngineDir.absolutePath)
+                // The DiT engine lives in nativeLibraryDir, while the shared
+                // /upscale endpoint needs the extracted QNN runtime. Keep the
+                // two paths explicit so generation and upscaling can coexist
+                // in the same backend process.
+                command += listOf("--qnn_lib_dir", runtimeDir.absolutePath)
             } else if (backendType != "sd15cpu" && backendType != "sdxlmnn" &&
                 backendType != BACKEND_TYPE_UPSCALER
             ) {

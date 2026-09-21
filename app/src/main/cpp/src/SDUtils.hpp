@@ -386,9 +386,10 @@ inline void PrintEncodeResult(const std::vector<int> &ids) {
   std::cout << "]" << std::endl;
 }
 
-// Encodes an RGB byte array into PNG format
-inline std::vector<uint8_t> encodePNG(const std::vector<uint8_t> &rgb_data,
-                                      int width, int height) {
+// Encodes an interleaved RGB/RGBA byte array into PNG format.
+inline std::vector<uint8_t> encodePNG(const std::vector<uint8_t> &image_data,
+                                      int width, int height,
+                                      int channels = 3) {
   std::vector<uint8_t> png_buffer;
 
   stbi_write_png_to_func(
@@ -397,15 +398,16 @@ inline std::vector<uint8_t> encodePNG(const std::vector<uint8_t> &rgb_data,
         buffer.insert(buffer.end(), static_cast<uint8_t *>(data),
                       static_cast<uint8_t *>(data) + size);
       },
-      &png_buffer, width, height, 3, rgb_data.data(), width * 3);
+      &png_buffer, width, height, channels, image_data.data(), width * channels);
 
   return png_buffer;
 }
 
-// Encodes an RGB byte array into JPEG format (quality adjustable)
-inline std::vector<uint8_t> encodeJPEG(const std::vector<uint8_t> &rgb_data,
+// Encodes an interleaved RGB/RGBA byte array into JPEG format. stb ignores
+// alpha for four-channel input, while still respecting the RGBA stride.
+inline std::vector<uint8_t> encodeJPEG(const std::vector<uint8_t> &image_data,
                                        int width, int height,
-                                       int quality = 95) {
+                                       int quality = 95, int channels = 3) {
   std::vector<uint8_t> jpeg_buffer;
 
   stbi_write_jpg_to_func(
@@ -414,7 +416,7 @@ inline std::vector<uint8_t> encodeJPEG(const std::vector<uint8_t> &rgb_data,
         buffer.insert(buffer.end(), static_cast<uint8_t *>(data),
                       static_cast<uint8_t *>(data) + size);
       },
-      &jpeg_buffer, width, height, 3, rgb_data.data(), quality);
+      &jpeg_buffer, width, height, channels, image_data.data(), quality);
 
   return jpeg_buffer;
 }

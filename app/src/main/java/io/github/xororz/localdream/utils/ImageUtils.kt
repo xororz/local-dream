@@ -4,6 +4,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
@@ -17,6 +21,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -58,6 +63,51 @@ private fun nextSaveFilename(extension: String): String {
 // downscaling the native result on the client.
 const val UPSCALER_NATIVE_SCALE = 4
 
+private fun applyScaledAlpha(
+    rgbBitmap: Bitmap,
+    alphaBytes: ByteArray,
+    sourceWidth: Int,
+    sourceHeight: Int,
+): Bitmap {
+    val sourceAlpha = Bitmap.createBitmap(sourceWidth, sourceHeight, Bitmap.Config.ALPHA_8)
+    val alphaBuffer = if (sourceAlpha.rowBytes == sourceWidth) {
+        alphaBytes
+    } else {
+        ByteArray(sourceAlpha.rowBytes * sourceHeight).also { padded ->
+            repeat(sourceHeight) { row ->
+                alphaBytes.copyInto(
+                    destination = padded,
+                    destinationOffset = row * sourceAlpha.rowBytes,
+                    startIndex = row * sourceWidth,
+                    endIndex = (row + 1) * sourceWidth,
+                )
+            }
+        }
+    }
+    sourceAlpha.copyPixelsFromBuffer(ByteBuffer.wrap(alphaBuffer))
+    val scaledAlpha = if (
+        sourceWidth == rgbBitmap.width && sourceHeight == rgbBitmap.height
+    ) {
+        sourceAlpha
+    } else {
+        Bitmap.createScaledBitmap(sourceAlpha, rgbBitmap.width, rgbBitmap.height, true)
+    }
+
+    val rgbaBitmap = rgbBitmap.copy(Bitmap.Config.ARGB_8888, true)
+        ?: throw IllegalStateException("Failed to allocate RGBA upscale result")
+    rgbaBitmap.setHasAlpha(true)
+    val alphaPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+    }
+    Canvas(rgbaBitmap).drawBitmap(scaledAlpha, 0f, 0f, alphaPaint)
+    alphaPaint.xfermode = null
+
+    if (scaledAlpha !== sourceAlpha) scaledAlpha.recycle()
+    sourceAlpha.recycle()
+    if (rgbaBitmap !== rgbBitmap) rgbBitmap.recycle()
+    return rgbaBitmap
+}
+
 /**
  * Upscales [bitmap] with the model identified by [upscalerId].
  *
@@ -97,11 +147,18 @@ suspend fun performUpscale(
     bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
     val rgbBytes = ByteArray(width * height * 3)
+    val alphaBytes = if (bitmap.hasAlpha()) ByteArray(width * height) else null
+    var hasTransparency = false
     for (i in pixels.indices) {
         val pixel = pixels[i]
         rgbBytes[i * 3] = ((pixel shr 16) and 0xFF).toByte()
         rgbBytes[i * 3 + 1] = ((pixel shr 8) and 0xFF).toByte()
         rgbBytes[i * 3 + 2] = (pixel and 0xFF).toByte()
+        alphaBytes?.let {
+            val alpha = (pixel ushr 24) and 0xFF
+            it[i] = alpha.toByte()
+            if (alpha != 0xFF) hasTransparency = true
+        }
     }
     Log.d(
         "UpscaleBinary",
@@ -133,7 +190,7 @@ suspend fun performUpscale(
 
         // Decode JPEG to Bitmap
         val decodeStartTime = System.currentTimeMillis()
-        val resultBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+        var resultBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
             ?: throw Exception("Failed to decode JPEG response")
         Log.d(
             "UpscaleBinary",
@@ -171,11 +228,18 @@ suspend fun performUpscale(
                     resultBitmap.recycle()
                 }
                 Log.d("UpscaleBinary", "Resized to ${targetWidth}x$targetHeight (${clampedScale}x)")
-                return@withContext scaled
+                resultBitmap = scaled
             }
         }
 
-        resultBitmap
+        // The neural upscalers are RGB-only. Preserve a Qwen RGBA result by
+        // scaling its alpha plane separately and applying it after RGB
+        // upscaling; opaque inputs keep the existing JPEG-sized memory path.
+        if (hasTransparency && alphaBytes != null) {
+            applyScaledAlpha(resultBitmap, alphaBytes, width, height)
+        } else {
+            resultBitmap
+        }
     }
 }
 
@@ -246,14 +310,16 @@ suspend fun saveImage(context: Context, bitmap: Bitmap, onSuccess: () -> Unit, o
                 "Start saving image - size: ${bitmap.width}x${bitmap.height}",
             )
 
-            // Save as JPEG if width or height is greater than 1024, otherwise save as PNG
+            // Transparent output (notably Qwen Image 2.1) must stay PNG. Opaque
+            // large images retain the existing JPEG space optimization.
             val isLargeImage = bitmap.width > 1024 || bitmap.height > 1024
-            val format = if (isLargeImage) Bitmap.CompressFormat.JPEG else Bitmap.CompressFormat.PNG
-            val extension = if (isLargeImage) "jpg" else "png"
-            val mimeType = if (isLargeImage) "image/jpeg" else "image/png"
-            val quality = if (isLargeImage) 95 else 100
+            val usePng = bitmap.hasAlpha() || !isLargeImage
+            val format = if (usePng) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+            val extension = if (usePng) "png" else "jpg"
+            val mimeType = if (usePng) "image/png" else "image/jpeg"
+            val quality = if (usePng) 100 else 95
 
-            Log.d("SaveImage", "Save format: ${if (isLargeImage) "JPEG" else "PNG"}")
+            Log.d("SaveImage", "Save format: ${if (usePng) "PNG" else "JPEG"}")
 
             val filename = nextSaveFilename(extension)
 

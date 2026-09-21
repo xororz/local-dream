@@ -5,7 +5,8 @@ import android.os.Build
 import java.io.File
 
 /**
- * The DiT engine (libdit_engine.so) that runs Z-Image Turbo and FLUX.2/Klein 4B.
+ * The DiT engine (libdit_engine.so) that runs Z-Image Turbo, FLUX.2/Klein and
+ * Qwen Image 2.1.
  *
  * It ships inside the APK alongside the backend executable, so it lands in
  * nativeLibraryDir and the core dlopens it from there. Its FastRPC skels are

@@ -185,7 +185,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 
-private data class FluxReferenceSelection(
+private data class EditReferenceSelection(
     val uri: Uri,
     val bitmap: Bitmap,
     val base64: String,
@@ -247,7 +247,8 @@ fun ModelRunScreen(
     } else {
         remember(modelRepository.models) { modelRepository.models.find { it.id == modelId } }
     }
-    val isFlux2Klein = model?.ditKind == "klein"
+    val supportsReferenceEditing = model?.ditKind == "klein" ||
+        model?.ditKind == "qwen21"
     LaunchedEffect(Unit) {
         if (!isRemote) {
             modelRepository.ensureLoaded()
@@ -356,11 +357,11 @@ fun ModelRunScreen(
     var showCustomAspectRatioDialog by remember { mutableStateOf(false) }
     var currentBatchIndex by remember { mutableIntStateOf(0) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-    val fluxReferenceImages = remember { mutableStateListOf<FluxReferenceSelection>() }
-    // Klein references are independent of the base image, so they track their
+    val editReferenceImages = remember { mutableStateListOf<EditReferenceSelection>() }
+    // Native-edit references are independent of the base image, so they track their
     // own decode state instead of sharing base64EncodeDone.
-    var fluxReferencesLoading by remember { mutableStateOf(false) }
-    var showKleinEditMenu by remember { mutableStateOf(false) }
+    var editReferencesLoading by remember { mutableStateOf(false) }
+    var showReferenceEditMenu by remember { mutableStateOf(false) }
     var base64EncodeDone by remember { mutableStateOf(false) }
     var returnedSeed by remember { mutableStateOf<Long?>(null) }
     var isRunning by remember { mutableStateOf(false) }
@@ -606,8 +607,8 @@ fun ModelRunScreen(
 
     fun clearImg2imgState() {
         selectedImageUri = null
-        fluxReferenceImages.clear()
-        File(context.filesDir, "flux_references.json").delete()
+        editReferenceImages.clear()
+        File(context.filesDir, "dit_references.json").delete()
         croppedBitmap = null
         drawingOverlayBitmap = null
         maskBitmap = null
@@ -1052,15 +1053,12 @@ fun ModelRunScreen(
     // Appends to the current reference set, so references can be picked in
     // several rounds. There is deliberately no count limit: each reference
     // lengthens the DiT sequence, and how many fit is left to the user.
-    // Appends to the current reference set, so references can be picked in
-    // several rounds. There is deliberately no count limit: each reference
-    // lengthens the DiT sequence, and how many fit is left to the user.
-    fun processFluxReferences(uris: List<Uri>) {
-        val existing = fluxReferenceImages.map { it.uri }.toSet()
+    fun processEditReferences(uris: List<Uri>) {
+        val existing = editReferenceImages.map { it.uri }.toSet()
         val selected = uris.distinct().filterNot { it in existing }
-        if (selected.isEmpty() || fluxReferencesLoading) return
+        if (selected.isEmpty() || editReferencesLoading) return
         scope.launch {
-            fluxReferencesLoading = true
+            editReferencesLoading = true
             try {
                 val decoded = withContext(Dispatchers.IO) {
                     selected.map { uri ->
@@ -1077,7 +1075,7 @@ fun ModelRunScreen(
                                 )
                             }
                         }
-                        FluxReferenceSelection(
+                        EditReferenceSelection(
                             uri = uri,
                             bitmap = bitmap,
                             // Reference conditioning is VAE-encoded rather than
@@ -1087,7 +1085,7 @@ fun ModelRunScreen(
                         )
                     }
                 }
-                fluxReferenceImages.addAll(decoded)
+                editReferenceImages.addAll(decoded)
             } catch (e: Exception) {
                 Toast.makeText(
                     context,
@@ -1095,16 +1093,16 @@ fun ModelRunScreen(
                     Toast.LENGTH_SHORT,
                 ).show()
             } finally {
-                fluxReferencesLoading = false
+                editReferencesLoading = false
             }
         }
     }
 
-    fun removeFluxReference(index: Int) {
-        if (index in fluxReferenceImages.indices) fluxReferenceImages.removeAt(index)
+    fun removeEditReference(index: Int) {
+        if (index in editReferenceImages.indices) editReferenceImages.removeAt(index)
     }
 
-    // Drops only the Klein base image (and its mask), keeping the references.
+    // Drops only the native-edit base image (and its mask), keeping references.
     fun clearBaseImageState() {
         selectedImageUri = null
         croppedBitmap = null
@@ -1135,13 +1133,13 @@ fun ModelRunScreen(
         uri?.let { processSelectedImage(it) }
     }
 
-    val fluxPhotoPickerLauncher = rememberLauncherForActivityResult(
+    val editPhotoPickerLauncher = rememberLauncherForActivityResult(
         PickMultipleVisualMedia(),
-    ) { uris -> processFluxReferences(uris) }
+    ) { uris -> processEditReferences(uris) }
 
-    val fluxContentPickerLauncher = rememberLauncherForActivityResult(
+    val editContentPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents(),
-    ) { uris -> processFluxReferences(uris) }
+    ) { uris -> processEditReferences(uris) }
 
     // Places an imported (already size-validated and resized) local image
     // into the result slot as the UltraFix source. Synthetic params: only the
@@ -1188,11 +1186,11 @@ fun ModelRunScreen(
         }
     }
 
-    fun onAddFluxReferencesClick() {
+    fun onAddEditReferencesClick() {
         if (Build.VERSION.SDK_INT >= 33) {
-            fluxPhotoPickerLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+            editPhotoPickerLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
         } else {
-            fluxContentPickerLauncher.launch("image/*")
+            editContentPickerLauncher.launch("image/*")
         }
     }
 
@@ -1575,7 +1573,7 @@ fun ModelRunScreen(
                     val currentGenerationMode = when {
                         wasUltrafix -> GenerationMode.ULTRAFIX
 
-                        isFlux2Klein && (selectedImageUri != null || fluxReferenceImages.isNotEmpty()) ->
+                        supportsReferenceEditing && (selectedImageUri != null || editReferenceImages.isNotEmpty()) ->
                             GenerationMode.EDIT
 
                         isInpaintMode -> GenerationMode.INPAINT
@@ -1955,14 +1953,14 @@ fun ModelRunScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 if (useImg2img) {
-                                    // Klein takes a base image and any number of
+                                    // Native edit models take a base image and any number of
                                     // references through one entry; a menu picks
                                     // which one to add.
                                     Box {
                                         TextButton(
                                             onClick = {
-                                                if (isFlux2Klein) {
-                                                    showKleinEditMenu = true
+                                                if (supportsReferenceEditing) {
+                                                    showReferenceEditMenu = true
                                                 } else {
                                                     onSelectImageClick()
                                                 }
@@ -1973,7 +1971,7 @@ fun ModelRunScreen(
                                             ),
                                         ) {
                                             Text(
-                                                if (isFlux2Klein) {
+                                                if (supportsReferenceEditing) {
                                                     stringResource(R.string.flux_edit)
                                                 } else {
                                                     "img2img"
@@ -1988,8 +1986,8 @@ fun ModelRunScreen(
                                             )
                                         }
                                         DropdownMenu(
-                                            expanded = showKleinEditMenu,
-                                            onDismissRequest = { showKleinEditMenu = false },
+                                            expanded = showReferenceEditMenu,
+                                            onDismissRequest = { showReferenceEditMenu = false },
                                         ) {
                                             DropdownMenuItem(
                                                 text = { Text(stringResource(R.string.flux_base_image)) },
@@ -1997,7 +1995,7 @@ fun ModelRunScreen(
                                                     Icon(Icons.Default.Image, contentDescription = null)
                                                 },
                                                 onClick = {
-                                                    showKleinEditMenu = false
+                                                    showReferenceEditMenu = false
                                                     onSelectImageClick()
                                                 },
                                             )
@@ -2011,10 +2009,10 @@ fun ModelRunScreen(
                                                         contentDescription = null,
                                                     )
                                                 },
-                                                enabled = !fluxReferencesLoading,
+                                                enabled = !editReferencesLoading,
                                                 onClick = {
-                                                    showKleinEditMenu = false
-                                                    onAddFluxReferencesClick()
+                                                    showReferenceEditMenu = false
+                                                    onAddEditReferencesClick()
                                                 },
                                             )
                                         }
@@ -2126,7 +2124,7 @@ fun ModelRunScreen(
                                     },
                                     onShare = {
                                         val currentMode = when {
-                                            isFlux2Klein && (selectedImageUri != null || fluxReferenceImages.isNotEmpty()) ->
+                                            supportsReferenceEditing && (selectedImageUri != null || editReferenceImages.isNotEmpty()) ->
                                                 GenerationMode.EDIT
 
                                             isInpaintMode -> GenerationMode.INPAINT
@@ -2224,17 +2222,17 @@ fun ModelRunScreen(
                                     // before the first service request. This
                                     // also closes races with rapid thumbnail
                                     // removals rewriting the scratch file.
-                                    val fluxReferencePayloads =
-                                        if (isFlux2Klein) {
-                                            fluxReferenceImages.map { it.base64 }
+                                    val editReferencePayloads =
+                                        if (supportsReferenceEditing) {
+                                            editReferenceImages.map { it.base64 }
                                         } else {
                                             emptyList()
                                         }
-                                    if (fluxReferencePayloads.isNotEmpty()) {
+                                    if (editReferencePayloads.isNotEmpty()) {
                                         withContext(Dispatchers.IO) {
                                             val json = JSONArray()
-                                            fluxReferencePayloads.forEach { json.put(it) }
-                                            File(context.filesDir, "flux_references.json")
+                                            editReferencePayloads.forEach { json.put(it) }
+                                            File(context.filesDir, "dit_references.json")
                                                 .writeText(json.toString())
                                         }
                                     }
@@ -2292,7 +2290,7 @@ fun ModelRunScreen(
                                             putExtra("aspect_ratio", aspectRatio)
                                             putExtra("batch_index", i)
                                             putExtra("backend_host", backendHost)
-                                            if (fluxReferencePayloads.isNotEmpty()) {
+                                            if (editReferencePayloads.isNotEmpty()) {
                                                 putExtra("has_reference_images", true)
                                             }
                                             if (selectedImageUri != null && base64EncodeDone) {
@@ -2485,7 +2483,7 @@ fun ModelRunScreen(
 
             AnimatedVisibility(
                 visible = (selectedImageUri != null && base64EncodeDone) ||
-                    fluxReferenceImages.isNotEmpty() || fluxReferencesLoading,
+                    editReferenceImages.isNotEmpty() || editReferencesLoading,
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut(),
             ) {
@@ -2533,7 +2531,7 @@ fun ModelRunScreen(
                                     }
                                     IconButton(
                                         onClick = {
-                                            if (isFlux2Klein) {
+                                            if (supportsReferenceEditing) {
                                                 clearBaseImageState()
                                             } else {
                                                 clearImg2imgState()
@@ -2576,8 +2574,8 @@ fun ModelRunScreen(
                                             modifier = Modifier.size(16.dp),
                                         )
                                     }
-                                    // Klein's base image is always reference 1.
-                                    if (isFlux2Klein) {
+                                    // The base image is always reference 1.
+                                    if (supportsReferenceEditing) {
                                         Text(
                                             "1",
                                             modifier = Modifier
@@ -2678,11 +2676,11 @@ fun ModelRunScreen(
                             }
                         }
 
-                        if (isFlux2Klein) {
+                        if (supportsReferenceEditing) {
                             // The base image is always reference 1, so the
                             // user's references are numbered after it.
                             val firstNumber = if (selectedImageUri != null) 2 else 1
-                            fluxReferenceImages.forEachIndexed { index, reference ->
+                            editReferenceImages.forEachIndexed { index, reference ->
                                 if (index > 0 || selectedImageUri != null) {
                                     Spacer(modifier = Modifier.width(8.dp))
                                 }
@@ -2701,7 +2699,7 @@ fun ModelRunScreen(
                                             contentScale = ContentScale.Crop,
                                         )
                                         IconButton(
-                                            onClick = { removeFluxReference(index) },
+                                            onClick = { removeEditReference(index) },
                                             enabled = !isRunning,
                                             modifier = Modifier
                                                 .size(24.dp)
@@ -2738,12 +2736,12 @@ fun ModelRunScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             SmallFloatingActionButton(
                                 onClick = {
-                                    if (!isRunning && !fluxReferencesLoading) {
-                                        onAddFluxReferencesClick()
+                                    if (!isRunning && !editReferencesLoading) {
+                                        onAddEditReferencesClick()
                                     }
                                 },
                             ) {
-                                if (fluxReferencesLoading) {
+                                if (editReferencesLoading) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(20.dp),
                                         strokeWidth = 2.dp,

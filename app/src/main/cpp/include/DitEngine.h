@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define DIT_ENGINE_ABI_VERSION 3
+#define DIT_ENGINE_ABI_VERSION 5
 
 // Name of the single symbol the core resolves after dlopen.
 #define DIT_ENGINE_ENTRY_SYMBOL "dit_engine_get_api"
@@ -31,13 +31,16 @@ typedef struct dit_ctx dit_ctx;
 typedef enum {
   DIT_MODEL_Z_IMAGE = 0,
   DIT_MODEL_FLUX2_KLEIN = 1,
+  DIT_MODEL_QWEN_IMAGE_2_1 = 2,
 } dit_model_kind;
 
 typedef struct {
   dit_model_kind kind;
-  // Weight files. The text encoder (llm) is shared between both models.
+  // Weight files. llm_vision_path is only required for native image editing
+  // with a vision-language text encoder (currently Qwen Image 2.1).
   const char *diffusion_model_path;
   const char *llm_path;
+  const char *llm_vision_path;
   const char *vae_path;
   // ggml device spec, e.g. "HTP0" for the Hexagon NPU or "CPU".
   const char *backend;
@@ -56,8 +59,8 @@ typedef struct {
   int height;
   int steps;
   float cfg_scale;
-  // Distilled guidance; both shipped models are guidance-distilled turbo
-  // variants, so this is not the same knob as cfg_scale.
+  // Distilled guidance for models that expose a guidance embedding. Other
+  // architectures ignore it; this is not the same knob as cfg_scale.
   float guidance;
   int64_t seed;
   const char *sample_method;
@@ -104,13 +107,14 @@ typedef struct {
   dit_ctx *(*create)(const dit_ctx_params *params);
   void (*destroy)(dit_ctx *ctx);
 
-  // Writes an RGB8 image of width * height * 3 bytes into *out_rgb, owned by
-  // the engine until free_image(). Returns false on failure or cancellation.
+  // Writes an interleaved RGB8/RGBA8 image into *out_pixels and its channel
+  // count into *out_channels, owned by the engine until free_image(). Returns
+  // false on failure or cancellation.
   bool (*generate)(dit_ctx *ctx, const dit_gen_params *params,
                    dit_progress_cb progress, dit_preview_cb preview,
-                   void *user_data, uint8_t **out_rgb, int *out_width,
-                   int *out_height);
-  void (*free_image)(uint8_t *rgb);
+                   void *user_data, uint8_t **out_pixels, int *out_width,
+                   int *out_height, int *out_channels);
+  void (*free_image)(uint8_t *pixels);
 
   // Last failure on this context, or the last create() failure when ctx is
   // NULL. Valid until the next call on the same context.

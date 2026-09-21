@@ -442,6 +442,7 @@
     <string name="dit_engine_missing">DiT engine not installed</string>
     <string name="z_image_turbo_description">6B DiT, 8 steps.</string>
     <string name="flux2_klein_description">4B DiT, 4 steps.</string>
+    <string name="qwen_image_2_1_description">Q4_0 DiT with Qwen3-VL-8B, 20 steps.</string>
     <string name="flux_edit">Edit</string>
     <string name="flux_base_image">Base</string>
     <string name="flux_reference_images">Reference</string>
