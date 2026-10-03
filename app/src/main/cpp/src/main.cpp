@@ -48,7 +48,7 @@
 //            unet_part1.bin unet_part2.bin vae_decoder.bin
 //            [vae_encoder.bin] (optional; enables img2img/inpaint)
 //   zimage/klein: tokenizer.json dit.safetensors llm.gguf vae.safetensors
-//   qwen21:  tokenizer.json dit.gguf llm.gguf llm_vision.gguf vae.safetensors
+//   qwen21:  tokenizer.json dit.safetensors llm.gguf llm_vision.gguf vae.safetensors
 // SD15/SDXL CLIP runs on MNN (CPU); Anima's CLIP (clip.bin) runs on QNN/HTP
 // (the C++ side still does the qwen token_emb lookup -> input_embedding).
 struct ServerOptions {
@@ -349,11 +349,7 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
   // engine .so ships in the APK's native library directory. Its FastRPC skels
   // are copied from assets into the shared runtime directory at app startup.
   if (opts.isDit()) {
-    std::string dit_path =
-        (dir / (opts.type == ServerOptions::ModelType::kQwenImage21
-                    ? "dit.gguf"
-                    : "dit.safetensors"))
-            .string();
+    std::string dit_path = (dir / "dit.safetensors").string();
     std::string llm_path = (dir / "llm.gguf").string();
     std::string llm_vision_path =
         opts.type == ServerOptions::ModelType::kQwenImage21
@@ -376,10 +372,14 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
             : opts.type == ServerOptions::ModelType::kFlux2Klein
                   ? DIT_MODEL_FLUX2_KLEIN
                   : DIT_MODEL_QWEN_IMAGE_2_1;
+    const std::string params_backend =
+        opts.type == ServerOptions::ModelType::kQwenImage21
+            ? "te=disk"
+            : opts.dit_params_backend;
     return std::make_unique<PipelineDit>(
         text_encoder, opts.model_dir, engine_path, dit_path, llm_path,
         llm_vision_path, vae_path, kind, opts.dit_backend,
-        opts.dit_params_backend,
+        params_backend,
         opts.dit_threads, opts.dit_vae_tile_size, !opts.no_img2img);
   }
 

@@ -287,8 +287,8 @@ data class Model(
         )
 
         val QWEN_IMAGE_2_1_PACKAGE_FILES = listOf(
-            "leejet/Qwen-Image-2.1-GGUF/resolve/main/" +
-                "qwen_image_2.1-Q4_0.gguf|dit.gguf",
+            "unsloth/Qwen-Image-2.1-FP8/resolve/main/" +
+                "Qwen-Image-2.1-FP8.safetensors|dit.safetensors",
             "bartowski/Qwen_Qwen3-VL-8B-Instruct-GGUF/resolve/main/" +
                 "Qwen_Qwen3-VL-8B-Instruct-Q4_0.gguf|llm.gguf",
             "bartowski/Qwen_Qwen3-VL-8B-Instruct-GGUF/resolve/main/" +
@@ -714,7 +714,7 @@ class ModelRepository private constructor(private val context: Context) {
             baseUrl = baseUrl,
             packageFiles = Model.QWEN_IMAGE_2_1_PACKAGE_FILES,
             generationSize = 1024,
-            approximateSize = "10.8GB",
+            approximateSize = "13.7GB",
             isDownloaded = Model.isDitPackageDownloaded(
                 context,
                 id,
