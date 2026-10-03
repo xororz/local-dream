@@ -707,6 +707,9 @@ class ModelRepository private constructor(private val context: Context) {
 
     private fun createQwenImage21Model(): Model {
         val id = "qwen_image_2_1"
+        // The package used to ship a Q4_0 dit.gguf; the FP8 dit.safetensors
+        // replaced it and nothing reads the old file, so reclaim its 4GB.
+        File(File(Model.getModelsDir(context), id), "dit.gguf").delete()
         return Model(
             id = id,
             name = "Qwen Image 2.1",
