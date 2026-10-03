@@ -15,10 +15,10 @@ index 8f585ba..6909a9c 100644
              x = conv->forward(ctx, x);
          } else {
 diff --git a/src/model/common/ggml_block.hpp b/src/model/common/ggml_block.hpp
-index 185a9e1..d70be42 100644
+index d05f88b..ea99966 100644
 --- a/src/model/common/ggml_block.hpp
 +++ b/src/model/common/ggml_block.hpp
-@@ -470,6 +470,7 @@ public:
+@@ -471,6 +471,7 @@ public:
                  return out;
              }
          }
@@ -71,7 +71,9 @@ index 185a9e1..d70be42 100644
      ggml_tensor* try_forward_upscale_add(GGMLRunnerContext* ctx,
                                           ggml_tensor* x,
                                           ggml_tensor* residual,
-@@ -517,4 +556,26 @@ public:
+@@ -515,6 +554,28 @@ public:
+     }
+ 
  private:
 +    // Hexagon repacks eligible F16 1x1/3x3 weights into the HMX tile layout at
 +    // upload time, and only the direct conv kernel reads that layout. A fallback
@@ -98,3 +100,20 @@ index 185a9e1..d70be42 100644
      ggml_tensor* try_forward_upscale(GGMLRunnerContext* ctx,
                                       ggml_tensor* x,
                                       int upscale_factor,
+diff --git a/src/model_io/safetensors_io.cpp b/src/model_io/safetensors_io.cpp
+index 71cacf5..361ac5d 100644
+--- a/src/model_io/safetensors_io.cpp
++++ b/src/model_io/safetensors_io.cpp
+@@ -350,6 +350,12 @@ bool read_safetensors_file(const std::string& file_path,
+                 tensor_storage.ne[1]  = 1;
+                 tensor_storage.n_dims = 1;
+             }
++        } else if (ends_with(name, "._weight_scale") && tensor_storage.n_dims == 2 && tensor_storage.ne[0] == 1) {
++            // Unsloth/torchao per-row FP8 scales are stored as [out_features, 1];
++            // Linear expects a 1-D scale.
++            tensor_storage.ne[0]  = tensor_storage.ne[1];
++            tensor_storage.ne[1]  = 1;
++            tensor_storage.n_dims = 1;
+         }
+ 
+         size_t tensor_data_size = end - begin;
