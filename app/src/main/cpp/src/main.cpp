@@ -374,7 +374,7 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
                   : DIT_MODEL_QWEN_IMAGE_2_1;
     const std::string params_backend =
         opts.type == ServerOptions::ModelType::kQwenImage21
-            ? "te=disk"
+            ? "te=disk,diffusion=disk"
             : opts.dit_params_backend;
     return std::make_unique<PipelineDit>(
         text_encoder, opts.model_dir, engine_path, dit_path, llm_path,
