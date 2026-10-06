@@ -500,4 +500,20 @@
     <string name="draw_select_color">色を選択</string>
     <string name="draw_result">結果:</string>
     <string name="draw_select">選択</string>
+    <!-- Model storage location -->
+    <string name="model_storage">モデルの保存先</string>
+    <string name="model_storage_internal">アプリのストレージ</string>
+    <string name="model_storage_internal_hint">Local Dream 専用です。アプリをアンインストールすると削除されます。</string>
+    <string name="model_storage_public_hint">ファイルマネージャーから見え、アンインストール後も残ります。「すべてのファイルへのアクセス」を持つ他のアプリが、再ダウンロードせずにこれらのモデルを使えます。「すべてのファイルへのアクセス」が必要です。</string>
+    <string name="model_storage_public_unsupported">Android 11 以降が必要です。</string>
+    <string name="model_storage_access_lost">「すべてのファイルへのアクセス」がオフになったため、Download フォルダのモデルを読み込めません。</string>
+    <string name="model_storage_grant">アクセスを許可</string>
+    <string name="model_storage_no_access">「すべてのファイルへのアクセス」が許可されませんでした</string>
+    <string name="model_storage_busy">ダウンロードと生成が終わるまでお待ちください</string>
+    <string name="model_storage_move_title">モデルを移動しますか？</string>
+    <string name="model_storage_move_confirm">%1$s のモデルと埋め込みを %2$s に移動します。完了するまで Local Dream を開いたままにしてください。</string>
+    <string name="model_storage_moving">モデルを移動中…</string>
+    <string name="model_storage_moved">モデルを移動しました</string>
+    <string name="model_storage_kept">モデルを移動しました。移動先に既にあった %1$d 個のファイルは元の場所に残しました。</string>
+    <string name="model_storage_move_failed">移動に失敗しました</string>
 </resources>

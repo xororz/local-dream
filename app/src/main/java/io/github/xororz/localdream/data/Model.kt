@@ -262,8 +262,6 @@ data class Model(
     }
 
     companion object {
-        private const val MODELS_DIR = "models"
-
         // Where each part of a DiT package comes from, and the name the
         // native side expects on disk (see PipelineDit). The weights are
         // pulled from the repositories that publish them rather than rehosted:
@@ -322,9 +320,7 @@ data class Model(
             return null
         }
 
-        fun getModelsDir(context: Context): File = File(context.filesDir, MODELS_DIR).apply {
-            if (!exists()) mkdirs()
-        }
+        fun getModelsDir(context: Context): File = ModelStorage.modelsDir(context)
 
         fun isModelDownloaded(context: Context, modelId: String, isCustom: Boolean = false): Boolean {
             if (isCustom) {

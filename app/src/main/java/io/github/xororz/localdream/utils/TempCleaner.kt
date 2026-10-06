@@ -3,6 +3,7 @@ package io.github.xororz.localdream.utils
 import android.content.Context
 import android.util.Log
 import io.github.xororz.localdream.data.ModelRepository
+import io.github.xororz.localdream.data.ModelStorage
 import io.github.xororz.localdream.service.ModelDownloadService
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -61,13 +62,13 @@ object TempCleaner {
                 state is ModelDownloadService.DownloadState.Extracting
         }
         if (!downloadActive) {
-            File(filesDir, "temp_downloads").takeIf { it.exists() }?.let { targets += it }
+            ModelStorage.tempDownloadsDir(context).takeIf { it.exists() }?.let { targets += it }
 
             // Unrecognized leftovers under models/ (stray files, half-extracted
             // dirs). Built-in models, upscalers and finished custom models are
             // preserved. Skipped during a download since a model dir may be
             // mid-populate.
-            File(filesDir, "models").takeIf { it.isDirectory }?.listFiles()?.forEach { entry ->
+            File(ModelStorage.root(context), "models").takeIf { it.isDirectory }?.listFiles()?.forEach { entry ->
                 if (!isRecognizedModelEntry(entry)) targets += entry
             }
         }

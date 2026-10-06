@@ -510,4 +510,21 @@
     <string name="draw_select_color">Select color</string>
     <string name="draw_result">Result:</string>
     <string name="draw_select">Select</string>
+    <!-- Model storage location -->
+    <string name="model_storage">Model Storage</string>
+    <string name="model_storage_internal">App storage</string>
+    <string name="model_storage_internal_hint">Private to Local Dream. Removed when the app is uninstalled.</string>
+    <string name="model_storage_public" translatable="false">Download/%1$s</string>
+    <string name="model_storage_public_hint">Visible in file managers and kept after uninstall. Other apps with All files access can use these models without downloading them again. Needs All files access.</string>
+    <string name="model_storage_public_unsupported">Needs Android 11 or newer.</string>
+    <string name="model_storage_access_lost">All files access was turned off, so models in the Download folder cannot be read.</string>
+    <string name="model_storage_grant">Grant access</string>
+    <string name="model_storage_no_access">All files access was not granted</string>
+    <string name="model_storage_busy">Wait for downloads and generation to finish first</string>
+    <string name="model_storage_move_title">Move models?</string>
+    <string name="model_storage_move_confirm">%1$s of models and embeddings will be moved to %2$s. Keep Local Dream open until it finishes.</string>
+    <string name="model_storage_moving">Moving models…</string>
+    <string name="model_storage_moved">Models moved</string>
+    <string name="model_storage_kept">Models moved. %1$d files were already at the destination and were left in place.</string>
+    <string name="model_storage_move_failed">Move failed</string>
 </resources>

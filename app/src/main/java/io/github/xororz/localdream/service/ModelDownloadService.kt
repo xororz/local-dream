@@ -10,6 +10,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.Model
+import io.github.xororz.localdream.data.ModelStorage
 import io.github.xororz.localdream.utils.Http
 import java.io.File
 import java.io.FileOutputStream
@@ -137,7 +138,7 @@ class ModelDownloadService : Service() {
             try {
                 _downloadState.value = DownloadState.Downloading(modelId, 0f, 0, 0)
 
-                val tempDir = File(filesDir, "temp_downloads")
+                val tempDir = ModelStorage.tempDownloadsDir(this@ModelDownloadService)
 
                 if (tempDir.exists()) {
                     tempDir.deleteRecursively()
@@ -429,9 +430,7 @@ class ModelDownloadService : Service() {
         stopSelf()
     }
 
-    private fun getModelsDir(): File = File(filesDir, "models").apply {
-        if (!exists()) mkdirs()
-    }
+    private fun getModelsDir(): File = ModelStorage.modelsDir(this)
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(

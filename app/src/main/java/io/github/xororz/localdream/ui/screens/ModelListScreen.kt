@@ -1375,6 +1375,10 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                             }
                         }
                     }
+                    // Where models are kept (GitHub build only, see ModelStorage)
+                    if (ModelStorage.isChoiceShown(context)) {
+                        item { ModelStorageSection() }
+                    }
                     // Appearance (theme) section
                     item { AppearanceSection() }
                     // Feature settings section
@@ -1853,6 +1857,13 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
             }
         }
     }
+
+    ModelStorageMoveOverlay(onFinished = {
+        scope.launch {
+            modelRepository.refreshAllModels()
+            upscalerRepository.refreshBaseUrl()
+        }
+    })
 
     BlockingProgressOverlay(visible = isConverting) {
         val byteProgress = extractByteProgress
@@ -3089,7 +3100,7 @@ suspend fun extractNpuModel(
 
         val modelId = modelName.replace(" ", "")
 
-        val modelsDir = File(context.filesDir, "models")
+        val modelsDir = Model.getModelsDir(context)
         if (!modelsDir.exists()) {
             modelsDir.mkdirs()
         }
@@ -3182,7 +3193,7 @@ suspend fun extractNpuModel(
         Log.e("NpuModelExtract", "Extraction failed", e)
 
         val modelId = modelName.replace(" ", "")
-        val modelDir = File(File(context.filesDir, "models"), modelId)
+        val modelDir = File(Model.getModelsDir(context), modelId)
         if (modelDir.exists()) {
             modelDir.deleteRecursively()
         }
@@ -3207,7 +3218,7 @@ fun EmbeddingManagerDialog(
     val scope = rememberCoroutineScope()
 
     fun loadEmbeddings() {
-        val embeddingsDir = File(context.filesDir, "embeddings")
+        val embeddingsDir = ModelStorage.embeddingsDir(context)
         if (!embeddingsDir.exists()) {
             embeddingsDir.mkdirs()
         }
@@ -3417,7 +3428,7 @@ fun EmbeddingManagerDialog(
 
 suspend fun importEmbedding(context: Context, fileUri: Uri, onSuccess: () -> Unit, onError: (String) -> Unit) = withContext(Dispatchers.IO) {
     try {
-        val embeddingsDir = File(context.filesDir, "embeddings")
+        val embeddingsDir = ModelStorage.embeddingsDir(context)
         if (!embeddingsDir.exists()) {
             embeddingsDir.mkdirs()
         }
@@ -3474,7 +3485,7 @@ suspend fun convertCustomModel(
 
         val modelId = modelName.replace(" ", "")
 
-        val modelsDir = File(context.filesDir, "models")
+        val modelsDir = Model.getModelsDir(context)
         if (!modelsDir.exists()) {
             modelsDir.mkdirs()
         }
@@ -3664,7 +3675,7 @@ suspend fun convertCustomModel(
         Log.e("ModelConvert", "Conversion failed", e)
 
         val modelId = modelName.replace(" ", "")
-        val modelDir = File(File(context.filesDir, "models"), modelId)
+        val modelDir = File(Model.getModelsDir(context), modelId)
         if (modelDir.exists()) {
             modelDir.deleteRecursively()
         }

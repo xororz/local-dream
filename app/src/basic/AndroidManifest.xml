@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Only for the optional Download/LocalDream model folder (ModelStorage),
+         requested when someone picks it in Settings, never at startup.
+         Declared in the GitHub build only: Google Play restricts this
+         permission, and declaring it is enough to trigger review. Builds
+         without it hide the option. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+</manifest>

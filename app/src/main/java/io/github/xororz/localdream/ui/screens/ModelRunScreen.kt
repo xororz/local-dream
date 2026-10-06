@@ -144,6 +144,7 @@ import io.github.xororz.localdream.data.HistoryFilter
 import io.github.xororz.localdream.data.HistoryItem
 import io.github.xororz.localdream.data.HistoryManager
 import io.github.xororz.localdream.data.ModelRepository
+import io.github.xororz.localdream.data.ModelStorage
 import io.github.xororz.localdream.data.PatchScanner
 import io.github.xororz.localdream.data.RemoteRepository
 import io.github.xororz.localdream.data.Resolution
@@ -501,7 +502,7 @@ fun ModelRunScreen(
     LaunchedEffect(promptField.isFocused, negativePromptField.isFocused) {
         if (!promptField.isFocused && !negativePromptField.isFocused) return@LaunchedEffect
         val names = withContext(Dispatchers.IO) {
-            File(context.filesDir, "embeddings")
+            ModelStorage.embeddingsDir(context)
                 .takeIf { it.isDirectory }
                 ?.listFiles()
                 ?.asSequence()
