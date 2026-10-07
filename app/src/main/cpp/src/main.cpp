@@ -372,14 +372,10 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
             : opts.type == ServerOptions::ModelType::kFlux2Klein
                   ? DIT_MODEL_FLUX2_KLEIN
                   : DIT_MODEL_QWEN_IMAGE_2_1;
-    const std::string params_backend =
-        opts.type == ServerOptions::ModelType::kQwenImage21
-            ? "te=disk,diffusion=disk"
-            : opts.dit_params_backend;
     return std::make_unique<PipelineDit>(
         text_encoder, opts.model_dir, engine_path, dit_path, llm_path,
         llm_vision_path, vae_path, kind, opts.dit_backend,
-        params_backend,
+        opts.dit_params_backend,
         opts.dit_threads, opts.dit_vae_tile_size, !opts.no_img2img);
   }
 
