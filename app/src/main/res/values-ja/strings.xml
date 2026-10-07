@@ -500,4 +500,23 @@
     <string name="draw_select_color">色を選択</string>
     <string name="draw_result">結果:</string>
     <string name="draw_select">選択</string>
+    <!-- Model storage location -->
+    <string name="model_storage">モデルの保存先</string>
+    <string name="model_storage_internal">アプリのストレージ</string>
+    <string name="model_storage_internal_hint">Local Dream 専用です。アプリをアンインストールすると削除されます。</string>
+    <string name="model_storage_public_hint">ファイルマネージャーから見え、アンインストール後も残ります。「すべてのファイルへのアクセス」を持つ他のアプリが、再ダウンロードせずにこれらのモデルを使えます。「すべてのファイルへのアクセス」が必要です。</string>
+    <string name="model_storage_public_unsupported">Android 11 以降が必要です。</string>
+    <string name="model_storage_access_lost">「すべてのファイルへのアクセス」がオフになったため、Download フォルダのモデルを読み込めません。</string>
+    <string name="model_storage_grant">アクセスを許可</string>
+    <string name="model_storage_no_access">「すべてのファイルへのアクセス」が許可されませんでした</string>
+    <string name="model_storage_busy">ダウンロードと生成が終わるまでお待ちください</string>
+    <string name="model_storage_move_title">モデルを移動しますか？</string>
+    <string name="model_storage_move_confirm">%1$s のモデルと埋め込みを %2$s に移動します。完了するまで Local Dream を開いたままにしてください。</string>
+    <string name="model_storage_moving">モデルを移動中…</string>
+    <string name="model_storage_moved">モデルを移動しました</string>
+    <string name="model_storage_move_failed">移動に失敗しました</string>
+    <string name="model_storage_pending">%1$s への移動が完了していないため、一部のモデルがもう一方の場所に残っています。上で保存先を選ぶと、移動を完了するか元に戻せます。</string>
+    <string name="model_storage_name_clash">Download フォルダは大文字と小文字を区別しないため、次の名前が他のモデルや埋め込みを上書きしてしまいます: %1$s。先に名前を変更するか削除してください。</string>
+    <string name="model_storage_conflict">%1$s には既に %2$s があります。どちらかを削除してから、もう一度お試しください。</string>
+    <string name="model_storage_moving_blocked">モデルを移動中です。移動が終わってからもう一度お試しください。</string>
 </resources>

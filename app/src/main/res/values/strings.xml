@@ -510,4 +510,24 @@
     <string name="draw_select_color">Select color</string>
     <string name="draw_result">Result:</string>
     <string name="draw_select">Select</string>
+    <!-- Model storage location -->
+    <string name="model_storage">Model Storage</string>
+    <string name="model_storage_internal">App storage</string>
+    <string name="model_storage_internal_hint">Private to Local Dream. Removed when the app is uninstalled.</string>
+    <string name="model_storage_public" translatable="false">Download/%1$s</string>
+    <string name="model_storage_public_hint">Visible in file managers and kept after uninstall. Other apps with All files access can use these models without downloading them again. Needs All files access.</string>
+    <string name="model_storage_public_unsupported">Needs Android 11 or newer.</string>
+    <string name="model_storage_access_lost">All files access was turned off, so models in the Download folder cannot be read.</string>
+    <string name="model_storage_grant">Grant access</string>
+    <string name="model_storage_no_access">All files access was not granted</string>
+    <string name="model_storage_busy">Wait for downloads and generation to finish first</string>
+    <string name="model_storage_move_title">Move models?</string>
+    <string name="model_storage_move_confirm">%1$s of models and embeddings will be moved to %2$s. Keep Local Dream open until it finishes.</string>
+    <string name="model_storage_moving">Moving models…</string>
+    <string name="model_storage_moved">Models moved</string>
+    <string name="model_storage_move_failed">Move failed</string>
+    <string name="model_storage_pending">A move to %1$s did not finish, so some models are still in the other location. Pick a location above to finish the move or to move them back.</string>
+    <string name="model_storage_name_clash">The Download folder does not tell upper and lower case apart, so these would overwrite another model or embedding: %1$s. Rename or delete them first.</string>
+    <string name="model_storage_conflict">%1$s already contains %2$s. Delete one of the copies, then try again.</string>
+    <string name="model_storage_moving_blocked">Models are being moved. Try again once the move has finished.</string>
 </resources>

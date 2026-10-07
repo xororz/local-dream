@@ -500,4 +500,23 @@
     <string name="draw_select_color">색상 선택</string>
     <string name="draw_result">결과:</string>
     <string name="draw_select">선택</string>
+    <!-- Model storage location -->
+    <string name="model_storage">모델 저장 위치</string>
+    <string name="model_storage_internal">앱 저장소</string>
+    <string name="model_storage_internal_hint">Local Dream 전용입니다. 앱을 삭제하면 함께 삭제됩니다.</string>
+    <string name="model_storage_public_hint">파일 관리자에서 보이며 앱을 삭제해도 남습니다. "모든 파일 액세스" 권한이 있는 다른 앱이 다시 다운로드하지 않고 이 모델을 사용할 수 있습니다. "모든 파일 액세스" 권한이 필요합니다.</string>
+    <string name="model_storage_public_unsupported">Android 11 이상이 필요합니다.</string>
+    <string name="model_storage_access_lost">"모든 파일 액세스" 권한이 꺼져 Download 폴더의 모델을 읽을 수 없습니다.</string>
+    <string name="model_storage_grant">권한 허용</string>
+    <string name="model_storage_no_access">"모든 파일 액세스" 권한이 허용되지 않았습니다</string>
+    <string name="model_storage_busy">다운로드와 생성이 끝날 때까지 기다려 주세요</string>
+    <string name="model_storage_move_title">모델을 이동할까요?</string>
+    <string name="model_storage_move_confirm">%1$s의 모델과 임베딩을 %2$s(으)로 이동합니다. 완료될 때까지 Local Dream을 열어 두세요.</string>
+    <string name="model_storage_moving">모델 이동 중…</string>
+    <string name="model_storage_moved">모델을 이동했습니다</string>
+    <string name="model_storage_move_failed">이동 실패</string>
+    <string name="model_storage_pending">%1$s(으)로의 이동이 완료되지 않아 일부 모델이 다른 위치에 남아 있습니다. 위에서 위치를 선택해 이동을 마치거나 원래대로 되돌리세요.</string>
+    <string name="model_storage_name_clash">Download 폴더는 대소문자를 구분하지 않으므로 다음 이름이 다른 모델이나 임베딩을 덮어씁니다: %1$s. 먼저 이름을 바꾸거나 삭제하세요.</string>
+    <string name="model_storage_conflict">%1$s에 이미 %2$s이(가) 있습니다. 하나를 삭제한 뒤 다시 시도하세요.</string>
+    <string name="model_storage_moving_blocked">모델을 이동하는 중입니다. 이동이 끝난 뒤 다시 시도하세요.</string>
 </resources>

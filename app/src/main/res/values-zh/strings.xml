@@ -500,4 +500,23 @@
     <string name="draw_select_color">选择颜色</string>
     <string name="draw_result">结果:</string>
     <string name="draw_select">选择</string>
+    <!-- Model storage location -->
+    <string name="model_storage">模型存储位置</string>
+    <string name="model_storage_internal">应用存储</string>
+    <string name="model_storage_internal_hint">仅 Local Dream 可访问，卸载应用时会被删除。</string>
+    <string name="model_storage_public_hint">文件管理器可见，卸载后保留。拥有“所有文件访问权限”的其他应用可直接使用这些模型，无需重新下载。需要“所有文件访问权限”。</string>
+    <string name="model_storage_public_unsupported">需要 Android 11 或更高版本。</string>
+    <string name="model_storage_access_lost">“所有文件访问权限”已被关闭，无法读取 Download 文件夹中的模型。</string>
+    <string name="model_storage_grant">授予权限</string>
+    <string name="model_storage_no_access">未授予“所有文件访问权限”</string>
+    <string name="model_storage_busy">请先等待下载和生成完成</string>
+    <string name="model_storage_move_title">移动模型？</string>
+    <string name="model_storage_move_confirm">将把 %1$s 的模型和嵌入移动到 %2$s。完成前请保持 Local Dream 打开。</string>
+    <string name="model_storage_moving">正在移动模型…</string>
+    <string name="model_storage_moved">模型已移动</string>
+    <string name="model_storage_move_failed">移动失败</string>
+    <string name="model_storage_pending">移动到 %1$s 的操作未完成，部分模型仍在另一个位置。请在上方选择一个位置，完成移动或将模型移回。</string>
+    <string name="model_storage_name_clash">Download 文件夹不区分大小写，以下名称会覆盖其他模型或嵌入：%1$s。请先重命名或删除它们。</string>
+    <string name="model_storage_conflict">%1$s 中已存在 %2$s。请删除其中一份后重试。</string>
+    <string name="model_storage_moving_blocked">正在移动模型，请在移动完成后重试。</string>
 </resources>

@@ -10,6 +10,7 @@ import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.DitEngine
 import io.github.xororz.localdream.data.DitResolution
 import io.github.xororz.localdream.data.Model
+import io.github.xororz.localdream.data.ModelStorage
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.Executors
@@ -294,6 +295,12 @@ class BackendService : Service() {
             return
         }
         stopBackend()
+        // Published under the move lock: a move either sees this backend as
+        // busy and stays put, or is already running and turns the start away.
+        if (ModelStorage.unlessMoving { updateState(BackendState.Starting) } == null) {
+            updateState(BackendState.Error(getString(R.string.model_storage_moving_blocked), want.modelId))
+            return
+        }
         if (startBackend(want)) {
             serving = want
             updateServing(want)
