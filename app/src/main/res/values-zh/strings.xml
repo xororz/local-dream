@@ -514,6 +514,9 @@
     <string name="model_storage_move_confirm">将把 %1$s 的模型和嵌入移动到 %2$s。完成前请保持 Local Dream 打开。</string>
     <string name="model_storage_moving">正在移动模型…</string>
     <string name="model_storage_moved">模型已移动</string>
-    <string name="model_storage_kept">模型已移动。目标位置已存在 %1$d 个文件，已保留原处。</string>
     <string name="model_storage_move_failed">移动失败</string>
+    <string name="model_storage_pending">移动到 %1$s 的操作未完成，部分模型仍在另一个位置。请在上方选择一个位置，完成移动或将模型移回。</string>
+    <string name="model_storage_name_clash">Download 文件夹不区分大小写，以下名称会覆盖其他模型或嵌入：%1$s。请先重命名或删除它们。</string>
+    <string name="model_storage_conflict">%1$s 中已存在 %2$s。请删除其中一份后重试。</string>
+    <string name="model_storage_moving_blocked">正在移动模型，请在移动完成后重试。</string>
 </resources>

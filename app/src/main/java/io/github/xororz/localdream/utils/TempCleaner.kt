@@ -27,7 +27,11 @@ import kotlinx.coroutines.withContext
  *
  * The download scratch dir and the models sweep are skipped while a
  * download/extract is in flight so cleaning can't pull the rug out from under
- * an active transfer (a model dir being populated by a rename).
+ * an active transfer (a model dir being populated by a rename), and while a
+ * move between storage locations runs or is unfinished, since a half-moved
+ * model looks just like a half-extracted one. The models sweep covers app
+ * storage only: in the public Download/LocalDream folder an unrecognized dir
+ * may belong to the person or to another app.
  */
 object TempCleaner {
     private const val TAG = "TempCleaner"
@@ -61,15 +65,19 @@ object TempCleaner {
             state is ModelDownloadService.DownloadState.Downloading ||
                 state is ModelDownloadService.DownloadState.Extracting
         }
-        if (!downloadActive) {
+        val moveActive = ModelStorage.moveState.value is ModelStorage.MoveState.Moving ||
+            ModelStorage.pendingMove(context) != null
+        if (!downloadActive && !moveActive) {
             ModelStorage.tempDownloadsDir(context).takeIf { it.exists() }?.let { targets += it }
 
             // Unrecognized leftovers under models/ (stray files, half-extracted
             // dirs). Built-in models, upscalers and finished custom models are
             // preserved. Skipped during a download since a model dir may be
             // mid-populate.
-            File(ModelStorage.root(context), "models").takeIf { it.isDirectory }?.listFiles()?.forEach { entry ->
-                if (!isRecognizedModelEntry(entry)) targets += entry
+            if (ModelStorage.location(context) == ModelStorage.Location.INTERNAL) {
+                File(filesDir, "models").takeIf { it.isDirectory }?.listFiles()?.forEach { entry ->
+                    if (!isRecognizedModelEntry(entry)) targets += entry
+                }
             }
         }
 

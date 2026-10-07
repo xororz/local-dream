@@ -6,8 +6,6 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- Where models are kept is a fact about this device (ModelStorage). -->
+    <exclude domain="sharedpref" path="model_storage.xml"/>
 </full-backup-content>

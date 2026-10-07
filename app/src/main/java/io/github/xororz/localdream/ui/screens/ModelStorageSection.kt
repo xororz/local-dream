@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,8 +43,6 @@ import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.ModelStorage
 import io.github.xororz.localdream.data.ModelStorage.Location
 import io.github.xororz.localdream.data.ModelStorage.MoveState
-import io.github.xororz.localdream.service.BackendService
-import io.github.xororz.localdream.service.ModelDownloadService
 import io.github.xororz.localdream.ui.components.BlockingProgressOverlay
 import io.github.xororz.localdream.ui.components.SmoothCircularWavyProgressIndicator
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +65,7 @@ internal fun ModelStorageSection() {
     }
     val current = remember(revision, moveState) { ModelStorage.location(context) }
     val accessLost = remember(revision, moveState) { ModelStorage.isAccessLost(context) }
+    val pending = remember(revision, moveState) { ModelStorage.pendingMove(context) }
 
     var confirmTarget by remember { mutableStateOf<Location?>(null) }
     var confirmBytes by remember { mutableStateOf(0L) }
@@ -74,20 +74,24 @@ internal fun ModelStorageSection() {
     val msgBusy = stringResource(R.string.model_storage_busy)
     val msgNoAccess = stringResource(R.string.model_storage_no_access)
 
-    fun busy(): Boolean {
-        val download = ModelDownloadService.downloadState.value
-        val backend = BackendService.backendState.value
-        return download is ModelDownloadService.DownloadState.Downloading ||
-            download is ModelDownloadService.DownloadState.Extracting ||
-            backend is BackendService.BackendState.Starting ||
-            backend is BackendService.BackendState.Running
+    // After an unfinished move either location is a valid target: the
+    // one it was headed for finishes it, the other one moves the files back.
+    fun canMoveTo(target: Location): Boolean = target != ModelStorage.location(context) ||
+        ModelStorage.pendingMove(context) != null
+
+    fun startMove(target: Location) {
+        if (!ModelStorage.startMove(context, target)) {
+            Toast.makeText(context, msgBusy, Toast.LENGTH_SHORT).show()
+        }
     }
 
     fun askToMove(target: Location) {
         scope.launch {
-            val bytes = withContext(Dispatchers.IO) { ModelStorage.sizeAt(context, current) }
+            val bytes = withContext(Dispatchers.IO) {
+                ModelStorage.sizeAt(context, ModelStorage.other(target))
+            }
             if (bytes == 0L) {
-                ModelStorage.startMove(context, target)
+                startMove(target)
             } else {
                 confirmBytes = bytes
                 confirmTarget = target
@@ -103,21 +107,31 @@ internal fun ModelStorageSection() {
         revision++
         if (!ModelStorage.hasAllFilesAccess()) {
             Toast.makeText(context, msgNoAccess, Toast.LENGTH_SHORT).show()
-        } else if (target != null && target != ModelStorage.location(context)) {
+        } else if (target != null && canMoveTo(target)) {
             askToMove(target)
         }
     }
 
+    fun requestAccess(target: Location?) {
+        awaitingAccessFor = target
+        val launched = ModelStorage.allFilesAccessIntents(context).any { intent ->
+            runCatching { accessLauncher.launch(intent) }.isSuccess
+        }
+        if (!launched) {
+            awaitingAccessFor = null
+            Toast.makeText(context, msgNoAccess, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun choose(target: Location) {
-        if (target == current || moveState is MoveState.Moving) return
-        if (busy()) {
+        if (moveState is MoveState.Moving || !canMoveTo(target)) return
+        if (ModelStorage.isBusy()) {
             Toast.makeText(context, msgBusy, Toast.LENGTH_SHORT).show()
             return
         }
         // Either direction touches Download/LocalDream.
         if (!ModelStorage.hasAllFilesAccess()) {
-            awaitingAccessFor = target
-            accessLauncher.launch(ModelStorage.allFilesAccessIntent(context))
+            requestAccess(target)
         } else {
             askToMove(target)
         }
@@ -147,7 +161,7 @@ internal fun ModelStorageSection() {
             ),
         ) {
             StorageOption(
-                title = stringResource(R.string.model_storage_internal),
+                title = locationLabel(Location.INTERNAL),
                 description = stringResource(R.string.model_storage_internal_hint),
                 selected = current == Location.INTERNAL,
                 enabled = true,
@@ -156,7 +170,7 @@ internal fun ModelStorageSection() {
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             val supported = ModelStorage.isPublicStorageSupported()
             StorageOption(
-                title = stringResource(R.string.model_storage_public, ModelStorage.PUBLIC_FOLDER),
+                title = locationLabel(Location.DOWNLOADS),
                 description = if (supported) {
                     stringResource(R.string.model_storage_public_hint)
                 } else {
@@ -166,6 +180,15 @@ internal fun ModelStorageSection() {
                 enabled = supported,
                 onClick = { choose(Location.DOWNLOADS) },
             )
+            if (pending != null && moveState !is MoveState.Moving) {
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                Text(
+                    stringResource(R.string.model_storage_pending, locationLabel(pending)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
             if (accessLost) {
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                 Column(
@@ -179,9 +202,7 @@ internal fun ModelStorageSection() {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    Button(onClick = {
-                        accessLauncher.launch(ModelStorage.allFilesAccessIntent(context))
-                    }) {
+                    Button(onClick = { requestAccess(null) }) {
                         Text(stringResource(R.string.model_storage_grant))
                     }
                 }
@@ -190,11 +211,7 @@ internal fun ModelStorageSection() {
     }
 
     confirmTarget?.let { target ->
-        val destination = if (target == Location.DOWNLOADS) {
-            stringResource(R.string.model_storage_public, ModelStorage.PUBLIC_FOLDER)
-        } else {
-            stringResource(R.string.model_storage_internal)
-        }
+        val destination = locationLabel(target)
         AlertDialog(
             onDismissRequest = { confirmTarget = null },
             title = { Text(stringResource(R.string.model_storage_move_title)) },
@@ -210,11 +227,7 @@ internal fun ModelStorageSection() {
             confirmButton = {
                 TextButton(onClick = {
                     confirmTarget = null
-                    if (busy()) {
-                        Toast.makeText(context, msgBusy, Toast.LENGTH_SHORT).show()
-                    } else {
-                        ModelStorage.startMove(context, target)
-                    }
+                    startMove(target)
                 }) { Text(stringResource(R.string.confirm)) }
             },
             dismissButton = {
@@ -224,6 +237,12 @@ internal fun ModelStorageSection() {
             },
         )
     }
+}
+
+@Composable
+private fun locationLabel(location: Location): String = when (location) {
+    Location.INTERNAL -> stringResource(R.string.model_storage_internal)
+    Location.DOWNLOADS -> stringResource(R.string.model_storage_public, ModelStorage.PUBLIC_FOLDER)
 }
 
 @Composable
@@ -269,28 +288,33 @@ private fun StorageOption(
 /**
  * Blocks the screen while models move, and resumes a move the app was killed
  * in the middle of. Lives on the model list, not in Settings, so the move is
- * visible wherever the person goes next.
+ * visible wherever the person goes next. [onModelsChanged] rescans the
+ * models after a move, and when All files access is switched in system
+ * settings while they live in Download/LocalDream.
  */
 @Composable
-internal fun ModelStorageMoveOverlay(onFinished: () -> Unit) {
+internal fun ModelStorageMoveOverlay(onModelsChanged: () -> Unit) {
     val context = LocalContext.current
     val moveState by ModelStorage.moveState.collectAsState()
+    val currentOnModelsChanged by rememberUpdatedState(onModelsChanged)
 
-    LaunchedEffect(Unit) {
-        val pending = ModelStorage.pendingMove(context)
-        if (pending != null && ModelStorage.moveState.value !is MoveState.Moving) {
-            ModelStorage.startMove(context, pending)
+    LaunchedEffect(Unit) { ModelStorage.resumePendingMove(context) }
+
+    val msgAccessLost = stringResource(R.string.model_storage_access_lost)
+    LifecycleResumeEffect(Unit) {
+        ModelStorage.pollAccessChange(context)?.let { hasAccess ->
+            if (!hasAccess) Toast.makeText(context, msgAccessLost, Toast.LENGTH_LONG).show()
+            currentOnModelsChanged()
         }
+        onPauseOrDispose { }
     }
 
     val msgMoved = stringResource(R.string.model_storage_moved)
-    val msgKept = stringResource(R.string.model_storage_kept)
     LaunchedEffect(moveState) {
-        val done = moveState as? MoveState.Done ?: return@LaunchedEffect
-        val message = if (done.keptFiles > 0) msgKept.format(done.keptFiles) else msgMoved
-        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        if (moveState !is MoveState.Done) return@LaunchedEffect
+        Toast.makeText(context, msgMoved, Toast.LENGTH_LONG).show()
         ModelStorage.clearMoveState()
-        onFinished()
+        currentOnModelsChanged()
     }
 
     val moving = moveState as? MoveState.Moving
@@ -315,15 +339,17 @@ internal fun ModelStorageMoveOverlay(onFinished: () -> Unit) {
     }
 
     (moveState as? MoveState.Failed)?.let { failed ->
+        // Some models may already be on the other side: rescan either way.
+        val dismiss = {
+            ModelStorage.clearMoveState()
+            currentOnModelsChanged()
+        }
         AlertDialog(
-            onDismissRequest = { ModelStorage.clearMoveState() },
+            onDismissRequest = dismiss,
             title = { Text(stringResource(R.string.model_storage_move_failed)) },
             text = { Text(failed.message) },
             confirmButton = {
-                TextButton(onClick = {
-                    ModelStorage.clearMoveState()
-                    onFinished()
-                }) { Text(stringResource(R.string.confirm)) }
+                TextButton(onClick = dismiss) { Text(stringResource(R.string.confirm)) }
             },
         )
     }

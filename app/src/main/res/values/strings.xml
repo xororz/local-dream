@@ -525,6 +525,9 @@
     <string name="model_storage_move_confirm">%1$s of models and embeddings will be moved to %2$s. Keep Local Dream open until it finishes.</string>
     <string name="model_storage_moving">Moving models…</string>
     <string name="model_storage_moved">Models moved</string>
-    <string name="model_storage_kept">Models moved. %1$d files were already at the destination and were left in place.</string>
     <string name="model_storage_move_failed">Move failed</string>
+    <string name="model_storage_pending">A move to %1$s did not finish, so some models are still in the other location. Pick a location above to finish the move or to move them back.</string>
+    <string name="model_storage_name_clash">The Download folder does not tell upper and lower case apart, so these would overwrite another model or embedding: %1$s. Rename or delete them first.</string>
+    <string name="model_storage_conflict">%1$s already contains %2$s. Delete one of the copies, then try again.</string>
+    <string name="model_storage_moving_blocked">Models are being moved. Try again once the move has finished.</string>
 </resources>

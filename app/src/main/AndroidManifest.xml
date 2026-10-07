@@ -66,6 +66,12 @@
             android:foregroundServiceType="dataSync" />
 
         <service
+            android:name=".service.ModelMoveService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
             android:name=".service.RemoteHostService"
             android:enabled="true"
             android:exported="false"

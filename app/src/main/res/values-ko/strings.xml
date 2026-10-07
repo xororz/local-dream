@@ -514,6 +514,9 @@
     <string name="model_storage_move_confirm">%1$s의 모델과 임베딩을 %2$s(으)로 이동합니다. 완료될 때까지 Local Dream을 열어 두세요.</string>
     <string name="model_storage_moving">모델 이동 중…</string>
     <string name="model_storage_moved">모델을 이동했습니다</string>
-    <string name="model_storage_kept">모델을 이동했습니다. 대상 위치에 이미 있던 %1$d개 파일은 원래 위치에 남겼습니다.</string>
     <string name="model_storage_move_failed">이동 실패</string>
+    <string name="model_storage_pending">%1$s(으)로의 이동이 완료되지 않아 일부 모델이 다른 위치에 남아 있습니다. 위에서 위치를 선택해 이동을 마치거나 원래대로 되돌리세요.</string>
+    <string name="model_storage_name_clash">Download 폴더는 대소문자를 구분하지 않으므로 다음 이름이 다른 모델이나 임베딩을 덮어씁니다: %1$s. 먼저 이름을 바꾸거나 삭제하세요.</string>
+    <string name="model_storage_conflict">%1$s에 이미 %2$s이(가) 있습니다. 하나를 삭제한 뒤 다시 시도하세요.</string>
+    <string name="model_storage_moving_blocked">모델을 이동하는 중입니다. 이동이 끝난 뒤 다시 시도하세요.</string>
 </resources>

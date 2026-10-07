@@ -230,7 +230,7 @@ data class Model(
 
             newId == id -> return@withContext RenameResult.Success
 
-            ModelRepository.isReservedModelId(newId) ->
+            ModelRepository.isReservedModelId(newId, ModelStorage.ignoresCase(context)) ->
                 return@withContext RenameResult.Error(RenameResult.Reason.Reserved)
         }
 
@@ -1101,7 +1101,14 @@ class ModelRepository private constructor(private val context: Context) {
             "z_image_turbo", "flux2_klein_4b", "qwen_image_2_1",
         )
 
-        fun isReservedModelId(id: String): Boolean = id in RESERVED_MODEL_IDS
+        // Case-sensitive like app storage (ext4). Pass ignoreCase where the
+        // models live on storage that ignores case (ModelStorage.ignoresCase):
+        // there "AnythingV5" is the built-in "anythingv5" folder.
+        fun isReservedModelId(id: String, ignoreCase: Boolean = false): Boolean = if (ignoreCase) {
+            RESERVED_MODEL_IDS.any { it.equals(id, ignoreCase = true) }
+        } else {
+            id in RESERVED_MODEL_IDS
+        }
 
         @SuppressLint("StaticFieldLeak")
         @Volatile
