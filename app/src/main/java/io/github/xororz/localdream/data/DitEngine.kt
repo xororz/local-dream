@@ -15,10 +15,11 @@ import java.io.File
 object DitEngine {
     const val ENGINE_LIB = "libdit_engine.so"
 
-    // The optimized FP8 path has been validated from SM8750 onward. Comparing
-    // the numeric part also admits newer SM-series chips without maintaining a
-    // hard-coded allowlist; suffixes such as SM8750P naturally map to 8750.
-    private const val FIRST_SUPPORTED_PART_NUMBER = 8750
+    // 8Gen3 (SM8650) test override: the optimized FP8 path was validated
+    // from SM8750 onward; lowering to 8650 unlocks the DiT listing/scan/skel
+    // copy on 8Gen3 so the DSP error (missing v75 skel) can be captured.
+    // Revert after the v75 skel is proven, or keep if P0 passes.
+    private const val FIRST_SUPPORTED_PART_NUMBER = 8650
 
     fun isSupportedDevice(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false

@@ -72,9 +72,9 @@ set_target_properties(dit_engine PROPERTIES
 
 # The DSP-side skels are loaded by FastRPC at run time, so nothing links them
 # and EXCLUDE_FROM_ALL would otherwise leave them unbuilt. They ship in the
-# same package as the engine, so tie them to this target. The Android catalog
-# starts at SM8750 (HTP v79), so older skels would only add APK size.
-foreach(htp_version v79 v81)
+# same package as the engine, so tie them to this target. v75 is the 8Gen3
+# (SM8650) skel; v79/v81 cover SM8750 and newer.
+foreach(htp_version v75 v79 v81)
     if(TARGET htp-${htp_version})
         add_dependencies(dit_engine htp-${htp_version})
     endif()
