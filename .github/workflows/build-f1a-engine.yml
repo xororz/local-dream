@@ -86,10 +86,13 @@ jobs:
       - name: Add emergency swap (full engine build is hungry)
         run: |
           sudo swapon --show || true
-          sudo fallocate -l 16G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          # Runner images already ship a /swapfile; never touch it, use our own.
+          if [ ! -e /swapfile2 ]; then
+            sudo fallocate -l 8G /swapfile2
+            sudo chmod 600 /swapfile2
+            sudo mkswap /swapfile2
+            sudo swapon /swapfile2 || echo "swapon swapfile2 failed, continuing with existing swap"
+          fi
           free -h
 
       - name: Build dit engine + skels (official build.sh, full flow)
