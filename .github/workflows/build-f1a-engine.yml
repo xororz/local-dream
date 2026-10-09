@@ -1,0 +1,122 @@
+# F1a experiment: full dit/build.sh on cloud Linux to produce a new
+# arm64 libdit_engine.so with pinned device buffers (FASTRPC_MAP_FD).
+# Manual trigger only. See 项目说明书 附2 for the analysis.
+name: build-f1a-engine
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout (no submodules yet)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Init stable-diffusion.cpp submodule only
+        run: git submodule update --init --recursive app/src/main/cpp/3rdparty/stable-diffusion.cpp
+
+      - name: Verify pinned versions
+        run: |
+          set -e
+          SDCPP_REV=$(git -C app/src/main/cpp/3rdparty/stable-diffusion.cpp rev-parse HEAD)
+          echo "sdcpp: $SDCPP_REV"
+          test "$SDCPP_REV" = "35a3d48b23581d2be7c3ad95e92f34662bb5f305"
+          GGML_URL=$(git -C app/src/main/cpp/3rdparty/stable-diffusion.cpp/ggml remote get-url origin)
+          GGML_REV=$(git -C app/src/main/cpp/3rdparty/stable-diffusion.cpp/ggml rev-parse HEAD)
+          echo "ggml url: $GGML_URL rev: $GGML_REV"
+          echo "$GGML_URL" | grep -q "happyyzy/ggml"
+          test "$GGML_REV" = "f8758628270072da26ad44baf5e189d4695d9800"
+          echo "pins OK"
+
+      - name: Install host deps (ninja, libatomic1 for hexagon tools)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libatomic1
+          cmake --version
+          ninja --version
+
+      - name: Install Android NDK r28c
+        run: |
+          set -e
+          mkdir -p "$HOME/ndk"
+          cd "$HOME/ndk"
+          curl -L --fail --retry 3 -o ndk.zip \
+            https://dl.google.com/android/repository/android-ndk-r28c-linux.zip
+          unzip -q ndk.zip
+          test -f "$HOME/ndk/android-ndk-r28c/build/cmake/android.toolchain.cmake"
+
+      - name: Install Hexagon SDK 6.6.0.0 (community repack, no login)
+        run: |
+          set -e
+          mkdir -p "$HOME/hexagon"
+          cd "$HOME/hexagon"
+          curl -L --fail --retry 3 -o hex.tar.xz \
+            https://github.com/snapdragon-toolchain/hexagon-sdk/releases/download/v6.6.0.0/hexagon-sdk-v6.6.0.0-amd64-lnx.tar.xz
+          echo "4A916E42C1DAB9EFDF2E58773F901EA780FA43C907BF054AB76572A3B3D942F4  hex.tar.xz" | sha256sum -c -
+          tar -xaf hex.tar.xz
+          ls "$HOME/hexagon"
+          test -f "$HOME/hexagon/6.6.0.0/build/cmake/hexagon_fun.cmake"
+          echo "HEXAGON_Tools:"
+          ls "$HOME/hexagon/6.6.0.0/tools/HEXAGON_Tools/"
+
+      - name: Apply F1a (pinned device buffer, one line)
+        run: |
+          set -e
+          python3 - <<'EOF'
+          path = 'app/src/main/cpp/3rdparty/stable-diffusion.cpp/ggml/src/ggml-hexagon/ggml-hexagon.cpp'
+          src = open(path).read()
+          start = src.index('ggml_backend_hexagon_buffer_type_alloc_buffer(')
+          end = src.index('ggml_backend_hexagon_host_buffer_type_alloc_buffer(')
+          assert start < end, 'unexpected function order'
+          span = src[start:end]
+          old = 'new ggml_hexagon_shared_buffer(sess, size, false);'
+          new = 'new ggml_hexagon_shared_buffer(sess, size, true);'
+          assert span.count(old) == 1, f'expected exactly 1 hit in device span, got {span.count(old)}'
+          src = src[:start] + span.replace(old, new) + src[end:]
+          open(path, 'w').write(src)
+          print('F1a applied to device alloc_buffer only')
+          EOF
+          git -C app/src/main/cpp/3rdparty/stable-diffusion.cpp/ggml diff --stat
+          git -C app/src/main/cpp/3rdparty/stable-diffusion.cpp/ggml diff | grep -E "^[+-].*shared_buffer\(sess" || true
+
+      - name: Add emergency swap (full engine build is hungry)
+        run: |
+          sudo swapon --show || true
+          sudo fallocate -l 16G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Build dit engine + skels (official build.sh, full flow)
+        run: |
+          set -e
+          export ANDROID_NDK_ROOT="$HOME/ndk/android-ndk-r28c"
+          export HEXAGON_SDK_ROOT="$HOME/hexagon/6.6.0.0"
+          HEX_TOOLS_CANDIDATE="$(ls -d "$HOME"/hexagon/6.6.0.0/tools/HEXAGON_Tools/*/ 2>/dev/null | head -n 1 || true)"
+          if [ -n "$HEX_TOOLS_CANDIDATE" ]; then
+            export HEXAGON_TOOLS_ROOT="$HEX_TOOLS_CANDIDATE"
+          fi
+          echo "HEXAGON_TOOLS_ROOT=${HEXAGON_TOOLS_ROOT:-<auto via hexagon_sdk.json>}"
+          export LD_LIBRARY_PATH="$HEXAGON_TOOLS_ROOT/Tools/lib:${LD_LIBRARY_PATH:-}"
+          echo "build.sh uses -j $(nproc) internally; swap added as cushion"
+          bash app/src/main/cpp/dit/build.sh
+
+      - name: Verify artifacts
+        run: |
+          set -e
+          ls -la app/src/main/jniLibs/arm64-v8a/
+          ls -la app/src/main/assets/ditlibs/
+          file app/src/main/jniLibs/arm64-v8a/libdit_engine.so
+          file app/src/main/jniLibs/arm64-v8a/libdit_engine.so | grep -q "ARM aarch64"
+          test -f app/src/main/assets/ditlibs/libggml-htp-v75.so
+
+      - name: Upload libdit_engine.so
+        uses: actions/upload-artifact@v4
+        with:
+          name: libdit_engine-f1a
+          path: app/src/main/jniLibs/arm64-v8a/libdit_engine.so

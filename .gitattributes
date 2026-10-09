@@ -1,1 +1,3 @@
 *tokenizer.json binary
+# F1a experiment: patch files must stay LF or `git apply` fails on Linux runners.
+*.patch text eol=lf
