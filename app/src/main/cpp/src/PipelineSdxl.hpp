@@ -95,34 +95,52 @@ class PipelineSdxl : public PipelineQnn {
     // QNN contexts into one group so they share a single HTP spill-fill scratch
     // buffer instead of each reserving its own multi-GB allocation. UNet is the
     // group head (created first, destroyed last); the VAEs reference its
-    // handle. Size comes from the env var because pre-2.35 binaries don't carry
-    // it.
+    // handle. The size must cover every member: it comes from the binaries'
+    // own metadata when they declare one (QNN >= 2.35), falling back to the
+    // hardcoded default for pre-2.35 packages, and the env var overrides both.
+    // ⚠ A context that refuses the group is retried on its own instead of
+    // failing the load: sharing is a memory optimization, never a requirement
+    // (a checkpoint converted by another toolchain can declare a larger
+    // spill-fill need than this package's default, and used to make the whole
+    // backend refuse to start).
     const uint64_t sf_bytes = spillFillGroupBytes();
-    Qnn_ContextHandle_t group_head = nullptr;
     if (sf_bytes)
       QNN_INFO("[spill-fill] SDXL context group sharing enabled: %llu bytes",
                (unsigned long long)sf_bytes);
 
-    unet_->setSpillFillGroup(sf_bytes, nullptr);
-    if (qnn_runtime::initializeApp("UNET", unet_) != EXIT_SUCCESS) return false;
+    bool group_head_active = false;
+    unet_ = qnn_runtime::createModelWithOptionalGroup(
+        unet_path_, "unet", sf_bytes, nullptr, nullptr, 0, &group_head_active);
+    if (!unet_) {
+      QNN_ERROR("Failed init QNN UNET model.");
+      return false;
+    }
+    group_head_active_ = group_head_active;
     // Record the context length this binary already carries: fixed-chunk
     // packages ship one max_chunks-wide context, patched ones ship 77 and grow
     // via .patch. Without it the first generate() on a fixed-chunk package sees
     // a token mismatch and tears the whole group down to reload the same UNet.
     unet_tokens_ = preloadedContextLength();
-    if (sf_bytes) group_head = unet_->getContextHandle();
+    Qnn_ContextHandle_t group_head =
+        group_head_active_ ? unet_->getContextHandle() : nullptr;
     logSpillFill("UNET", unet_);
 
-    vae_decoder_->setSpillFillGroup(sf_bytes, group_head);
-    if (qnn_runtime::initializeApp("VAEDecoder", vae_decoder_) != EXIT_SUCCESS)
+    // A context can only join a live group head; when the UNet had to fall back
+    // to a standalone context the VAEs run standalone too.
+    const uint64_t member_sf_bytes = group_head ? sf_bytes : 0;
+
+    vae_decoder_ = qnn_runtime::createModelWithOptionalGroup(
+        vae_decoder_path_, "vae_decoder", member_sf_bytes, group_head);
+    if (!vae_decoder_) {
+      QNN_ERROR("Failed init QNN VAE Decoder model.");
       return false;
+    }
     logSpillFill("VAEDecoder", vae_decoder_);
 
     if (vae_encoder_) {
-      vae_encoder_->setSpillFillGroup(sf_bytes, group_head);
-      if (qnn_runtime::initializeApp("VAEEncoder", vae_encoder_) !=
-          EXIT_SUCCESS)
-        return false;
+      vae_encoder_ = qnn_runtime::createModelWithOptionalGroup(
+          vae_encoder_path_, "vae_encoder", member_sf_bytes, group_head);
+      if (!vae_encoder_) QNN_WARN("Failed init QNN VAE Enc model.");
       logSpillFill("VAEEncoder", vae_encoder_);
     }
     return true;
@@ -196,22 +214,39 @@ class PipelineSdxl : public PipelineQnn {
     vae_encoder_.reset();
     vae_decoder_.reset();
     unet_.reset();
+    group_head_active_ = false;
     // Build into a local first: patching and bring-up can both throw, and a
     // half-initialized unet_ left behind would be reused by the next request
     // with the same token count and executed on empty graph info.
-    auto unet = qnn_runtime::createModel(unet_path_, "unet");
-    if (!unet) throw std::runtime_error("Failed create QNN UNET");
-    if (!lowram_) unet->setSpillFillGroup(spillFillGroupBytes(), nullptr);
     std::unique_ptr<qnn_runtime::PatchedModelBuffer> patched;
     if (tokens > 77 && !text_encoder_.fixed_chunks_) {
       patched = qnn_runtime::applyZstdPatchToBuffer(
           unet_path_, model_dir_ + "/" + std::to_string(tokens) + ".patch");
       if (!patched) throw std::runtime_error(unet_path_);
     }
-    if (qnn_runtime::initializeApp("UNET", unet, patched ? patched->buffer.get() : nullptr,
-                                    patched ? patched->size : 0) != EXIT_SUCCESS)
-      throw std::runtime_error("Failed init QNN UNET");
-    unet_ = std::move(unet);
+
+    uint64_t sf_bytes = lowram_ ? 0 : spillFillGroupBytes();
+    // The group buffer must cover every member; a patched context is wider
+    // than the one on disk and can declare a larger spill-fill size, so raise
+    // the group size to match it. If the context still refuses the group, the
+    // fallback below brings it up standalone instead of failing the run.
+    if (patched) {
+      const uint64_t patched_sf = qnn_runtime::contextSpillFillBytes(
+          patched->buffer.get(), patched->size);
+      if (patched_sf > sf_bytes) {
+        sf_bytes = patched_sf;
+        noteDeclaredSpillFill(patched_sf);
+        QNN_INFO(
+            "[spill-fill] patched UNET context declares %llu bytes (%.1f MB)",
+            (unsigned long long)patched_sf, patched_sf / (1024.0 * 1024.0));
+      }
+    }
+
+    unet_ = qnn_runtime::createModelWithOptionalGroup(
+        unet_path_, "unet", sf_bytes, nullptr,
+        patched ? patched->buffer.get() : nullptr,
+        patched ? patched->size : 0, &group_head_active_);
+    if (!unet_) throw std::runtime_error("Failed init QNN UNET: " + unet_path_);
     unet_tokens_ = tokens;
     QNN_INFO("[lowram] SDXL UNET loaded");
   }
@@ -283,27 +318,48 @@ class PipelineSdxl : public PipelineQnn {
 
   std::unique_ptr<QnnModel> createVaeModel(const std::string &path,
                                           const std::string &name) {
-    auto model = qnn_runtime::createModel(path, name);
-    if (!model) throw std::runtime_error("Failed create QNN model: " + name);
-    if (!lowram_ && unet_)
-      model->setSpillFillGroup(spillFillGroupBytes(), unet_->getContextHandle());
-    if (qnn_runtime::initializeApp(name, model) != EXIT_SUCCESS)
-      throw std::runtime_error("Failed init QNN model: " + name);
+    // Only join the group while the resident UNet is its head; a standalone
+    // context is not a group reference the backend would accept.
+    const bool join_group = !lowram_ && group_head_active_ && unet_ != nullptr;
+    const uint64_t sf_bytes = join_group ? spillFillGroupBytes() : 0;
+    auto model = qnn_runtime::createModelWithOptionalGroup(
+        path, name, sf_bytes,
+        join_group ? unet_->getContextHandle() : nullptr);
+    if (!model) throw std::runtime_error("Failed init QNN model: " + name);
     return model;
   }
 
   // Max shared spill-fill buffer (bytes) for the SDXL non-lowram context group.
-  // Hardcoded default = 920 MiB, chosen to cover the measured per-model
-  // requirements (UNet 89,063,424 / VAE-dec 884,801,536 / VAE-enc 575,668,224)
-  // with headroom; the backend honors the group head's value so it must be >=
-  // the largest of the three. Sharing one 920 MiB buffer instead of three
-  // separate ones saves ~600 MB. The LOCALDREAM_SDXL_SPILL_FILL_BYTES env var
-  // overrides this (e.g. after regenerating binaries); set it to 0 to disable
-  // sharing entirely.
-  static uint64_t spillFillGroupBytes() {
+  // The backend honors the group head's value, so it has to be >= the largest
+  // requirement among UNet/VAE-dec/VAE-enc. QNN >= 2.35 context binaries
+  // declare their real requirement in their metadata; the hardcoded default
+  // (920 MiB, covering the measured qnn2.28 requirements: UNet 89,063,424 /
+  // VAE-dec 884,801,536 / VAE-enc 575,668,224) only applies to metadata-less
+  // packages. Sharing one buffer instead of three saves ~600 MB. The
+  // LOCALDREAM_SDXL_SPILL_FILL_BYTES env var overrides both; set it to 0 to
+  // disable sharing entirely. A context that still refuses the group falls
+  // back to its own buffer, so a mismatch can slow a load but never fail it.
+  uint64_t spillFillGroupBytes() const {
     const char *e = getenv("LOCALDREAM_SDXL_SPILL_FILL_BYTES");
     if (e && *e) return strtoull(e, nullptr, 10);
-    return 964689920ULL;  // 920 MiB
+    if (!declared_sf_measured_) {
+      declared_sf_measured_ = true;
+      declared_sf_ = qnn_runtime::declaredSpillFillBytes(
+          {unet_path_, vae_decoder_path_, vae_encoder_path_});
+      if (declared_sf_ == 0) {
+        QNN_INFO(
+            "[spill-fill] SDXL package carries no spill-fill metadata "
+            "(pre-2.35 binaries); using the default group size");
+      }
+    }
+    return declared_sf_ > 0 ? declared_sf_ : 964689920ULL;  // 920 MiB
+  }
+
+  // Raises the cached group size when a wider (patched) context declares more
+  // than the on-disk models do.
+  void noteDeclaredSpillFill(uint64_t bytes) const {
+    declared_sf_measured_ = true;
+    if (bytes > declared_sf_) declared_sf_ = bytes;
   }
 
   // Diagnostic: log a model's real HTP spill-fill requirement so the right
@@ -434,6 +490,12 @@ class PipelineSdxl : public PipelineQnn {
   const std::string vae_encoder_path_;
   const bool lowram_;
   int unet_tokens_ = 77;
+  // True while unet_ is registered as the head of a live spill-fill group: the
+  // VAEs may only join the group while it is.
+  bool group_head_active_ = false;
+  // Group size read from the model metadata, measured once per process.
+  mutable uint64_t declared_sf_ = 0;
+  mutable bool declared_sf_measured_ = false;
 
   MNN::Interpreter *clip_interpreter_ = nullptr;
   MNN::Interpreter *clip2_interpreter_ = nullptr;

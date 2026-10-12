@@ -1889,9 +1889,12 @@ fun ModelRunScreen(
                     isCheckingBackend = false
                     backendReady = true
                 },
-                onUnhealthy = {
+                onUnhealthy = { detail ->
                     isCheckingBackend = false
-                    errorMessage = msgBackendFailed
+                    // Show the backend's real failure (native exit code + last
+                    // output lines, start exception, ...) when there is one;
+                    // fall back to the generic hint on a timeout.
+                    errorMessage = detail ?: msgBackendFailed
                 },
             )
         }

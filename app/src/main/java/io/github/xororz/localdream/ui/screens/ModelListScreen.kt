@@ -1503,26 +1503,20 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                                 .show()
                                         }
                                     }
+                                // Low-RAM toggles: default ON like upstream (the
+                                // safe side). The bug being fixed is that turning
+                                // one OFF never rebinds — the service reads the
+                                // same keys at backend launch and they are part of
+                                // its restart decision, so a flip here takes
+                                // effect on the next Run.
                                 var sdxlLowRam by remember {
                                     mutableStateOf(
-                                        preferences.getBoolean("sdxl_lowram", true).also {
-                                            if (!preferences.contains("sdxl_lowram")) {
-                                                preferences.edit {
-                                                    putBoolean("sdxl_lowram", true)
-                                                }
-                                            }
-                                        },
+                                        preferences.getBoolean("sdxl_lowram", true),
                                     )
                                 }
                                 var animaLowRam by remember {
                                     mutableStateOf(
-                                        preferences.getBoolean("anima_lowram", true).also {
-                                            if (!preferences.contains("anima_lowram")) {
-                                                preferences.edit {
-                                                    putBoolean("anima_lowram", true)
-                                                }
-                                            }
-                                        },
+                                        preferences.getBoolean("anima_lowram", true),
                                     )
                                 }
                                 var animaSeqDit by remember {

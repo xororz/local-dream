@@ -159,13 +159,21 @@ class BackendService : Service() {
     // is part of the config on purpose: entering/exiting host mode changes the
     // required bind address, and reusing a live process across that boundary
     // would either leave the port unreachable for the controller or leave it
-    // exposed after host mode ends.
+    // exposed after host mode ends. The launch-bound switches (useImg2img, the
+    // two low-RAM toggles, animaSeqDit) are part of it for the same reason:
+    // they are baked into the process command line at launch, so changing one
+    // must restart the backend instead of reusing a process that still runs
+    // with the old flags (the "low RAM mode cannot be turned off" bug).
     private data class BackendConfig(
         val modelId: String,
         val backendType: String,
         val width: Int,
         val height: Int,
         val listenOnAll: Boolean,
+        val useImg2img: Boolean,
+        val sdxlLowRam: Boolean,
+        val animaLowRam: Boolean,
+        val animaSeqDit: Boolean,
     )
 
     override fun onCreate() {
@@ -230,10 +238,27 @@ class BackendService : Service() {
         // persisted flag: a crash can never leave a stale "expose the port"
         // bit behind, and a config-equality check below forces a restart when
         // the bind address requirement changes.
-        val listenOnAll = getSharedPreferences("app_prefs", MODE_PRIVATE)
-            .getBoolean("listen_on_all_addresses", false) ||
+        // The launch-bound switches are read fresh here on every start request
+        // (never from a cached copy, so a headless /select after a settings
+        // change sees the new value) and become part of the config, which is
+        // what forces reconcile() to restart the process when any of them
+        // changes instead of reusing a backend started with stale flags.
+        // Defaults stay upstream's ON: the mode is the safe side, and the fix
+        // is that turning it OFF actually rebinds — not a default change.
+        val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+        val listenOnAll = prefs.getBoolean("listen_on_all_addresses", false) ||
             RemoteHostService.isRunning.value
-        return BackendConfig(modelId, backendType, width, height, listenOnAll)
+        return BackendConfig(
+            modelId,
+            backendType,
+            width,
+            height,
+            listenOnAll,
+            useImg2img = prefs.getBoolean("use_img2img", true),
+            sdxlLowRam = prefs.getBoolean("sdxl_lowram", true),
+            animaLowRam = prefs.getBoolean("anima_lowram", true),
+            animaSeqDit = prefs.getBoolean("anima_seq_dit", false),
+        )
     }
 
     // Declares the desired backend and converges to it. Cancels any pending
@@ -491,8 +516,10 @@ class BackendService : Service() {
                 return false
             }
 
-            val preferences = this.getSharedPreferences("app_prefs", MODE_PRIVATE)
-            val useImg2img = preferences.getBoolean("use_img2img", true)
+            // Launch-bound switches come from the config (captured fresh at
+            // command time in parseConfig), never re-read here: the command
+            // line must match the config reconcile() decided to serve.
+            val useImg2img = config.useImg2img
             // Part of the config (captured at command time in parseConfig) so
             // reconcile() restarts the process when the bind address
             // requirement changes instead of reusing a mismatched one.
@@ -580,14 +607,17 @@ class BackendService : Service() {
             // SDXL and Anima are the large NPU formats that benefit from
             // per-stage load/release. They share the same backend --lowram flag
             // but keep separate UI toggles so each can opt in independently.
-            if ((backendType == "sdxl" || backendType == "sdxlmnn") && preferences.getBoolean("sdxl_lowram", true)) {
+            // Read from the config so the flag only changes when reconcile()
+            // actually relaunches the backend (a stale flag on a reused
+            // process is exactly what made low RAM mode impossible to disable).
+            if ((backendType == "sdxl" || backendType == "sdxlmnn") && config.sdxlLowRam) {
                 command += "--lowram"
             }
-            if (backendType == "anima" && preferences.getBoolean("anima_lowram", true)) {
+            if (backendType == "anima" && config.animaLowRam) {
                 command += "--lowram"
                 // Aggressive variant: never hold both DiT halves resident at
                 // once, so 12GB devices can run Anima low-RAM. Slower per step.
-                if (preferences.getBoolean("anima_seq_dit", false)) {
+                if (config.animaSeqDit) {
                     command += "--anima_seq_dit"
                 }
             }
@@ -675,11 +705,21 @@ class BackendService : Service() {
 
     private fun startMonitorThread(proc: Process) {
         Thread {
+            // Recent backend output, kept for crash reporting: the native side
+            // prints the real failure (missing model file, QNN spill-fill
+            // refusal, context init error, ...) to stdout/stderr, and folding
+            // the last lines into the Error state turns the generic "backend
+            // start failed" banner into a self-diagnosing message.
+            val recent = ArrayDeque<String>()
             val exitCode = try {
                 proc.inputStream.bufferedReader().use { reader ->
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
                         Log.i(TAG, "Backend: $line")
+                        synchronized(recent) {
+                            if (recent.size >= 15) recent.removeFirst()
+                            recent.addLast(line ?: "")
+                        }
                     }
                 }
                 proc.waitFor()
@@ -695,9 +735,14 @@ class BackendService : Service() {
             // we didn't intentionally stop it; a torn-down or superseded process
             // exiting is expected and must not poison the shared backendState.
             if (isLiveCrash(proc)) {
+                val tail = synchronized(recent) { recent.joinToString("\n") }
                 updateState(
                     BackendState.Error(
-                        "Backend process exited with code: $exitCode",
+                        if (tail.isBlank()) {
+                            "Backend process exited with code: $exitCode"
+                        } else {
+                            "Backend process exited with code: $exitCode\n$tail"
+                        },
                         servingModelId.value,
                     ),
                 )

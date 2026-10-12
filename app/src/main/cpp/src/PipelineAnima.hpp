@@ -116,39 +116,56 @@ class PipelineAnima : public PipelineQnn {
     // member, which destructs AFTER this class's derived members (clip_,
     // unet_part1_, unet_part2_) and after the other base member vae_encoder_
     // (declared later, so destroyed first), making it the safe head — every
-    // group reference dies before the buffer. Size comes from the env (pre-2.35
-    // binaries don't carry it); 0 disables sharing.
+    // group reference dies before the buffer. Size comes from the binaries'
+    // own metadata when they declare one (env override wins); 0 disables
+    // sharing. ⚠ A context that refuses the group is retried standalone:
+    // sharing is a memory optimization, never a reason to fail the load.
     const uint64_t sf_bytes = spillFillGroupBytes();
-    Qnn_ContextHandle_t head = nullptr;
     if (sf_bytes)
       QNN_INFO("[spill-fill] Anima context group sharing enabled: %llu bytes",
                (unsigned long long)sf_bytes);
 
-    vae_decoder_->setSpillFillGroup(sf_bytes, nullptr);
-    if (qnn_runtime::initializeApp("VAEDecoder", vae_decoder_) != EXIT_SUCCESS)
+    bool head_active = false;
+    vae_decoder_ = qnn_runtime::createModelWithOptionalGroup(
+        vae_decoder_path_, "vae_decoder", sf_bytes, nullptr, nullptr, 0,
+        &head_active);
+    if (!vae_decoder_) {
+      QNN_ERROR("Failed init Anima QNN VAE Decoder model.");
       return false;
-    if (sf_bytes) head = vae_decoder_->getContextHandle();
+    }
+    Qnn_ContextHandle_t head =
+        head_active ? vae_decoder_->getContextHandle() : nullptr;
+    const uint64_t member_sf = head ? sf_bytes : 0;
     logSpillFill("VAEDecoder", vae_decoder_);
 
-    clip_->setSpillFillGroup(sf_bytes, head);
-    if (qnn_runtime::initializeApp("CLIP", clip_) != EXIT_SUCCESS) return false;
+    clip_ = qnn_runtime::createModelWithOptionalGroup(clip_path_, "clip",
+                                                      member_sf, head);
+    if (!clip_) {
+      QNN_ERROR("Failed init Anima QNN CLIP model.");
+      return false;
+    }
     logSpillFill("CLIP", clip_);
 
-    unet_part1_->setSpillFillGroup(sf_bytes, head);
-    if (qnn_runtime::initializeApp("UNET_PART1", unet_part1_) != EXIT_SUCCESS)
+    unet_part1_ = qnn_runtime::createModelWithOptionalGroup(
+        unet_part1_path_, "unet_part1", member_sf, head);
+    if (!unet_part1_) {
+      QNN_ERROR("Failed init Anima QNN unet_part1 model.");
       return false;
+    }
     logSpillFill("UNET_PART1", unet_part1_);
 
-    unet_part2_->setSpillFillGroup(sf_bytes, head);
-    if (qnn_runtime::initializeApp("UNET_PART2", unet_part2_) != EXIT_SUCCESS)
+    unet_part2_ = qnn_runtime::createModelWithOptionalGroup(
+        unet_part2_path_, "unet_part2", member_sf, head);
+    if (!unet_part2_) {
+      QNN_ERROR("Failed init Anima QNN unet_part2 model.");
       return false;
+    }
     logSpillFill("UNET_PART2", unet_part2_);
 
     if (vae_encoder_) {
-      vae_encoder_->setSpillFillGroup(sf_bytes, head);
-      if (qnn_runtime::initializeApp("VAEEncoder", vae_encoder_) !=
-          EXIT_SUCCESS)
-        return false;
+      vae_encoder_ = qnn_runtime::createModelWithOptionalGroup(
+          vae_encoder_path_, "vae_encoder", member_sf, head);
+      if (!vae_encoder_) QNN_WARN("Failed init Anima QNN VAE Enc model.");
       logSpillFill("VAEEncoder", vae_encoder_);
     }
 
@@ -351,7 +368,9 @@ class PipelineAnima : public PipelineQnn {
   // The two DiT halves run strictly in sequence (part1 -> part2) every step and
   // stay resident for the whole denoising loop, so they share one spill-fill
   // buffer: part1 is the group head, part2 references it. part1 is created
-  // first and (on release) destroyed last.
+  // first and (on release) destroyed last. ⚠ If either half refuses the group
+  // it is retried standalone — sharing is a memory optimization, never a reason
+  // to fail the run.
   void loadUnetPartsIfNeeded() {
     if (unet_part1_ && unet_part2_) return;
     const uint64_t sf_bytes = spillFillGroupBytes();
@@ -359,20 +378,18 @@ class PipelineAnima : public PipelineQnn {
       QNN_INFO("[lowram] Anima UNet part group sharing enabled: %llu bytes",
                (unsigned long long)sf_bytes);
 
-    unet_part1_ = qnn_runtime::createModel(unet_part1_path_, "unet_part1");
+    bool head_active = false;
+    unet_part1_ = qnn_runtime::createModelWithOptionalGroup(
+        unet_part1_path_, "unet_part1", sf_bytes, nullptr, nullptr, 0,
+        &head_active);
     if (!unet_part1_)
-      throw std::runtime_error("[lowram] Failed create Anima unet_part1");
-    unet_part1_->setSpillFillGroup(sf_bytes, nullptr);
-    if (qnn_runtime::initializeApp("UNET_PART1", unet_part1_) != EXIT_SUCCESS)
       throw std::runtime_error("[lowram] Failed init Anima unet_part1");
     Qnn_ContextHandle_t head =
-        sf_bytes ? unet_part1_->getContextHandle() : nullptr;
+        head_active ? unet_part1_->getContextHandle() : nullptr;
 
-    unet_part2_ = qnn_runtime::createModel(unet_part2_path_, "unet_part2");
+    unet_part2_ = qnn_runtime::createModelWithOptionalGroup(
+        unet_part2_path_, "unet_part2", head ? sf_bytes : 0, head);
     if (!unet_part2_)
-      throw std::runtime_error("[lowram] Failed create Anima unet_part2");
-    unet_part2_->setSpillFillGroup(sf_bytes, head);
-    if (qnn_runtime::initializeApp("UNET_PART2", unet_part2_) != EXIT_SUCCESS)
       throw std::runtime_error("[lowram] Failed init Anima unet_part2");
     QNN_INFO("[lowram] Anima UNet parts loaded");
   }
@@ -438,14 +455,28 @@ class PipelineAnima : public PipelineQnn {
   }
 
   // Max shared spill-fill buffer (bytes) for the Anima context group. The DiT
-  // at 1024 may need more than SDXL's UNet, so the default is generous;
-  // override with LOCALDREAM_ANIMA_SPILL_FILL_BYTES (run once with
-  // LOCALDREAM_ANIMA_SPILL_FILL_PROBE=1 to read each model's real requirement
-  // from logcat, take the max). Set to 0 to disable sharing.
-  static uint64_t spillFillGroupBytes() {
+  // at 1024 may need more than SDXL's UNet, so the default is generous; QNN >=
+  // 2.35 binaries declare their real requirement in their metadata and that
+  // wins over the default. Override with LOCALDREAM_ANIMA_SPILL_FILL_BYTES
+  // (run once with LOCALDREAM_ANIMA_SPILL_FILL_PROBE=1 to read each model's
+  // real requirement from logcat, take the max). Set to 0 to disable sharing.
+  // A context that still refuses the group falls back to its own buffer, so a
+  // mismatch can slow a load but never fail it.
+  uint64_t spillFillGroupBytes() const {
     const char *e = getenv("LOCALDREAM_ANIMA_SPILL_FILL_BYTES");
     if (e && *e) return strtoull(e, nullptr, 10);
-    return 601096192ULL;  // tune via PROBE if creation fails
+    if (!declared_sf_measured_) {
+      declared_sf_measured_ = true;
+      declared_sf_ = qnn_runtime::declaredSpillFillBytes(
+          {clip_path_, unet_part1_path_, unet_part2_path_, vae_decoder_path_,
+           vae_encoder_path_});
+      if (declared_sf_ == 0) {
+        QNN_INFO(
+            "[spill-fill] Anima package carries no spill-fill metadata "
+            "(pre-2.35 binaries); using the default group size");
+      }
+    }
+    return declared_sf_ > 0 ? declared_sf_ : 601096192ULL;  // tune via PROBE
   }
 
   static void logSpillFill(const char *name,
@@ -473,6 +504,9 @@ class PipelineAnima : public PipelineQnn {
   // released before part2 is loaded; one buffer per CFG branch.
   std::vector<std::vector<float>> seq_intermediates_neg_;
   std::vector<std::vector<float>> seq_intermediates_pos_;
+  // Group size read from the model metadata, measured once per process.
+  mutable uint64_t declared_sf_ = 0;
+  mutable bool declared_sf_measured_ = false;
 };
 
 #endif  // PIPELINEANIMA_HPP

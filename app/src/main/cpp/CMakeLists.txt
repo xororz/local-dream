@@ -82,6 +82,14 @@ set(MNN_OPENCL ON CACHE BOOL "" FORCE)
 set(MNN_SUPPORT_TRANSFORMER_FUSE ON CACHE BOOL "" FORCE)
 add_subdirectory(3rdparty/MNN)
 
+# ⚠ Without this, tokenizers-cpp's vendored sentencepiece find_package(OpenMP)
+# succeeds against the toolchain's clang resource dir and links libomp.so into
+# the backend binary; Android does not ship libomp.so, so the linker then
+# refuses to exec the backend at all ("library \"libomp.so\" not found: needed
+# by main executable"). libsais just runs serial — same as upstream's own
+# no-OpenMP release builds.
+set(CMAKE_DISABLE_FIND_PACKAGE_OpenMP TRUE CACHE BOOL "" FORCE)
+
 set(XTENSOR_USE_XSIMD ON)
 
 set(PACKAGE_INCLUDES
