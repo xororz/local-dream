@@ -91,7 +91,7 @@ class BackendService : Service() {
 
         // --type values served by the downloadable DiT engine.
         fun isDitBackend(backendType: String): Boolean = backendType == "zimage" ||
-            backendType == "klein" || backendType == "qwen21"
+            backendType == "klein" || backendType == "qwen21" || backendType == "qwen21turbo"
 
         // One reused dir, stamped with the SDK it holds. Per-file copying only
         // refreshes libs whose size changed, so an SDK bump would otherwise

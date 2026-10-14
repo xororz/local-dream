@@ -32,6 +32,7 @@ typedef enum {
   DIT_MODEL_Z_IMAGE = 0,
   DIT_MODEL_FLUX2_KLEIN = 1,
   DIT_MODEL_QWEN_IMAGE_2_1 = 2,
+  DIT_MODEL_QWEN_IMAGE_2_1_TURBO = 3,
 } dit_model_kind;
 
 typedef struct {

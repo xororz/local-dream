@@ -48,7 +48,7 @@
 //            unet_part1.bin unet_part2.bin vae_decoder.bin
 //            [vae_encoder.bin] (optional; enables img2img/inpaint)
 //   zimage/klein: tokenizer.json dit.safetensors llm.gguf vae.safetensors
-//   qwen21:  tokenizer.json dit.safetensors llm.gguf llm_vision.gguf vae.safetensors
+//   qwen21/qwen21turbo: tokenizer.json dit.safetensors llm.gguf llm_vision.gguf vae.safetensors
 // SD15/SDXL CLIP runs on MNN (CPU); Anima's CLIP (clip.bin) runs on QNN/HTP
 // (the C++ side still does the qwen token_emb lookup -> input_embedding).
 struct ServerOptions {
@@ -61,6 +61,7 @@ struct ServerOptions {
     kZImage,
     kFlux2Klein,
     kQwenImage21,
+    kQwenImage21Turbo,
   };
 
   int port = 8081;
@@ -100,7 +101,7 @@ struct ServerOptions {
   // DiT formats served by libdit_engine.so: no fixed canvas, no QNN contexts.
   bool isDit() const {
     return type == ModelType::kZImage || type == ModelType::kFlux2Klein ||
-           type == ModelType::kQwenImage21;
+           type == ModelType::kQwenImage21 || type == ModelType::kQwenImage21Turbo;
   }
 };
 
@@ -108,7 +109,7 @@ static void showHelp() {
   std::cout
       << "Usage:\n"
          "  stable_diffusion_core --type "
-         "<sd15cpu|sd15npu|sdxl|sdxlmnn|anima|zimage|klein|qwen21> "
+         "<sd15cpu|sd15npu|sdxl|sdxlmnn|anima|zimage|klein|qwen21|qwen21turbo> "
          "--model_dir <dir> [--lib_dir <dir>] [options]\n"
          "  stable_diffusion_core --upscaler_mode [--lib_dir <dir>] "
          "[options]\n"
@@ -117,7 +118,7 @@ static void showHelp() {
          "Modes:\n"
          "  --type <type>          Model format: sd15cpu (MNN), sd15npu "
          "(QNN), sdxl (QNN), sdxlmnn (MNN), anima (QNN), "
-         "zimage/klein/qwen21 "
+         "zimage/klein/qwen21/qwen21turbo "
          "(DiT engine)\n"
          "  --upscaler_mode        Upscale-only server, no diffusion model\n"
          "  --convert <dir>        Convert model.safetensors in <dir> to MNN "
@@ -289,6 +290,8 @@ static ServerOptions processCommandLine(int argc, char **argv) {
     opts.type = ServerOptions::ModelType::kFlux2Klein;
   else if (typeStr == "qwen21")
     opts.type = ServerOptions::ModelType::kQwenImage21;
+  else if (typeStr == "qwen21turbo")
+    opts.type = ServerOptions::ModelType::kQwenImage21Turbo;
   else
     showHelpAndExit(typeStr.empty() ? "Missing --type"
                                     : "Invalid --type: " + typeStr);
@@ -352,7 +355,8 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
     std::string dit_path = (dir / "dit.safetensors").string();
     std::string llm_path = (dir / "llm.gguf").string();
     std::string llm_vision_path =
-        opts.type == ServerOptions::ModelType::kQwenImage21
+        (opts.type == ServerOptions::ModelType::kQwenImage21 ||
+         opts.type == ServerOptions::ModelType::kQwenImage21Turbo)
             ? (dir / "llm_vision.gguf").string()
             : "";
     std::string vae_path = (dir / "vae.safetensors").string();
@@ -371,7 +375,9 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
             ? DIT_MODEL_Z_IMAGE
             : opts.type == ServerOptions::ModelType::kFlux2Klein
                   ? DIT_MODEL_FLUX2_KLEIN
-                  : DIT_MODEL_QWEN_IMAGE_2_1;
+                  : opts.type == ServerOptions::ModelType::kQwenImage21Turbo
+                        ? DIT_MODEL_QWEN_IMAGE_2_1_TURBO
+                        : DIT_MODEL_QWEN_IMAGE_2_1;
     return std::make_unique<PipelineDit>(
         text_encoder, opts.model_dir, engine_path, dit_path, llm_path,
         llm_vision_path, vae_path, kind, opts.dit_backend,

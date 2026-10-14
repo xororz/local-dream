@@ -123,7 +123,7 @@ data class Model(
     val isCustom: Boolean = false,
     val isSdxl: Boolean = false,
     val isAnima: Boolean = false,
-    // DiT packages run by libdit_engine.so: "zimage", "klein" or "qwen21".
+    // DiT packages run by libdit_engine.so: "zimage", "klein", "qwen21" or "qwen21turbo".
     val ditKind: String = "",
     // Files that make up a package downloaded file-by-file rather than as one
     // zip, as "<path under baseUrl>|<name on disk>" pairs. Used by the DiT
@@ -296,6 +296,11 @@ data class Model(
                 "qwen_image_2.1_vae_bf16.safetensors|vae.safetensors",
         )
 
+        val QWEN_IMAGE_2_1_TURBO_PACKAGE_FILES = listOf(
+            "unsloth/Qwen-Image-2.1-Turbo-FP8/resolve/main/" +
+                "Qwen-Image-2.1-Turbo-FP8.safetensors|dit.safetensors",
+        ) + QWEN_IMAGE_2_1_PACKAGE_FILES.drop(1)
+
         fun isDeviceSupported(): Boolean {
             val soc = getDeviceSoc()
             return getChipsetSuffix(soc) != null
@@ -356,6 +361,7 @@ data class Model(
             "zimage" -> "ZIMAGE"
             "klein" -> "KLEIN"
             "qwen21" -> "QWEN_IMAGE_2_1"
+            "qwen21turbo" -> "QWEN_IMAGE_2_1_TURBO"
             else -> ""
         }
 
@@ -539,6 +545,7 @@ class ModelRepository private constructor(private val context: Context) {
                 val zImageFile = File(dir, "ZIMAGE")
                 val kleinFile = File(dir, "KLEIN")
                 val qwenImage21File = File(dir, "QWEN_IMAGE_2_1")
+                val qwenImage21TurboFile = File(dir, "QWEN_IMAGE_2_1_TURBO")
 
                 when {
                     zImageFile.exists() && DitEngine.isSupportedDevice() ->
@@ -546,6 +553,9 @@ class ModelRepository private constructor(private val context: Context) {
 
                     kleinFile.exists() && DitEngine.isSupportedDevice() ->
                         customModels.add(createCustomModel(dir, isNpu = true, ditKind = "klein"))
+
+                    qwenImage21TurboFile.exists() && DitEngine.isSupportedDevice() ->
+                        customModels.add(createCustomModel(dir, isNpu = true, ditKind = "qwen21turbo"))
 
                     qwenImage21File.exists() && DitEngine.isSupportedDevice() ->
                         customModels.add(createCustomModel(dir, isNpu = true, ditKind = "qwen21"))
@@ -610,6 +620,7 @@ class ModelRepository private constructor(private val context: Context) {
                 add(createZImageTurboModel())
                 add(createFlux2KleinModel())
                 add(createQwenImage21Model())
+                add(createQwenImage21Model(turbo = true))
             }
             if (isSdxlCapableSoc(getDeviceSoc())) {
                 add(createIllustriousV16Model())
@@ -701,35 +712,41 @@ class ModelRepository private constructor(private val context: Context) {
         )
     }
 
-    private fun createQwenImage21Model(): Model {
-        val id = "qwen_image_2_1"
-        // The package used to ship a Q4_0 dit.gguf; the FP8 dit.safetensors
-        // replaced it and nothing reads the old file, so reclaim its 4GB.
-        File(File(Model.getModelsDir(context), id), "dit.gguf").delete()
+    private fun createQwenImage21Model(turbo: Boolean = false): Model {
+        val id = if (turbo) "qwen_image_2_1_turbo" else "qwen_image_2_1"
+        val ditKind = if (turbo) "qwen21turbo" else "qwen21"
+        val packageFiles = if (turbo) Model.QWEN_IMAGE_2_1_TURBO_PACKAGE_FILES else Model.QWEN_IMAGE_2_1_PACKAGE_FILES
+        if (!turbo) {
+            // The package used to ship a Q4_0 dit.gguf; the FP8 dit.safetensors
+            // replaced it and nothing reads the old file, so reclaim its 4GB.
+            File(File(Model.getModelsDir(context), id), "dit.gguf").delete()
+        }
         return Model(
             id = id,
-            name = "Qwen Image 2.1",
-            description = context.getString(R.string.qwen_image_2_1_description),
+            name = if (turbo) "Qwen Image 2.1 Turbo" else "Qwen Image 2.1",
+            description = context.getString(
+                if (turbo) R.string.qwen_image_2_1_turbo_description else R.string.qwen_image_2_1_description,
+            ),
             baseUrl = baseUrl,
-            packageFiles = Model.QWEN_IMAGE_2_1_PACKAGE_FILES,
+            packageFiles = packageFiles,
             generationSize = 1024,
             approximateSize = "13.7GB",
             isDownloaded = Model.isDitPackageDownloaded(
                 context,
                 id,
-                "qwen21",
-                Model.QWEN_IMAGE_2_1_PACKAGE_FILES,
+                ditKind,
+                packageFiles,
             ),
             codeDefaults = ModelConfig(
                 prompt = "a lovely cat holding a sign that says 'Qwen Image 2.1',",
                 negativePrompt = "",
-                steps = 20f,
+                steps = if (turbo) 8f else 20f,
                 cfg = 1f,
                 scheduler = "euler",
                 denoiseStrength = 1f,
             ),
             runOnCpu = false,
-            ditKind = "qwen21",
+            ditKind = ditKind,
         )
     }
 
@@ -1099,6 +1116,7 @@ class ModelRepository private constructor(private val context: Context) {
             "absoluterealitycpu", "chilloutmixcpu",
             // DiT
             "z_image_turbo", "flux2_klein_4b", "qwen_image_2_1",
+            "qwen_image_2_1_turbo",
         )
 
         // Case-sensitive like app storage (ext4). Pass ignoreCase where the
