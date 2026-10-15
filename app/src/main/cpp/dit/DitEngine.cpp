@@ -248,7 +248,11 @@ bool engine_generate(dit_ctx *ctx, const dit_gen_params *params, dit_progress_cb
     gen.ref_images = reference_images.data();
     gen.ref_images_count = static_cast<int>(reference_images.size());
     gen.ref_image_args =
-        ctx->kind == DIT_MODEL_QWEN_IMAGE_2_1 ? "preset=qwen" : "preset=flux2";
+        ctx->kind == DIT_MODEL_QWEN_IMAGE_2_1
+            ? "preset=qwen"
+            : ctx->kind == DIT_MODEL_KREA_2_TURBO
+                  ? "preset=krea2_ostris_edit"
+                  : "preset=flux2";
   }
 
   if (params->vae_tile_size > 0) {
