@@ -100,20 +100,3 @@ index d05f88b..ea99966 100644
      ggml_tensor* try_forward_upscale(GGMLRunnerContext* ctx,
                                       ggml_tensor* x,
                                       int upscale_factor,
-diff --git a/src/model_io/safetensors_io.cpp b/src/model_io/safetensors_io.cpp
-index 71cacf5..361ac5d 100644
---- a/src/model_io/safetensors_io.cpp
-+++ b/src/model_io/safetensors_io.cpp
-@@ -350,6 +350,12 @@ bool read_safetensors_file(const std::string& file_path,
-                 tensor_storage.ne[1]  = 1;
-                 tensor_storage.n_dims = 1;
-             }
-+        } else if (ends_with(name, "._weight_scale") && tensor_storage.n_dims == 2 && tensor_storage.ne[0] == 1) {
-+            // Unsloth/torchao per-row FP8 scales are stored as [out_features, 1];
-+            // Linear expects a 1-D scale.
-+            tensor_storage.ne[0]  = tensor_storage.ne[1];
-+            tensor_storage.ne[1]  = 1;
-+            tensor_storage.n_dims = 1;
-         }
- 
-         size_t tensor_data_size = end - begin;
