@@ -32,12 +32,13 @@ typedef enum {
   DIT_MODEL_Z_IMAGE = 0,
   DIT_MODEL_FLUX2_KLEIN = 1,
   DIT_MODEL_QWEN_IMAGE_2_1 = 2,
+  DIT_MODEL_KREA_2_TURBO = 4,
 } dit_model_kind;
 
 typedef struct {
   dit_model_kind kind;
   // Weight files. llm_vision_path is only required for native image editing
-  // with a vision-language text encoder (currently Qwen Image 2.1).
+  // with a vision-language text encoder (Qwen Image 2.1 and Krea 2 Turbo).
   const char *diffusion_model_path;
   const char *llm_path;
   const char *llm_vision_path;
