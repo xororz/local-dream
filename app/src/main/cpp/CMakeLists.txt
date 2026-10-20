@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Build and package against the same QNN SDK revision.
-set(QNN_SDK_ROOT "$ENV{QNN_SDK_ROOT}" CACHE PATH "Qualcomm AI Runtime SDK 2.50.0.260828")
+set(QNN_SDK_ROOT "$ENV{QNN_SDK_ROOT}" CACHE PATH "Qualcomm AI Runtime SDK 2.51.0.260929")
 set(SAMPLE_APP_DIR "${CMAKE_CURRENT_BINARY_DIR}/3rdparty/SampleApp")
 file(COPY "${QNN_SDK_ROOT}/examples/QNN/SampleApp/SampleApp/"
     DESTINATION "${SAMPLE_APP_DIR}")
@@ -28,7 +28,7 @@ foreach(lib QnnHtp QnnSystem)
     file(COPY "${QNN_SDK_ROOT}/lib/aarch64-android/lib${lib}.so"
         DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/qnnlibs")
 endforeach()
-foreach(arch 68 69 73 75 79 81)
+foreach(arch 68 69 73 75 79 81 85)
     file(COPY "${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtpV${arch}Stub.so"
         "${QNN_SDK_ROOT}/lib/hexagon-v${arch}/unsigned/libQnnHtpV${arch}.so"
         "${QNN_SDK_ROOT}/lib/hexagon-v${arch}/unsigned/libQnnHtpV${arch}Skel.so"

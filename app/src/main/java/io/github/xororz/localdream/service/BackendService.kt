@@ -61,7 +61,7 @@ class BackendService : Service() {
         private const val TAG = "BackendService"
         private const val EXECUTABLE_NAME = "libstable_diffusion_core.so"
         const val RUNTIME_DIR = "runtime_libs"
-        private const val RUNTIME_VERSION = "qnn_2_50_0_260828"
+        private const val RUNTIME_VERSION = "qnn_2_51_0_260929"
         private const val RUNTIME_VERSION_FILE = ".runtime_version"
         private const val NOTIFICATION_ID = 2
         private const val CHANNEL_ID = "backend_service_channel"
