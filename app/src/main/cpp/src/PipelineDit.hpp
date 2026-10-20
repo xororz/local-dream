@@ -286,8 +286,7 @@ class PipelineDit : public Pipeline {
 
   bool isNativeEditModel() const {
     return kind_ == DIT_MODEL_FLUX2_KLEIN ||
-           kind_ == DIT_MODEL_QWEN_IMAGE_2_1 ||
-           kind_ == DIT_MODEL_KREA_2_TURBO;
+           kind_ == DIT_MODEL_QWEN_IMAGE_2_1;
   }
 
   struct Callbacks {

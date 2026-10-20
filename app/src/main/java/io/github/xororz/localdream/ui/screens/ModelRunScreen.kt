@@ -249,7 +249,7 @@ fun ModelRunScreen(
         remember(modelRepository.models) { modelRepository.models.find { it.id == modelId } }
     }
     val supportsReferenceEditing = model?.ditKind == "klein" ||
-        model?.ditKind == "qwen21" || model?.ditKind == "krea2turbo"
+        model?.ditKind == "qwen21"
     LaunchedEffect(Unit) {
         if (!isRemote) {
             modelRepository.ensureLoaded()
