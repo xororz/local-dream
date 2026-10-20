@@ -1,5 +1,43 @@
+diff --git a/src/ggml-hexagon/CMakeLists.txt b/src/ggml-hexagon/CMakeLists.txt
+index 845b922b..00627459 100644
+--- a/src/ggml-hexagon/CMakeLists.txt
++++ b/src/ggml-hexagon/CMakeLists.txt
+@@ -71,7 +71,7 @@ function(build_htp_skel V)
+             -DHEXAGON_TOOLS_ROOT=${HEXAGON_TOOLS_ROOT}
+             -DHEXAGON_HTP_DEBUG=${GGML_HEXAGON_HTP_DEBUG}
+             -DDSP_VERSION=${V}
+-            -DPREBUILT_LIB_DIR="toolv19_${V}")
++            -DPREBUILT_LIB_DIR="toolv21_${V}")
+     list(APPEND HTP_SKELS ${CMAKE_CURRENT_BINARY_DIR}/libggml-htp-${V}.so)
+     set(HTP_SKELS ${HTP_SKELS} PARENT_SCOPE)
+ endfunction()
+@@ -80,6 +80,7 @@ build_htp_skel(v73)
+ build_htp_skel(v75)
+ build_htp_skel(v79)
+ build_htp_skel(v81)
++build_htp_skel(v85)
+ 
+ # Install Hexagon skels required at runtime
+ install(FILES ${HTP_SKELS} TYPE LIB)
+diff --git a/src/ggml-hexagon/ggml-hexagon.cpp b/src/ggml-hexagon/ggml-hexagon.cpp
+index f48c98c8..b8872b5a 100644
+--- a/src/ggml-hexagon/ggml-hexagon.cpp
++++ b/src/ggml-hexagon/ggml-hexagon.cpp
+@@ -7770,9 +7770,9 @@ static void ggml_hexagon_init(ggml_backend_reg * reg) {
+             if (opt_arch < 73) {
+                 GGML_LOG_WARN("ggml-hex: Hexagon arch v%d is under supported range, capping at v73\n", opt_arch);
+                 opt_arch = 73;
+-            } else if (opt_arch > 81) {
+-                GGML_LOG_WARN("ggml-hex: Hexagon arch v%d is over supported range, capping at v81\n", opt_arch);
+-                opt_arch = 81;
++            } else if (opt_arch > 85) {
++                GGML_LOG_WARN("ggml-hex: Hexagon arch v%d is over supported range, capping at v85\n", opt_arch);
++                opt_arch = 85;
+             }
+         }
+     } else {
 diff --git a/src/ggml-hexagon/htp/cpy-ops.c b/src/ggml-hexagon/htp/cpy-ops.c
-index 6dc41236..da569d2c 100644
+index 6dc41236..7beb8008 100644
 --- a/src/ggml-hexagon/htp/cpy-ops.c
 +++ b/src/ggml-hexagon/htp/cpy-ops.c
 @@ -362,6 +362,13 @@ static inline void cpy_dma_sametype_sameshape(
