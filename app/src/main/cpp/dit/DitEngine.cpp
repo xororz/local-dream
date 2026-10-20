@@ -202,11 +202,6 @@ bool engine_generate(dit_ctx *ctx, const dit_gen_params *params, dit_progress_cb
   if (params->sample_method && params->sample_method[0])
     gen.sample_params.sample_method = str_to_sample_method(params->sample_method);
 
-  if (ctx->kind == DIT_MODEL_QWEN_IMAGE_2_1_TURBO) {
-    gen.sample_params.scheduler = SIMPLE_SCHEDULER;
-    gen.sample_params.flow_shift = 1.9937155f;  // exp(0.69), ComfyUI's Qwen 2.1 shift.
-  }
-
   if (params->init_image_rgb && params->init_width > 0 && params->init_height > 0) {
     gen.init_image.width = static_cast<uint32_t>(params->init_width);
     gen.init_image.height = static_cast<uint32_t>(params->init_height);
@@ -253,8 +248,7 @@ bool engine_generate(dit_ctx *ctx, const dit_gen_params *params, dit_progress_cb
     gen.ref_images = reference_images.data();
     gen.ref_images_count = static_cast<int>(reference_images.size());
     gen.ref_image_args =
-        (ctx->kind == DIT_MODEL_QWEN_IMAGE_2_1 ||
-         ctx->kind == DIT_MODEL_QWEN_IMAGE_2_1_TURBO) ? "preset=qwen" : "preset=flux2";
+        ctx->kind == DIT_MODEL_QWEN_IMAGE_2_1 ? "preset=qwen" : "preset=flux2";
   }
 
   if (params->vae_tile_size > 0) {

@@ -123,7 +123,7 @@ data class Model(
     val isCustom: Boolean = false,
     val isSdxl: Boolean = false,
     val isAnima: Boolean = false,
-    // DiT packages run by libdit_engine.so: "zimage", "klein", "qwen21" or "qwen21turbo".
+    // DiT packages run by libdit_engine.so: "zimage", "klein" or "qwen21".
     val ditKind: String = "",
     // Files that make up a package downloaded file-by-file rather than as one
     // zip, as "<path under baseUrl>|<name on disk>" pairs. Used by the DiT
@@ -361,7 +361,6 @@ data class Model(
             "zimage" -> "ZIMAGE"
             "klein" -> "KLEIN"
             "qwen21" -> "QWEN_IMAGE_2_1"
-            "qwen21turbo" -> "QWEN_IMAGE_2_1_TURBO"
             else -> ""
         }
 
@@ -545,7 +544,6 @@ class ModelRepository private constructor(private val context: Context) {
                 val zImageFile = File(dir, "ZIMAGE")
                 val kleinFile = File(dir, "KLEIN")
                 val qwenImage21File = File(dir, "QWEN_IMAGE_2_1")
-                val qwenImage21TurboFile = File(dir, "QWEN_IMAGE_2_1_TURBO")
 
                 when {
                     zImageFile.exists() && DitEngine.isSupportedDevice() ->
@@ -553,9 +551,6 @@ class ModelRepository private constructor(private val context: Context) {
 
                     kleinFile.exists() && DitEngine.isSupportedDevice() ->
                         customModels.add(createCustomModel(dir, isNpu = true, ditKind = "klein"))
-
-                    qwenImage21TurboFile.exists() && DitEngine.isSupportedDevice() ->
-                        customModels.add(createCustomModel(dir, isNpu = true, ditKind = "qwen21turbo"))
 
                     qwenImage21File.exists() && DitEngine.isSupportedDevice() ->
                         customModels.add(createCustomModel(dir, isNpu = true, ditKind = "qwen21"))
@@ -714,7 +709,6 @@ class ModelRepository private constructor(private val context: Context) {
 
     private fun createQwenImage21Model(turbo: Boolean = false): Model {
         val id = if (turbo) "qwen_image_2_1_turbo" else "qwen_image_2_1"
-        val ditKind = if (turbo) "qwen21turbo" else "qwen21"
         val packageFiles = if (turbo) Model.QWEN_IMAGE_2_1_TURBO_PACKAGE_FILES else Model.QWEN_IMAGE_2_1_PACKAGE_FILES
         if (!turbo) {
             // The package used to ship a Q4_0 dit.gguf; the FP8 dit.safetensors
@@ -734,7 +728,7 @@ class ModelRepository private constructor(private val context: Context) {
             isDownloaded = Model.isDitPackageDownloaded(
                 context,
                 id,
-                ditKind,
+                "qwen21",
                 packageFiles,
             ),
             codeDefaults = ModelConfig(
@@ -746,7 +740,7 @@ class ModelRepository private constructor(private val context: Context) {
                 denoiseStrength = 1f,
             ),
             runOnCpu = false,
-            ditKind = ditKind,
+            ditKind = "qwen21",
         )
     }
 
