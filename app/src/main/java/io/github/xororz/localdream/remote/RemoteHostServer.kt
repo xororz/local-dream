@@ -23,6 +23,11 @@ import org.json.JSONObject
  * access" feature: the generation port itself is unauthenticated, so gating
  * only the control API would add friction without adding security. Host mode
  * is explicit and user-visible while active.
+ *
+ * CORS headers mirror the native backend's (main.cpp, set_default_headers) so a
+ * browser page can drive these routes the same way it already drives /generate.
+ * `Access-Control-Allow-Origin: *` matches what the generation port already
+ * sends; it widens nothing that was not already reachable from a page.
  */
 class RemoteHostServer(
     private val port: Int,
@@ -159,6 +164,12 @@ class RemoteHostServer(
     }
 
     private fun route(request: Request): Response {
+        // Preflight is answered before any path-based routing: a browser sends
+        // OPTIONS without the method it intends to use, so deciding by path
+        // would 404 the preflight itself on every route except /info.
+        if (request.method == "OPTIONS") {
+            return Response(204, JSONObject())
+        }
         if (request.path == RemoteProtocol.PATH_INFO) {
             return Response(200, handler.info())
         }
@@ -180,24 +191,20 @@ class RemoteHostServer(
     }
 
     private fun writeResponse(socket: Socket, response: Response) {
-        val body = response.body.toString().toByteArray(StandardCharsets.UTF_8)
-        val reason = when (response.code) {
-            200 -> "OK"
-            400 -> "Bad Request"
-            401 -> "Unauthorized"
-            404 -> "Not Found"
-            else -> "Error"
-        }
-        val header = buildString {
-            append("HTTP/1.1 ${response.code} $reason\r\n")
-            append("Content-Type: application/json\r\n")
-            append("Content-Length: ${body.size}\r\n")
-            append("Connection: close\r\n")
-            append("\r\n")
+        // A 204 must not carry a body, and Content-Type on it is meaningless.
+        val noContent = response.code == 204
+        val body = if (noContent) {
+            ByteArray(0)
+        } else {
+            response.body.toString().toByteArray(StandardCharsets.UTF_8)
         }
         val output = socket.getOutputStream()
-        output.write(header.toByteArray(StandardCharsets.ISO_8859_1))
-        output.write(body)
+        output.write(
+            responseHead(response.code, body.size).toByteArray(StandardCharsets.ISO_8859_1),
+        )
+        if (!noContent) {
+            output.write(body)
+        }
         output.flush()
     }
 
@@ -213,5 +220,41 @@ class RemoteHostServer(
         private const val SOCKET_TIMEOUT_MS = 10_000
         private const val MAX_BODY_BYTES = 64 * 1024
         private const val MAX_LINE_LENGTH = 8 * 1024
+    }
+}
+
+// The CORS headers mirror the native backend's default headers (set_default_headers
+// in main.cpp) so a browser page can drive the control API exactly the way it
+// already drives /generate on the generation port. Allow-Private-Network is the
+// one addition: Chrome sends a private-network preflight when a public page
+// reaches a LAN address, and that preflight fails without this header.
+//
+// Kept outside the class so it holds no socket state: the wire format is then
+// assertable from a plain JVM test, which is otherwise only observable by
+// opening a browser against a running device.
+internal fun responseHead(code: Int, bodySize: Int): String {
+    val reason = when (code) {
+        200 -> "OK"
+        204 -> "No Content"
+        400 -> "Bad Request"
+        401 -> "Unauthorized"
+        404 -> "Not Found"
+        else -> "Error"
+    }
+    return buildString {
+        append("HTTP/1.1 $code $reason\r\n")
+        append("Access-Control-Allow-Origin: *\r\n")
+        append("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n")
+        append("Access-Control-Allow-Headers: Content-Type, Authorization\r\n")
+        append("Access-Control-Max-Age: 86400\r\n")
+        append("Access-Control-Allow-Private-Network: true\r\n")
+        if (code == 204) {
+            append("Content-Length: 0\r\n")
+        } else {
+            append("Content-Type: application/json\r\n")
+            append("Content-Length: $bodySize\r\n")
+        }
+        append("Connection: close\r\n")
+        append("\r\n")
     }
 }
