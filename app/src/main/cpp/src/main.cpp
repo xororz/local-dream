@@ -47,7 +47,7 @@
 //   anima:   tokenizer.json tokenizer_t5.json token_emb.bin clip.bin
 //            unet_part1.bin unet_part2.bin vae_decoder.bin
 //            [vae_encoder.bin] (optional; enables img2img/inpaint)
-//   zimage/klein: tokenizer.json dit.safetensors llm.gguf vae.safetensors
+//   zimage/klein: tokenizer.json dit.safetensors (or dit.gguf) llm.gguf vae.safetensors
 //   qwen21:  tokenizer.json dit.safetensors llm.gguf llm_vision.gguf vae.safetensors
 //   krea2turbo: tokenizer.json dit.gguf llm.gguf llm_vision.gguf vae.safetensors
 // SD15/SDXL CLIP runs on MNN (CPU); Anima's CLIP (clip.bin) runs on QNN/HTP
@@ -353,9 +353,9 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
   // engine .so ships in the APK's native library directory. Its FastRPC skels
   // are copied from assets into the shared runtime directory at app startup.
   if (opts.isDit()) {
-    std::string dit_path =
-        (dir / (opts.type == ServerOptions::ModelType::kKrea2Turbo
-                    ? "dit.gguf" : "dit.safetensors")).string();
+    std::string dit_path = (dir / "dit.safetensors").string();
+    if (!std::filesystem::exists(dit_path))
+      dit_path = (dir / "dit.gguf").string();
     std::string llm_path = (dir / "llm.gguf").string();
     std::string llm_vision_path =
         (opts.type == ServerOptions::ModelType::kQwenImage21 ||
