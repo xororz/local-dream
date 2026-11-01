@@ -292,6 +292,15 @@ data class Model(
             "Qwen/Qwen3-8B/resolve/main/tokenizer.json|tokenizer.json",
         )
 
+        val FLUX3_PACKAGE_FILES = listOf(
+            "unsloth/flux-3-image-klein/resolve/main/variants/fp8r/" +
+                "model.safetensors|dit.safetensors",
+            "bartowski/Qwen_Qwen3-VL-4B-Instruct-GGUF/resolve/main/" +
+                "Qwen_Qwen3-VL-4B-Instruct-Q4_0.gguf|llm.gguf",
+            "zhiyuanasad/flux2_klein_adreno/resolve/main/vae.safetensors|vae.safetensors",
+            "Qwen/Qwen3-VL-4B-Instruct/resolve/main/tokenizer.json|tokenizer.json",
+        )
+
         val QWEN_IMAGE_2_1_PACKAGE_FILES = listOf(
             "unsloth/Qwen-Image-2.1-FP8/resolve/main/" +
                 "Qwen-Image-2.1-FP8.safetensors|dit.safetensors",
@@ -638,6 +647,7 @@ class ModelRepository private constructor(private val context: Context) {
                 add(createZImageTurboModel())
                 add(createFlux2KleinModel())
                 add(createFlux2KleinModel(nineB = true))
+                add(createFlux3Model())
                 add(createQwenImage21Model())
                 add(createQwenImage21Model(turbo = true))
                 add(createKrea2TurboModel())
@@ -731,6 +741,36 @@ class ModelRepository private constructor(private val context: Context) {
                 denoiseStrength = 1f,
             ),
             runOnCpu = false,
+            ditKind = "klein",
+        )
+    }
+
+    private fun createFlux3Model(): Model {
+        val id = "flux3_image_klein"
+        return Model(
+            id = id,
+            name = "FLUX.3 Image Klein",
+            description = context.getString(R.string.flux3_description),
+            baseUrl = baseUrl,
+            packageFiles = Model.FLUX3_PACKAGE_FILES,
+            generationSize = 1024,
+            approximateSize = "9.0GB",
+            isDownloaded = Model.isDitPackageDownloaded(
+                context,
+                id,
+                "klein",
+                Model.FLUX3_PACKAGE_FILES,
+            ),
+            codeDefaults = ModelConfig(
+                prompt = "a lovely cat wearing black sunglasses, studio photo,",
+                negativePrompt = "",
+                steps = 16f,
+                cfg = 1f,
+                scheduler = "euler",
+                denoiseStrength = 1f,
+            ),
+            runOnCpu = false,
+            // Klein's reference path applies; sd.cpp detects the model from its weights.
             ditKind = "klein",
         )
     }
@@ -1167,7 +1207,7 @@ class ModelRepository private constructor(private val context: Context) {
             "absoluterealitycpu", "chilloutmixcpu",
             // DiT
             "z_image_turbo", "flux2_klein_4b", "flux2_klein_9b", "qwen_image_2_1",
-            "qwen_image_2_1_turbo", "krea_2_turbo",
+            "flux3_image_klein", "qwen_image_2_1_turbo", "krea_2_turbo",
         )
 
         // Case-sensitive like app storage (ext4). Pass ignoreCase where the

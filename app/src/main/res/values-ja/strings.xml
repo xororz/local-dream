@@ -433,6 +433,7 @@
     <string name="z_image_turbo_description">6B DiT、8 ステップ。</string>
     <string name="flux2_klein_description">4B DiT、4 ステップ。</string>
     <string name="flux2_klein_9b_description">9B DiT、4 ステップ。</string>
+    <string name="flux3_description">6B DiT、16 ステップ。</string>
     <string name="qwen_image_2_1_description">FP8 DiT + Qwen3-VL-8B、20 ステップ。</string>
     <string name="qwen_image_2_1_turbo_description">FP8 DiT + Qwen3-VL-8B、8 ステップ。</string>
     <string name="krea_2_turbo_description">12B DiT、8 ステップ。</string>
