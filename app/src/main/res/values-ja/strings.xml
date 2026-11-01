@@ -101,8 +101,10 @@
     <string name="unsupport_npu">お使いのデバイスは現在サポートされていません。CPU 版をご利用ください。</string>
     <string name="cpu_models">CPU Models</string>
     <string name="npu_models">NPU Models</string>
+    <string name="dit_models">DiT Models</string>
     <string name="no_cpu_models">モデルなし</string>
     <string name="no_npu_models">モデルなし</string>
+    <string name="no_dit_models">モデルなし</string>
     <string name="img2img_hint">img2img機能を使用します。必要がない場合や問題が発生した場合はオフにしてください。オフにするとSDXLのアスペクト比指定とUltraFixも無効になります。</string>
     <string name="show_process">生成プロセスを表示</string>
     <string name="show_process_hint">NPU モデル専用機能です。</string>

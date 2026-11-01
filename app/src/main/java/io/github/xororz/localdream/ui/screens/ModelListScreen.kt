@@ -389,11 +389,20 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
 
     val listedModels = if (remoteActive) remoteRepository.models else modelRepository.models
     val cpuModels = remember(listedModels, pinnedIds) {
-        PinnedModels.sort(listedModels.filter { it.runOnCpu }, pinnedIds)
+        PinnedModels.sort(listedModels.filter { it.runOnCpu && !it.isDit }, pinnedIds)
     }
     val npuModels = remember(listedModels, pinnedIds) {
-        PinnedModels.sort(listedModels.filter { !it.runOnCpu }, pinnedIds)
+        PinnedModels.sort(listedModels.filter { !it.runOnCpu && !it.isDit }, pinnedIds)
     }
+    val ditModels = remember(listedModels, pinnedIds) {
+        PinnedModels.sort(listedModels.filter { it.isDit }, pinnedIds)
+    }
+
+    val tabTitles = listOf(
+        stringResource(R.string.cpu_models),
+        stringResource(R.string.npu_models),
+        stringResource(R.string.dit_models),
+    )
 
     val lastViewedPage = remember {
         val preferences = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
@@ -401,19 +410,14 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
     }
 
     val pagerState = rememberPagerState(
-        initialPage = lastViewedPage,
-        pageCount = { 2 },
+        initialPage = lastViewedPage.coerceIn(tabTitles.indices),
+        pageCount = { tabTitles.size },
     )
 
     LaunchedEffect(pagerState.currentPage) {
         val preferences = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
         preferences.edit { putInt("last_viewed_page", pagerState.currentPage) }
     }
-
-    val tabTitles = listOf(
-        stringResource(R.string.cpu_models),
-        stringResource(R.string.npu_models),
-    )
 
     if (isSelectionMode) {
         BackHandler {
@@ -1036,7 +1040,11 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                 state = pagerState,
                 modifier = Modifier.weight(1f),
             ) { page ->
-                val models = if (page == 0) cpuModels else npuModels
+                val models = when (page) {
+                    0 -> cpuModels
+                    1 -> npuModels
+                    else -> ditModels
+                }
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -1153,10 +1161,10 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     Text(
-                                        text = if (page == 0) {
-                                            stringResource(R.string.no_cpu_models)
-                                        } else {
-                                            stringResource(R.string.no_npu_models)
+                                        text = when (page) {
+                                            0 -> stringResource(R.string.no_cpu_models)
+                                            1 -> stringResource(R.string.no_npu_models)
+                                            else -> stringResource(R.string.no_dit_models)
                                         },
                                         style = MaterialTheme.typography.bodyLarge,
                                         textAlign = TextAlign.Center,
@@ -1176,7 +1184,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                 horizontalArrangement = Arrangement.Center,
             ) {
                 TabPageIndicator(
-                    pageCount = 2,
+                    pageCount = pagerState.pageCount,
                     currentPage = pagerState.currentPage,
                 )
             }

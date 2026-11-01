@@ -101,8 +101,10 @@
     <string name="unsupport_npu">이 기기는 지원되지 않습니다. CPU 모델을 사용해 보세요.</string>
     <string name="cpu_models">CPU 모델</string>
     <string name="npu_models">NPU 모델</string>
+    <string name="dit_models">DiT 모델</string>
     <string name="no_cpu_models">모델 없음</string>
     <string name="no_npu_models">모델 없음</string>
+    <string name="no_dit_models">모델 없음</string>
     <string name="img2img_hint">img2img 기능을 사용합니다. 필요하지 않거나 문제가 발생하면 끄세요. 끄면 SDXL 화면비 기능과 UltraFix도 비활성화됩니다.</string>
     <string name="show_process">생성 과정 표시</string>
     <string name="show_process_hint">NPU 모델에서만 작동합니다. 중간 생성 스텝을 표시합니다. 생성 속도가 느려지므로 과정이 궁금할 때만 켜세요.</string>

@@ -104,8 +104,10 @@
     <string name="unsupport_npu">Your device is not supported. Try the CPU model please.</string>
     <string name="cpu_models">CPU Models</string>
     <string name="npu_models">NPU Models</string>
+    <string name="dit_models">DiT Models</string>
     <string name="no_cpu_models">No Models</string>
     <string name="no_npu_models">No Models</string>
+    <string name="no_dit_models">No Models</string>
     <string name="img2img_hint">Use img2img feature. Turn off if you don\'t need or encounter any problems. Turning it off also disables SDXL aspect ratio and UltraFix.</string>
     <string name="show_process">Show Generation Process</string>
     <string name="show_process_hint">Only works for NPU models. Show intermediate generation steps. This will slow down generation speed. Enable only when curious about the process.</string>
