@@ -11,6 +11,8 @@
     <string name="capture_logs_hint">모델 실행 중 앱 로그를 수집하고 종료 후 표시합니다</string>
     <string name="listen_on_all_addresses">LAN 접근 허용</string>
     <string name="listen_on_all_addresses_hint">같은 네트워크의 다른 기기가 백엔드(포트 8081)에 접근할 수 있게 합니다. 끄면 로컬에서만 접근할 수 있습니다.</string>
+    <string name="secure_screen">스크린샷 보호</string>
+    <string name="secure_screen_hint">스크린샷과 화면 녹화를 차단하고 최근 앱 화면에서 앱 미리보기를 숨깁니다</string>
     <string name="tag_autocomplete">태그 자동 완성</string>
     <string name="tag_autocomplete_hint">프롬프트를 입력하는 동안 태그를 제안하고 수정합니다</string>
     <string name="tag_alias_label">별칭</string>
