@@ -161,6 +161,17 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onDestroy() {
+        // The activity is really finishing, not being recreated for a rotation
+        // or fold/unfold. On Android 12+ Back on the root screen only moves the
+        // task to the background, so the clear on the next start (see
+        // LocalDreamApplication) is what usually applies.
+        if (isFinishing && !isChangingConfigurations) {
+            (application as LocalDreamApplication).clearHistoryIfEnabled()
+        }
+        super.onDestroy()
+    }
 }
 
 @Composable

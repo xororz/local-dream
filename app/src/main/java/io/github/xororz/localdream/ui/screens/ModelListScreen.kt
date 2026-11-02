@@ -1464,6 +1464,9 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                 var secureScreen by remember {
                                     mutableStateOf(PrivacySettings.isSecureScreenEnabled(context))
                                 }
+                                var forgetHistory by remember {
+                                    mutableStateOf(PrivacySettings.isForgetHistoryEnabled(context))
+                                }
                                 val tagRepository =
                                     remember { TagAutocompleteRepository.getInstance(context) }
                                 val tagDictState by tagRepository.state.collectAsState()
@@ -1822,6 +1825,18 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                     onCheckedChange = {
                                         secureScreen = it
                                         PrivacySettings.setSecureScreenEnabled(context, it)
+                                    },
+                                )
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                                SwitchSettingRow(
+                                    title = stringResource(R.string.forget_history),
+                                    description = stringResource(R.string.forget_history_hint),
+                                    checked = forgetHistory,
+                                    onCheckedChange = {
+                                        forgetHistory = it
+                                        PrivacySettings.setForgetHistoryEnabled(context, it)
                                     },
                                 )
                             }

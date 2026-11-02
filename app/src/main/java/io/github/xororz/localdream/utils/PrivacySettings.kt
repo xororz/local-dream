@@ -16,6 +16,9 @@ object PrivacySettings {
     /** Block screenshots and screen recording, and hide the app in Recents. */
     const val KEY_SECURE_SCREEN = "secure_screen"
 
+    /** Do not keep the generation history from one app session to the next. */
+    const val KEY_FORGET_HISTORY = "forget_history_between_sessions"
+
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun isSecureScreenEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_SECURE_SCREEN, false)
@@ -23,6 +26,12 @@ object PrivacySettings {
     fun setSecureScreenEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit { putBoolean(KEY_SECURE_SCREEN, enabled) }
         context.findActivity()?.let { applySecureScreen(it, enabled) }
+    }
+
+    fun isForgetHistoryEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_FORGET_HISTORY, false)
+
+    fun setForgetHistoryEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit { putBoolean(KEY_FORGET_HISTORY, enabled) }
     }
 
     /**

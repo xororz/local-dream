@@ -23,6 +23,9 @@ interface HistoryDao {
     @Query("DELETE FROM generation_history WHERE modelId = :modelId")
     suspend fun deleteAllForModel(modelId: String): Int
 
+    @Query("DELETE FROM generation_history")
+    suspend fun deleteAll(): Int
+
     // Repoint every row of a model to a new id, rewriting the stored image path
     // prefix (history/<oldId>/... -> history/<newId>/...) to match the moved
     // files on disk. Used when a custom model is renamed.
