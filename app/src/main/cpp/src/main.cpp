@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -139,6 +140,11 @@ static void showHelp() {
          "Options:\n"
          "  --port <n>             HTTP port (default 8081)\n"
          "  --listen_all           Listen on 0.0.0.0 instead of 127.0.0.1\n"
+         "\n"
+         "Environment:\n"
+         "  LD_BACKEND_TOKEN       When set, every request except CORS\n"
+         "                         preflight must send\n"
+         "                         \"Authorization: Bearer <token>\"\n"
          "  --no_img2img           Disable img2img/inpaint; modular backends\n"
          "                         also skip the VAE encoder\n"
          "  --use_v_pred           v-prediction model\n"
@@ -496,8 +502,11 @@ static void registerGenerateEndpoint(httplib::Server &svr, Pipeline *pipeline) {
           pipeline->supportsImg2Img(), pipeline->supportsReferenceEditing(),
           pipeline->supportsUltrafix()));
 
-      std::cout << "Req Rcvd: P:" << req->prompt
-                << " NP:" << req->negative_prompt << " S:" << req->steps
+      // Prompt texts stay out of the log (it ends up in logcat); their
+      // lengths are enough to tell requests apart while debugging.
+      std::cout << "Req Rcvd: P:" << req->prompt.size() << " chars"
+                << " NP:" << req->negative_prompt.size() << " chars"
+                << " S:" << req->steps
                 << " CFG:" << req->cfg << " Seed:" << req->seed
                 << " Size:" << req->width << "x" << req->height
                 << " Img2Img:" << req->img2img << " Mask:" << req->has_mask
@@ -916,6 +925,38 @@ int main(int argc, char **argv) {
   svr.Options(R"(.*)", [](const httplib::Request &, httplib::Response &res) {
     res.status = 204;
   });
+
+  // Access token: the app passes a per-install secret in LD_BACKEND_TOKEN so
+  // only it (and devices it was paired with) can use the backend. Without the
+  // check any other app on the device - or any web page, given the permissive
+  // CORS headers above - could drive it on 127.0.0.1, and anyone on the LAN
+  // with --listen_all. Preflight requests carry no credentials and stay open.
+  const char *token_env = std::getenv("LD_BACKEND_TOKEN");
+  const std::string expected_auth =
+      (token_env && *token_env) ? std::string("Bearer ") + token_env : "";
+  if (expected_auth.empty()) {
+    std::cout << "Warning: LD_BACKEND_TOKEN not set, backend is unauthenticated"
+              << std::endl;
+  } else {
+    svr.set_pre_routing_handler([expected_auth](const httplib::Request &req,
+                                                httplib::Response &res) {
+      if (req.method == "OPTIONS") {
+        return httplib::Server::HandlerResponse::Unhandled;
+      }
+      const std::string got = req.get_header_value("Authorization");
+      // Constant-time comparison: no early exit on the first mismatch.
+      unsigned char diff = got.size() == expected_auth.size() ? 0 : 1;
+      for (size_t i = 0; i < expected_auth.size(); ++i) {
+        const unsigned char c = i < got.size() ? got[i] : 0;
+        diff |= static_cast<unsigned char>(c ^ expected_auth[i]);
+      }
+      if (diff == 0) return httplib::Server::HandlerResponse::Unhandled;
+      res.status = 401;
+      res.set_content(R"({"type":"error","message":"unauthorized"})",
+                      "application/json");
+      return httplib::Server::HandlerResponse::Handled;
+    });
+  }
   svr.Get("/health", [](const httplib::Request &, httplib::Response &res) {
     res.status = 200;
   });

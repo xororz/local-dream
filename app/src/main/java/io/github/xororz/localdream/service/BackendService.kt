@@ -11,6 +11,7 @@ import io.github.xororz.localdream.data.DitEngine
 import io.github.xororz.localdream.data.DitResolution
 import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.data.ModelStorage
+import io.github.xororz.localdream.utils.BackendAuth
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.Executors
@@ -628,6 +629,8 @@ class BackendService : Service() {
             val systemLibPathsStr = systemLibPaths.joinToString(":")
             env["LD_LIBRARY_PATH"] = systemLibPathsStr
             env["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
+            // Only requests carrying this device's access code are served.
+            env[BackendAuth.ENV_TOKEN] = BackendAuth.localCode(this)
             if (ditEngineDir != null) {
                 // ggml-hexagon asks FastRPC for its skel by bare name, so both
                 // the runtime directory holding the skels and the platform
@@ -679,7 +682,7 @@ class BackendService : Service() {
                 proc.inputStream.bufferedReader().use { reader ->
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
-                        Log.i(TAG, "Backend: $line")
+                        Log.i(TAG, "Backend: ${redactBackendLine(line!!)}")
                     }
                 }
                 proc.waitFor()
@@ -753,3 +756,17 @@ class BackendService : Service() {
         updateServing(null)
     }
 }
+
+// Backend builds from before the prompt was dropped from the request log
+// print it as "Req Rcvd: P:<prompt> NP:<negative> S:...". Logcat ends up in
+// bug reports and log captures, so cut the prompt texts out before logging.
+internal fun redactBackendLine(line: String): String {
+    if (!line.startsWith(REQ_LOG_PREFIX)) return line
+    // The prompts are free text, so take the last " S:<steps> CFG:" as the
+    // start of the parameters rather than the first " S:".
+    val rest = REQ_LOG_PARAMS.findAll(line).lastOrNull()?.let { line.substring(it.range.first) }.orEmpty()
+    return "$REQ_LOG_PREFIX<redacted>$rest"
+}
+
+private const val REQ_LOG_PREFIX = "Req Rcvd: P:"
+private val REQ_LOG_PARAMS = Regex(" S:\\d+ CFG:")

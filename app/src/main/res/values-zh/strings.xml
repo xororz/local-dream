@@ -11,6 +11,7 @@
     <string name="capture_logs_hint">运行模型时收集应用日志，退出后展示</string>
     <string name="listen_on_all_addresses">允许局域网访问</string>
     <string name="listen_on_all_addresses_hint">允许同一网络下的其他设备访问后端（端口 8081）。关闭则只接受本机访问。</string>
+    <string name="lan_access_code">其他设备的访问码：%1$s</string>
     <string name="tag_autocomplete">Tag 联想</string>
     <string name="tag_autocomplete_hint">输入提示词时联想并纠正 tag</string>
     <string name="tag_alias_label">别名</string>
@@ -226,6 +227,8 @@
 
     <!-- Error Messages -->
     <string name="error_download_failed">下载失败: %s</string>
+    <string name="error_download_insecure">下载已阻止：模型只通过 HTTPS 下载。请检查设置中的下载地址。</string>
+    <string name="error_download_checksum">下载失败：文件与其发布的校验值不符，已被删除。请重试或换用其他下载源。</string>
     <string name="error_request_failed">请求失败: %s</string>
     <string name="unknown_error">未知错误</string>
 
@@ -478,6 +481,11 @@
     <string name="remote_banner_offline">主机不可达</string>
     <string name="remote_select_failed">在主机上启动模型失败</string>
     <string name="remote_port_hint">默认控制端口：%1$d。可用 地址:端口 形式指定其他端口。</string>
+    <string name="remote_access_code">访问码</string>
+    <string name="remote_access_code_hint">控制端必须输入此访问码。没有它，控制端口和生成端口都不会响应，因此其他应用和网络中的其他设备无法使用本设备。</string>
+    <string name="remote_access_code_regenerate">生成新访问码（解除所有控制端的配对）</string>
+    <string name="remote_access_code_field">主机上显示的访问码</string>
+    <string name="remote_connect_failed_code">主机拒绝了访问码。请检查主机上显示的访问码。</string>
     <string name="remote_host_notify_title">受控模式运行中</string>
     <string name="remote_host_notify">Local Dream 可被局域网内设备控制</string>
     <string name="remote_screen_shield">纯黑屏幕（保持运行）</string>

@@ -10,6 +10,7 @@ import io.github.xororz.localdream.R
 import io.github.xororz.localdream.remote.RemoteApiClient
 import io.github.xororz.localdream.remote.RemoteCatalog
 import io.github.xororz.localdream.remote.RemoteProtocol
+import io.github.xororz.localdream.utils.BackendAuth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +26,9 @@ data class RemoteConnection(
 sealed class RemoteConnectResult {
     data class Success(val deviceName: String) : RemoteConnectResult()
     data object Unreachable : RemoteConnectResult()
+
+    /** The host answered but rejected the access code. */
+    data object Unauthorized : RemoteConnectResult()
 }
 
 /**
@@ -101,6 +105,7 @@ class RemoteRepository private constructor(private val context: Context) {
         if (connection != null) return
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val host = prefs.getString(KEY_HOST, null) ?: return
+        BackendAuth.setRemoteCode(host, prefs.getString(KEY_CODE, null))
         connection = RemoteConnection(
             host = host,
             port = prefs.getInt(KEY_PORT, RemoteProtocol.CONTROL_PORT),
@@ -109,10 +114,11 @@ class RemoteRepository private constructor(private val context: Context) {
     }
 
     /**
-     * Verifies the host at [hostInput] ("ip" or "ip:port"), fetches its
-     * catalog and persists the link on success.
+     * Verifies the host at [hostInput] ("ip" or "ip:port") with the access
+     * [code] shown on the host, fetches its catalog and persists the link on
+     * success.
      */
-    suspend fun connect(hostInput: String): RemoteConnectResult {
+    suspend fun connect(hostInput: String, code: String): RemoteConnectResult {
         val host = hostInput.substringBefore(':').trim()
         val port = hostInput.substringAfter(':', "").toIntOrNull()
             ?: RemoteProtocol.CONTROL_PORT
@@ -120,6 +126,21 @@ class RemoteRepository private constructor(private val context: Context) {
 
         val client = RemoteApiClient(host, port)
         val info = client.fetchInfo() ?: return RemoteConnectResult.Unreachable
+        // From here on every request to this host carries the code.
+        BackendAuth.setRemoteCode(host, code)
+        when (client.checkAccess()) {
+            true -> Unit
+
+            false -> {
+                BackendAuth.setRemoteCode(host, null)
+                return RemoteConnectResult.Unauthorized
+            }
+
+            null -> {
+                BackendAuth.setRemoteCode(host, null)
+                return RemoteConnectResult.Unreachable
+            }
+        }
         val catalog = client.fetchCatalog() ?: return RemoteConnectResult.Unreachable
 
         val name = info.deviceName.ifEmpty { host }
@@ -129,6 +150,7 @@ class RemoteRepository private constructor(private val context: Context) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
             putString(KEY_HOST, host)
             putInt(KEY_PORT, port)
+            putString(KEY_CODE, code)
             putString(KEY_NAME, name)
         }
         return RemoteConnectResult.Success(name)
@@ -154,6 +176,7 @@ class RemoteRepository private constructor(private val context: Context) {
 
     /** Drops the saved link and returns the list screens to local mode. */
     fun disconnect() {
+        connection?.let { BackendAuth.setRemoteCode(it.host, null) }
         connection = null
         models = emptyList()
         resolutionsById = emptyMap()
