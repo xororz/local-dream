@@ -11,6 +11,7 @@ import io.github.xororz.localdream.data.DitEngine
 import io.github.xororz.localdream.data.DitResolution
 import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.data.ModelStorage
+import io.github.xororz.localdream.utils.BackendAuth
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.Executors
@@ -628,6 +629,8 @@ class BackendService : Service() {
             val systemLibPathsStr = systemLibPaths.joinToString(":")
             env["LD_LIBRARY_PATH"] = systemLibPathsStr
             env["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
+            // Only requests carrying this device's access code are served.
+            env[BackendAuth.ENV_TOKEN] = BackendAuth.localCode(this)
             if (ditEngineDir != null) {
                 // ggml-hexagon asks FastRPC for its skel by bare name, so both
                 // the runtime directory holding the skels and the platform

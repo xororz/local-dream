@@ -11,6 +11,7 @@
     <string name="capture_logs_hint">モデル実行中にアプリのログを収集し、終了後に表示します</string>
     <string name="listen_on_all_addresses">LAN からのアクセスを許可</string>
     <string name="listen_on_all_addresses_hint">同じネットワーク上の他のデバイスからバックエンド（ポート 8081）にアクセスできるようにします。オフの場合はローカルのみ。</string>
+    <string name="lan_access_code">他のデバイス用アクセスコード: %1$s</string>
     <string name="tag_autocomplete">タグ補完</string>
     <string name="tag_autocomplete_hint">プロンプト入力中にタグを補完・修正します</string>
     <string name="tag_alias_label">別名</string>
@@ -478,6 +479,11 @@
     <string name="remote_banner_offline">ホストに到達できません</string>
     <string name="remote_select_failed">ホストでのモデル起動に失敗しました</string>
     <string name="remote_port_hint">既定の制御ポート：%1$d。アドレス:ポート の形式で変更できます。</string>
+    <string name="remote_access_code">アクセスコード</string>
+    <string name="remote_access_code_hint">コントローラーはこのコードを入力する必要があります。コードがないと制御ポートも生成ポートも応答しないため、他のアプリやネットワーク上の他のデバイスはこのデバイスを使用できません。</string>
+    <string name="remote_access_code_regenerate">新しいコードを作成（すべてのコントローラーのペアリングを解除）</string>
+    <string name="remote_access_code_field">ホストに表示されたアクセスコード</string>
+    <string name="remote_connect_failed_code">ホストがアクセスコードを拒否しました。ホストに表示されているコードを確認してください。</string>
     <string name="remote_host_notify_title">ホストモード実行中</string>
     <string name="remote_host_notify">Local Dream はローカルネットワークから操作できます</string>
     <string name="remote_screen_shield">黒画面（動作を維持）</string>

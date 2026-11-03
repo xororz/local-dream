@@ -11,6 +11,7 @@
     <string name="capture_logs_hint">모델 실행 중 앱 로그를 수집하고 종료 후 표시합니다</string>
     <string name="listen_on_all_addresses">LAN 접근 허용</string>
     <string name="listen_on_all_addresses_hint">같은 네트워크의 다른 기기가 백엔드(포트 8081)에 접근할 수 있게 합니다. 끄면 로컬에서만 접근할 수 있습니다.</string>
+    <string name="lan_access_code">다른 기기용 액세스 코드: %1$s</string>
     <string name="tag_autocomplete">태그 자동 완성</string>
     <string name="tag_autocomplete_hint">프롬프트를 입력하는 동안 태그를 제안하고 수정합니다</string>
     <string name="tag_alias_label">별칭</string>
@@ -478,6 +479,11 @@
     <string name="remote_banner_offline">호스트에 연결할 수 없음</string>
     <string name="remote_select_failed">호스트에서 모델을 시작하지 못했습니다</string>
     <string name="remote_port_hint">기본 제어 포트: %1$d. 주소:포트 형식으로 변경할 수 있습니다.</string>
+    <string name="remote_access_code">액세스 코드</string>
+    <string name="remote_access_code_hint">컨트롤러는 이 코드를 입력해야 합니다. 코드가 없으면 제어 포트와 생성 포트 모두 응답하지 않으므로 다른 앱이나 네트워크의 다른 기기가 이 기기를 사용할 수 없습니다.</string>
+    <string name="remote_access_code_regenerate">새 코드 만들기(모든 컨트롤러의 페어링 해제)</string>
+    <string name="remote_access_code_field">호스트에 표시된 액세스 코드</string>
+    <string name="remote_connect_failed_code">호스트가 액세스 코드를 거부했습니다. 호스트에 표시된 코드를 확인하세요.</string>
     <string name="remote_host_notify_title">호스트 모드 실행 중</string>
     <string name="remote_host_notify">Local Dream을 로컬 네트워크에서 제어할 수 있습니다</string>
     <string name="remote_screen_shield">검은 화면(계속 실행)</string>
