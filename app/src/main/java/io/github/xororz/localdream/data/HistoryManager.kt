@@ -65,6 +65,10 @@ data class HistoryItem(
 // Keep id batches under SQLite's host-parameter limit (999 on older API levels).
 private const val SQLITE_IN_CHUNK = 900
 
+// Base64 IPC buffers holding the img2img / inpaint / UltraFix input images and
+// DiT reference images (see TempCleaner and BackgroundGenerationService).
+private val TRANSIENT_INPUT_FILES = listOf("tmp.txt", "mask.txt", "ultrafix.txt", "dit_references.json")
+
 class HistoryManager(private val context: Context) {
 
     private val db = AppDatabase.get(context)
@@ -243,6 +247,22 @@ class HistoryManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e("HistoryManager", "Failed to delete history items", e)
             0
+        }
+    }
+
+    // Delete the whole generation history: every DB row, every image file
+    // under history/ and the transient input-image buffers. Used by the
+    // "Don't keep history" setting. Returns the number of rows deleted,
+    // or -1 on failure.
+    suspend fun clearAllHistory(): Int = withContext(Dispatchers.IO) {
+        try {
+            val removed = dao.deleteAll()
+            File(filesDir, "history").listFiles()?.forEach { it.deleteRecursively() }
+            for (name in TRANSIENT_INPUT_FILES) File(filesDir, name).delete()
+            removed
+        } catch (e: Exception) {
+            Log.e("HistoryManager", "Failed to clear history", e)
+            -1
         }
     }
 

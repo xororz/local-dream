@@ -1,14 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
+   Backup and device-transfer rules for Android 12 and newer.
    See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+   for details. Keep in sync with backup_rules.xml (Android 11 and lower).
+
+   Generated images (history/), their prompts and parameters (local_dream.db),
+   the saved per-model prompts (generation_prefs) and the transient input
+   image buffers are private and can be large, so they are left out of both
+   cloud backups and device-to-device transfers.
 -->
 <data-extraction-rules>
-    <!-- Where models are kept is a fact about this device (ModelStorage). -->
     <cloud-backup>
+        <!-- Where models are kept is a fact about this device (ModelStorage). -->
         <exclude domain="sharedpref" path="model_storage.xml"/>
+        <exclude domain="file" path="history"/>
+        <exclude domain="file" path="tmp.txt"/>
+        <exclude domain="file" path="mask.txt"/>
+        <exclude domain="file" path="ultrafix.txt"/>
+        <exclude domain="file" path="dit_references.json"/>
+        <exclude domain="file" path="datastore/generation_prefs.preferences_pb"/>
+        <exclude domain="database" path="local_dream.db"/>
+        <exclude domain="database" path="local_dream.db-shm"/>
+        <exclude domain="database" path="local_dream.db-wal"/>
+        <exclude domain="database" path="local_dream.db-journal"/>
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="model_storage.xml"/>
+        <exclude domain="file" path="history"/>
+        <exclude domain="file" path="tmp.txt"/>
+        <exclude domain="file" path="mask.txt"/>
+        <exclude domain="file" path="ultrafix.txt"/>
+        <exclude domain="file" path="dit_references.json"/>
+        <exclude domain="file" path="datastore/generation_prefs.preferences_pb"/>
+        <exclude domain="database" path="local_dream.db"/>
+        <exclude domain="database" path="local_dream.db-shm"/>
+        <exclude domain="database" path="local_dream.db-wal"/>
+        <exclude domain="database" path="local_dream.db-journal"/>
     </device-transfer>
 </data-extraction-rules>
