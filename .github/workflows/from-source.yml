@@ -62,9 +62,10 @@ jobs:
       - name: Hexagon SDK (from the public Snapdragon toolchain image)
         run: |
           docker pull -q "$HEXAGON_IMAGE"
-          CID=$(docker create "$HEXAGON_IMAGE")
-          docker cp "$CID:/opt/hexagon" "$RUNNER_TEMP/hexagon"
-          docker rm "$CID" > /dev/null
+          # Copy as root inside the container: parts of the SDK are not
+          # readable for the runner user, which breaks a plain docker cp.
+          docker run --rm -u 0 -v "$RUNNER_TEMP:/out" "$HEXAGON_IMAGE" \
+            sh -c "cp -a /opt/hexagon /out/ && chown -R $(id -u):$(id -g) /out/hexagon"
           ROOT=$(find "$RUNNER_TEMP/hexagon" -maxdepth 1 -mindepth 1 -type d | sort | tail -n1)
           echo "HEXAGON_SDK_ROOT=$ROOT" >> "$GITHUB_ENV"
           ls "$RUNNER_TEMP/hexagon"
