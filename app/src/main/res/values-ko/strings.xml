@@ -227,6 +227,8 @@
 
     <!-- Error Messages -->
     <string name="error_download_failed">다운로드 실패: %s</string>
+    <string name="error_download_insecure">다운로드 차단됨: 모델은 HTTPS로만 다운로드됩니다. 설정에서 다운로드 주소를 확인하세요.</string>
+    <string name="error_download_checksum">다운로드 실패: 파일이 게시된 체크섬과 일치하지 않아 삭제되었습니다. 다시 시도하거나 다른 다운로드 소스를 사용하세요.</string>
     <string name="error_request_failed">요청 실패: %s</string>
     <string name="unknown_error">알 수 없는 오류</string>
 

@@ -227,6 +227,8 @@
 
     <!-- Error Messages -->
     <string name="error_download_failed">下载失败: %s</string>
+    <string name="error_download_insecure">下载已阻止：模型只通过 HTTPS 下载。请检查设置中的下载地址。</string>
+    <string name="error_download_checksum">下载失败：文件与其发布的校验值不符，已被删除。请重试或换用其他下载源。</string>
     <string name="error_request_failed">请求失败: %s</string>
     <string name="unknown_error">未知错误</string>
 
