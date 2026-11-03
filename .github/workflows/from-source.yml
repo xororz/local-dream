@@ -1,0 +1,260 @@
+name: APK from source
+
+# Fork-only workflow, not part of any upstream pull request.
+#
+# Builds the whole app from this repository's sources, including the native
+# backend (libstable_diffusion_core.so) and the DiT engine (libdit_engine.so),
+# instead of taking prebuilt binaries from the official release. The only
+# binaries that are not built here are Qualcomm's QNN runtime libraries; they
+# come straight from Qualcomm's public SDK download and are compared with the
+# ones in the official APK.
+#
+# A second job rebuilds the unmodified upstream release tag and compares the
+# result with the official binaries, as a plausibility check that the
+# published binaries correspond to the published source.
+
+on:
+  push:
+    branches: [ci-personal]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM_TAG: v3.0.0-alpha.7
+  QNN_VERSION: 2.51.0.260929
+  NDK_CORE: 28.0.13004108
+  NDK_DIT: 29.0.14206865
+  HEXAGON_IMAGE: ghcr.io/snapdragon-toolchain/arm64-android:v0.8
+
+jobs:
+  native:
+    name: Native libraries (this branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Toolchains
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build > /dev/null
+          rustup target add aarch64-linux-android
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" --install "ndk;$NDK_CORE" "ndk;$NDK_DIT" > /dev/null
+          # CMakePresets.json pins the NDK to this path.
+          sudo mkdir -p /data && sudo ln -sfn "$ANDROID_HOME/ndk/$NDK_CORE" /data/android-ndk-r28
+          cmake --version | head -1
+
+      - name: Qualcomm AI Runtime SDK (public download)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/qairt.zip" \
+            "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/$QNN_VERSION/v$QNN_VERSION.zip"
+          unzip -q "$RUNNER_TEMP/qairt.zip" -d "$RUNNER_TEMP/qairt"
+          rm "$RUNNER_TEMP/qairt.zip"
+          ROOT=$(find "$RUNNER_TEMP/qairt" -maxdepth 3 -type d -name "$QNN_VERSION" | head -n1)
+          test -d "$ROOT/include/QNN" || { echo "QNN SDK layout not recognized"; find "$RUNNER_TEMP/qairt" -maxdepth 3; exit 1; }
+          echo "QNN_SDK_ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Hexagon SDK (from the public Snapdragon toolchain image)
+        run: |
+          docker pull -q "$HEXAGON_IMAGE"
+          CID=$(docker create "$HEXAGON_IMAGE")
+          docker cp "$CID:/opt/hexagon" "$RUNNER_TEMP/hexagon"
+          docker rm "$CID" > /dev/null
+          ROOT=$(find "$RUNNER_TEMP/hexagon" -maxdepth 1 -mindepth 1 -type d | sort | tail -n1)
+          echo "HEXAGON_SDK_ROOT=$ROOT" >> "$GITHUB_ENV"
+          ls "$RUNNER_TEMP/hexagon"
+
+      - name: Build the core backend
+        working-directory: app/src/main/cpp
+        run: bash build.sh
+
+      - name: Build the DiT engine
+        working-directory: app/src/main/cpp
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$NDK_DIT"
+          bash dit/build.sh
+
+      - name: Collect
+        run: |
+          mkdir -p native-out
+          cp -r app/src/main/jniLibs native-out/
+          mkdir -p native-out/assets
+          cp -r app/src/main/assets/qnnlibs app/src/main/assets/ditlibs native-out/assets/
+          mkdir -p native-out/assets/licenses
+          cp -r app/src/main/assets/licenses/qnn-* native-out/assets/licenses/
+          find native-out -type f -exec sha256sum {} \; | sort -k2
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-from-source
+          path: native-out/
+
+  reproduce:
+    name: Rebuild the official release and compare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: xororz/local-dream
+          ref: ${{ env.UPSTREAM_TAG }}
+          submodules: recursive
+
+      - name: Toolchains
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build > /dev/null
+          rustup target add aarch64-linux-android
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" --install "ndk;$NDK_CORE" > /dev/null
+          sudo mkdir -p /data && sudo ln -sfn "$ANDROID_HOME/ndk/$NDK_CORE" /data/android-ndk-r28
+
+      - name: Qualcomm AI Runtime SDK (public download)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/qairt.zip" \
+            "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/$QNN_VERSION/v$QNN_VERSION.zip"
+          unzip -q "$RUNNER_TEMP/qairt.zip" -d "$RUNNER_TEMP/qairt"
+          ROOT=$(find "$RUNNER_TEMP/qairt" -maxdepth 3 -type d -name "$QNN_VERSION" | head -n1)
+          echo "QNN_SDK_ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Build the core backend of ${{ env.UPSTREAM_TAG }}
+        working-directory: app/src/main/cpp
+        run: bash build.sh
+
+      - name: Official release APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/upstream"
+          gh release download "$UPSTREAM_TAG" -R xororz/local-dream -p "*.apk" -D "$RUNNER_TEMP/upstream"
+          APK=$(ls "$RUNNER_TEMP"/upstream/*.apk | grep -v with_filter | head -n1)
+          mkdir -p "$RUNNER_TEMP/official"
+          unzip -q -o "$APK" 'lib/arm64-v8a/*' 'assets/qnnlibs/*' -d "$RUNNER_TEMP/official"
+
+      - name: Compare with the official binaries
+        run: |
+          OFF="$RUNNER_TEMP/official"
+          OWN=app/src/main
+          {
+            echo "## Rebuild of $UPSTREAM_TAG vs. the official APK"
+            echo
+            echo "### Qualcomm QNN libraries (Qualcomm SDK download vs. APK)"
+            echo
+            echo "| File | Identical |"
+            echo "|---|---|"
+            for f in "$OFF"/assets/qnnlibs/*.so; do
+              n=$(basename "$f")
+              if [ -f "$OWN/assets/qnnlibs/$n" ] && cmp -s "$f" "$OWN/assets/qnnlibs/$n"; then r="yes"; else r="**NO**"; fi
+              echo "| $n | $r |"
+            done
+            echo
+            echo "### libstable_diffusion_core.so"
+            echo
+            A="$OFF/lib/arm64-v8a/libstable_diffusion_core.so"
+            B="$OWN/jniLibs/arm64-v8a/libstable_diffusion_core.so"
+            echo "- official: $(stat -c %s "$A") bytes, sha256 $(sha256sum "$A" | cut -c1-16)…"
+            echo "- rebuilt:  $(stat -c %s "$B") bytes, sha256 $(sha256sum "$B" | cut -c1-16)…"
+            if cmp -s "$A" "$B"; then echo "- **bit-identical**"; else echo "- not bit-identical (expected without a reproducible-build setup)"; fi
+            readelf --dyn-syms -W "$A" | awk 'NR>3{print $5, $7=="UND"?"import":"export", $8}' | sort -u > "$RUNNER_TEMP/a.syms"
+            readelf --dyn-syms -W "$B" | awk 'NR>3{print $5, $7=="UND"?"import":"export", $8}' | sort -u > "$RUNNER_TEMP/b.syms"
+            if diff -q "$RUNNER_TEMP/a.syms" "$RUNNER_TEMP/b.syms" > /dev/null; then
+              echo "- dynamic symbol table (imports and exports): **identical**"
+            else
+              echo "- dynamic symbol table differs:"
+              echo '```'
+              diff "$RUNNER_TEMP/a.syms" "$RUNNER_TEMP/b.syms" | head -50
+              echo '```'
+            fi
+            readelf -d -W "$A" | grep NEEDED | sort > "$RUNNER_TEMP/a.need"
+            readelf -d -W "$B" | grep NEEDED | sort > "$RUNNER_TEMP/b.need"
+            if diff -q "$RUNNER_TEMP/a.need" "$RUNNER_TEMP/b.need" > /dev/null; then
+              echo "- linked libraries: **identical**"
+            else
+              echo "- linked libraries differ"
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  apk:
+    name: APK
+    needs: native
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-from-source
+          path: native-out
+
+      - name: Native libraries built from source into the tree
+        run: |
+          mkdir -p app/src/main/jniLibs app/src/main/assets
+          cp -r native-out/jniLibs/. app/src/main/jniLibs/
+          cp -r native-out/assets/. app/src/main/assets/
+          ls -l app/src/main/jniLibs/arm64-v8a app/src/main/assets/qnnlibs app/src/main/assets/ditlibs
+
+      - name: Own package id (installs next to the official app)
+        run: |
+          sed -i 's/applicationId = "io.github.xororz.localdream"/applicationId = "io.github.xororz.localdream"\n        applicationIdSuffix = ".privacytest"/' app/build.gradle.kts
+          grep -n applicationIdSuffix app/build.gradle.kts
+
+      - name: Throwaway signing key
+        run: |
+          keytool -genkeypair -keystore "$RUNNER_TEMP/test.jks" -storepass test-pass -keypass test-pass \
+            -alias test -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=Local Dream source build" -noprompt
+          {
+            echo "ORG_GRADLE_PROJECT_RELEASE_STORE_FILE=$RUNNER_TEMP/test.jks"
+            echo "ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD=test-pass"
+            echo "ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS=test"
+            echo "ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD=test-pass"
+          } >> "$GITHUB_ENV"
+
+      - name: Checks
+        run: ./gradlew --no-daemon ktlintCheck detekt testBasicDebugUnitTest
+
+      - name: Build release APKs (basic and filter)
+        run: ./gradlew --no-daemon assembleBasicRelease assembleFilterRelease
+
+      - name: Collect APKs
+        run: |
+          mkdir -p out
+          find app/build/outputs/apk -name '*.apk' -exec cp {} out/ \;
+          cd out
+          for f in *.apk; do mv "$f" "${f%.apk}_fromsource.apk"; done
+          sha256sum *.apk | tee SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apks-from-source
+          path: out/
+
+      - name: Publish as a pre-release in this fork
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="fromsource-${GITHUB_SHA::7}"
+          NOTES="Personal test build: upstream $UPSTREAM_TAG + privacy-options (PR #352) + security-hardening.
+          Everything is built from this commit's sources by GitHub Actions, including the native backend
+          and the DiT engine. Only Qualcomm's QNN runtime libraries are prebuilt; they come from Qualcomm's
+          public SDK $QNN_VERSION download. See the workflow run for the build log.
+          Package id io.github.xororz.localdream.privacytest, installs next to the official app.
+          Signed with a throwaway key: uninstall before installing a newer test build.
+          Licensed CC BY-NC 4.0 like upstream; non-commercial use only."
+          gh release create "$TAG" out/*.apk out/SHA256SUMS --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --title "Source build ${GITHUB_SHA::7}" --notes "$NOTES"
