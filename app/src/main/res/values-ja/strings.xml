@@ -12,6 +12,10 @@
     <string name="listen_on_all_addresses">LAN からのアクセスを許可</string>
     <string name="listen_on_all_addresses_hint">同じネットワーク上の他のデバイスからバックエンド（ポート 8081）にアクセスできるようにします。オフの場合はローカルのみ。</string>
     <string name="lan_access_code">他のデバイス用アクセスコード: %1$s</string>
+    <string name="secure_screen">スクリーンショット保護</string>
+    <string name="secure_screen_hint">スクリーンショットと画面録画を禁止し、履歴画面でアプリのプレビューを隠します</string>
+    <string name="forget_history">履歴を保持しない</string>
+    <string name="forget_history_hint">アプリが新しく起動するたび（履歴画面からスワイプして閉じた後や端末の再起動後など）、生成した画像とそのプロンプト、入力画像を削除します。ギャラリーに保存した画像は残ります。</string>
     <string name="tag_autocomplete">タグ補完</string>
     <string name="tag_autocomplete_hint">プロンプト入力中にタグを補完・修正します</string>
     <string name="tag_alias_label">別名</string>

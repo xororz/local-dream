@@ -1,11 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
+   Backup rules for Android 11 and lower (Auto Backup).
    See https://developer.android.com/guide/topics/data/autobackup
    for details.
-   Note: This file is ignored for devices older that API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+   Note: This file is ignored on Android 12 and newer, which use
+   data_extraction_rules.xml instead. Keep both files in sync.
 -->
 <full-backup-content>
     <!-- Where models are kept is a fact about this device (ModelStorage). -->
     <exclude domain="sharedpref" path="model_storage.xml"/>
+
+    <!-- Generated images, prompts and input images are private and can be
+         large: keep them out of backups. -->
+    <exclude domain="file" path="history"/>
+    <exclude domain="file" path="tmp.txt"/>
+    <exclude domain="file" path="mask.txt"/>
+    <exclude domain="file" path="ultrafix.txt"/>
+    <exclude domain="file" path="dit_references.json"/>
+    <exclude domain="file" path="datastore/generation_prefs.preferences_pb"/>
+    <exclude domain="database" path="local_dream.db"/>
+    <exclude domain="database" path="local_dream.db-shm"/>
+    <exclude domain="database" path="local_dream.db-wal"/>
+    <exclude domain="database" path="local_dream.db-journal"/>
 </full-backup-content>

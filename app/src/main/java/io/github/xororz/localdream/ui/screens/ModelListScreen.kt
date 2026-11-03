@@ -95,6 +95,7 @@ import io.github.xororz.localdream.ui.theme.ThemePreset
 import io.github.xororz.localdream.ui.theme.scheme
 import io.github.xororz.localdream.utils.BackendAuth
 import io.github.xororz.localdream.utils.LogCapture
+import io.github.xororz.localdream.utils.PrivacySettings
 import io.github.xororz.localdream.utils.TempCleaner
 import java.io.BufferedOutputStream
 import java.io.File
@@ -1462,6 +1463,12 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                             },
                                     )
                                 }
+                                var secureScreen by remember {
+                                    mutableStateOf(PrivacySettings.isSecureScreenEnabled(context))
+                                }
+                                var forgetHistory by remember {
+                                    mutableStateOf(PrivacySettings.isForgetHistoryEnabled(context))
+                                }
                                 val tagRepository =
                                     remember { TagAutocompleteRepository.getInstance(context) }
                                 val tagDictState by tagRepository.state.collectAsState()
@@ -1823,6 +1830,22 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                                     )
                                 }
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                                SwitchSettingRow(
+                                    title = stringResource(R.string.secure_screen),
+                                    description = stringResource(R.string.secure_screen_hint),
+                                    checked = secureScreen,
+                                    onCheckedChange = {
+                                        secureScreen = it
+                                        PrivacySettings.setSecureScreenEnabled(context, it)
+                                    },
+                                    title = stringResource(R.string.forget_history),
+                                    description = stringResource(R.string.forget_history_hint),
+                                    checked = forgetHistory,
+                                        forgetHistory = it
+                                        PrivacySettings.setForgetHistoryEnabled(context, it)
                             }
                         }
                     }
