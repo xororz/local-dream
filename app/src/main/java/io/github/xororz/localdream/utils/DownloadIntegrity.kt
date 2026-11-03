@@ -21,8 +21,7 @@ object DownloadIntegrity {
 
     class InsecureUrlException(url: String) : IOException("Refusing non-HTTPS download: $url")
 
-    class ChecksumMismatchException(expected: String, actual: String) :
-        IOException("SHA-256 mismatch: expected $expected, got $actual")
+    class ChecksumMismatchException(expected: String, actual: String) : IOException("SHA-256 mismatch: expected $expected, got $actual")
 
     fun requireHttps(url: String) {
         if (!url.startsWith("https://", ignoreCase = true)) throw InsecureUrlException(url)

@@ -130,10 +130,12 @@ class RemoteRepository private constructor(private val context: Context) {
         BackendAuth.setRemoteCode(host, code)
         when (client.checkAccess()) {
             true -> Unit
+
             false -> {
                 BackendAuth.setRemoteCode(host, null)
                 return RemoteConnectResult.Unauthorized
             }
+
             null -> {
                 BackendAuth.setRemoteCode(host, null)
                 return RemoteConnectResult.Unreachable

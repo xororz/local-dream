@@ -232,8 +232,8 @@ class RemoteHostServer(
 }
 
 /** True when no code is required, or [authorization] carries exactly that code. */
-internal fun isAuthorized(authorization: String?, code: String?): Boolean =
-    code.isNullOrEmpty() || BackendAuth.matches(authorization, code)
+internal fun isAuthorized(authorization: String?, code: String?): Boolean = code.isNullOrEmpty() ||
+    BackendAuth.matches(authorization, code)
 
 // The CORS headers mirror the native backend's default headers (set_default_headers
 // in main.cpp) so a browser page can drive the control API exactly the way it
