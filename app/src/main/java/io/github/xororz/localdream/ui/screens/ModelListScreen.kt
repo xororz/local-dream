@@ -1841,11 +1841,19 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                         secureScreen = it
                                         PrivacySettings.setSecureScreenEnabled(context, it)
                                     },
+                                )
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                                SwitchSettingRow(
                                     title = stringResource(R.string.forget_history),
                                     description = stringResource(R.string.forget_history_hint),
                                     checked = forgetHistory,
+                                    onCheckedChange = {
                                         forgetHistory = it
                                         PrivacySettings.setForgetHistoryEnabled(context, it)
+                                    },
+                                )
                             }
                         }
                     }
