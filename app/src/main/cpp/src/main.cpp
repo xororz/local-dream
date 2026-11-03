@@ -502,8 +502,11 @@ static void registerGenerateEndpoint(httplib::Server &svr, Pipeline *pipeline) {
           pipeline->supportsImg2Img(), pipeline->supportsReferenceEditing(),
           pipeline->supportsUltrafix()));
 
-      std::cout << "Req Rcvd: P:" << req->prompt
-                << " NP:" << req->negative_prompt << " S:" << req->steps
+      // Prompt texts stay out of the log (it ends up in logcat); their
+      // lengths are enough to tell requests apart while debugging.
+      std::cout << "Req Rcvd: P:" << req->prompt.size() << " chars"
+                << " NP:" << req->negative_prompt.size() << " chars"
+                << " S:" << req->steps
                 << " CFG:" << req->cfg << " Seed:" << req->seed
                 << " Size:" << req->width << "x" << req->height
                 << " Img2Img:" << req->img2img << " Mask:" << req->has_mask

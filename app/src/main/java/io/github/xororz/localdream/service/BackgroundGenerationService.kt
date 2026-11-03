@@ -130,7 +130,6 @@ class BackgroundGenerationService : Service() {
         }
 
         val prompt = intent?.getStringExtra("prompt")
-        Log.d("GenerationService", "prompt: $prompt")
 
         if (prompt == null) {
             Log.e("GenerationService", "empty prompt")

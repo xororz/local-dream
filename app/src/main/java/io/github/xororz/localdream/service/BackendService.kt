@@ -682,7 +682,7 @@ class BackendService : Service() {
                 proc.inputStream.bufferedReader().use { reader ->
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
-                        Log.i(TAG, "Backend: $line")
+                        Log.i(TAG, "Backend: ${redactBackendLine(line!!)}")
                     }
                 }
                 proc.waitFor()
@@ -756,3 +756,17 @@ class BackendService : Service() {
         updateServing(null)
     }
 }
+
+// Backend builds from before the prompt was dropped from the request log
+// print it as "Req Rcvd: P:<prompt> NP:<negative> S:...". Logcat ends up in
+// bug reports and log captures, so cut the prompt texts out before logging.
+internal fun redactBackendLine(line: String): String {
+    if (!line.startsWith(REQ_LOG_PREFIX)) return line
+    // The prompts are free text, so take the last " S:<steps> CFG:" as the
+    // start of the parameters rather than the first " S:".
+    val rest = REQ_LOG_PARAMS.findAll(line).lastOrNull()?.let { line.substring(it.range.first) }.orEmpty()
+    return "$REQ_LOG_PREFIX<redacted>$rest"
+}
+
+private const val REQ_LOG_PREFIX = "Req Rcvd: P:"
+private val REQ_LOG_PARAMS = Regex(" S:\\d+ CFG:")
