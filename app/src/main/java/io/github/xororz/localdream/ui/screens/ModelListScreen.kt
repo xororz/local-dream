@@ -71,6 +71,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -92,6 +93,7 @@ import io.github.xororz.localdream.ui.theme.LocalThemeController
 import io.github.xororz.localdream.ui.theme.Motion
 import io.github.xororz.localdream.ui.theme.ThemePreset
 import io.github.xororz.localdream.ui.theme.scheme
+import io.github.xororz.localdream.utils.BackendAuth
 import io.github.xororz.localdream.utils.LogCapture
 import io.github.xororz.localdream.utils.TempCleaner
 import java.io.BufferedOutputStream
@@ -1808,6 +1810,19 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                         }
                                     },
                                 )
+                                AnimatedVisibility(visible = listenOnAllAddresses) {
+                                    // Other devices must send this code; see BackendAuth.
+                                    Text(
+                                        stringResource(
+                                            R.string.lan_access_code,
+                                            BackendAuth.format(BackendAuth.localCode(context)),
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                                    )
+                                }
                             }
                         }
                     }

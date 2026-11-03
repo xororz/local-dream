@@ -6,5 +6,11 @@ import okhttp3.OkHttpClient
 // derived via newBuilder() so they share this instance's dispatcher and
 // connection pool instead of each spawning their own thread pools.
 object Http {
-    val client: OkHttpClient by lazy { OkHttpClient() }
+    // BackendAuth adds the access code to requests for the local backend and
+    // for paired hosts; derived clients inherit the interceptor.
+    val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .addInterceptor(BackendAuth.interceptor)
+            .build()
+    }
 }
