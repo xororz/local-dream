@@ -27,6 +27,7 @@ env:
   NDK_CORE: 28.0.13004108
   NDK_DIT: 29.0.14206865
   HEXAGON_IMAGE: ghcr.io/snapdragon-toolchain/arm64-android:v0.8
+  RUST_VERSION: 1.86.0
 
 jobs:
   native:
@@ -41,7 +42,10 @@ jobs:
       - name: Toolchains
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build > /dev/null
-          rustup target add aarch64-linux-android
+          # tokenizers-c does not build with current Rust (the
+          # dangerous_implicit_autorefs lint is an error since 1.89).
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target aarch64-linux-android
+          rustup default "$RUST_VERSION"
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses > /dev/null || true
           "$SDKM" --install "ndk;$NDK_CORE" "ndk;$NDK_DIT" > /dev/null
@@ -109,7 +113,10 @@ jobs:
       - name: Toolchains
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build > /dev/null
-          rustup target add aarch64-linux-android
+          # tokenizers-c does not build with current Rust (the
+          # dangerous_implicit_autorefs lint is an error since 1.89).
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target aarch64-linux-android
+          rustup default "$RUST_VERSION"
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses > /dev/null || true
           "$SDKM" --install "ndk;$NDK_CORE" > /dev/null
