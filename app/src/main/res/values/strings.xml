@@ -236,6 +236,8 @@
 
     <!-- Error Messages -->
     <string name="error_download_failed">Download failed: %s</string>
+    <string name="error_download_insecure">Download blocked: models are only downloaded over HTTPS. Check the download address in the settings.</string>
+    <string name="error_download_checksum">Download failed: the file does not match the checksum published for it and was deleted. Try again or use another download source.</string>
     <string name="error_request_failed">Request failed: %s</string>
     <string name="unknown_error">unknown error</string>
 

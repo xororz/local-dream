@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import io.github.xororz.localdream.R
 import io.github.xororz.localdream.data.Model
 import io.github.xororz.localdream.data.ModelStorage
+import io.github.xororz.localdream.utils.DownloadIntegrity
 import io.github.xororz.localdream.utils.Http
 import java.io.File
 import java.io.FileOutputStream
@@ -39,6 +40,8 @@ class ModelDownloadService : Service() {
     private val client = Http.client.newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        // Never follow a redirect from HTTPS down to plain HTTP.
+        .followSslRedirects(false)
         .build()
 
     companion object {
@@ -325,6 +328,7 @@ class ModelDownloadService : Service() {
 
     /** Published size of a remote file, or -1 when the server does not say. */
     private fun remoteSize(url: String): Long {
+        if (!url.startsWith("https://", ignoreCase = true)) return -1L
         val request = Request.Builder().url(url).head().build()
         return runCatching {
             client.newCall(request).execute().use { response ->
@@ -345,6 +349,11 @@ class ModelDownloadService : Service() {
         packageOffset: Long = 0L,
         packageTotal: Long = 0L,
     ) = withContext(Dispatchers.IO) {
+        try {
+            DownloadIntegrity.requireHttps(url)
+        } catch (e: DownloadIntegrity.InsecureUrlException) {
+            throw Exception(getString(R.string.error_download_insecure), e)
+        }
         val request = Request.Builder()
             .url(url)
             .build()
@@ -353,6 +362,12 @@ class ModelDownloadService : Service() {
             if (!response.isSuccessful) {
                 throw Exception(getString(R.string.error_download_failed, response.code.toString()))
             }
+
+            val expectedSha256 = DownloadIntegrity.expectedSha256(response)
+            if (expectedSha256 == null) {
+                Log.i(TAG, "No SHA-256 published for ${destFile.name}, checking the size only")
+            }
+            val digest = DownloadIntegrity.newDigest()
 
             val body = response.body ?: throw Exception("Response body is null")
             val totalBytes = body.contentLength()
@@ -366,6 +381,7 @@ class ModelDownloadService : Service() {
 
                     while (input.read(buffer).also { bytes = it } != -1) {
                         output.write(buffer, 0, bytes)
+                        digest.update(buffer, 0, bytes)
                         downloadedBytes += bytes
 
                         val currentTime = System.currentTimeMillis()
@@ -398,6 +414,19 @@ class ModelDownloadService : Service() {
                 throw Exception(
                     getString(R.string.error_download_failed, "$downloadedBytes/$totalBytes"),
                 )
+            }
+
+            if (expectedSha256 != null) {
+                val actual = DownloadIntegrity.hex(digest.digest())
+                if (actual != expectedSha256) {
+                    destFile.delete()
+                    Log.e(TAG, "SHA-256 mismatch for ${destFile.name}: expected $expectedSha256, got $actual")
+                    throw Exception(
+                        getString(R.string.error_download_checksum),
+                        DownloadIntegrity.ChecksumMismatchException(expectedSha256, actual),
+                    )
+                }
+                Log.i(TAG, "SHA-256 verified for ${destFile.name}")
             }
         }
     }

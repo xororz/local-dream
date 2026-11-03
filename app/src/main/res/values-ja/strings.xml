@@ -227,6 +227,8 @@
 
     <!-- Error Messages -->
     <string name="error_download_failed">ダウンロード失敗: %s</string>
+    <string name="error_download_insecure">ダウンロードをブロックしました：モデルは HTTPS でのみダウンロードされます。設定のダウンロード先を確認してください。</string>
+    <string name="error_download_checksum">ダウンロード失敗：ファイルが公開されているチェックサムと一致しないため削除しました。再試行するか、別のダウンロード元を使用してください。</string>
     <string name="error_request_failed">リクエスト失敗: %s</string>
     <string name="unknown_error">不明なエラー</string>
 
