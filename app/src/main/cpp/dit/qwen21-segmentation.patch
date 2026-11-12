@@ -1,0 +1,38 @@
+diff --git a/src/model/diffusion/qwen_image_2_1.hpp b/src/model/diffusion/qwen_image_2_1.hpp
+--- a/src/model/diffusion/qwen_image_2_1.hpp
++++ b/src/model/diffusion/qwen_image_2_1.hpp
+@@ -1,6 +1,10 @@
+ #ifndef __SD_MODEL_DIFFUSION_QWEN_IMAGE_2_1_H__
+ #define __SD_MODEL_DIFFUSION_QWEN_IMAGE_2_1_H__
+ 
++#include <cstdlib>
++#include <cstring>
++
++#include "core/ggml_graph_cut.h"
+ #include "model/diffusion/qwen_image.hpp"
+ 
+ namespace Qwen {
+@@ -367,9 +371,23 @@
+                 }
+                 joint = joint == nullptr ? h : ggml_concat(ctx->ggml_ctx, joint, h, 1);
+             }
++            // Only the SM8650/v75 DiT profile opts in; other devices keep
++            // their original graph and memory-planning behavior.
++            const char* compat = std::getenv("GGML_HEXAGON_FP8_COMPAT");
++            const bool v75_compat = compat && std::strcmp(compat, "1") == 0;
++            if (v75_compat) {
++                // Retain shared activations across cuts, not their projection
++                // weights. Modulation views refer to this cached base tensor.
++                sd::ggml_graph_cut::mark_graph_cut(time, "qwen21.prelude", "time");
++                sd::ggml_graph_cut::mark_graph_cut(modulation, "qwen21.prelude", "modulation");
++                sd::ggml_graph_cut::mark_graph_cut(joint, "qwen21.prelude", "joint");
++            }
+             for (int i = 0; i < config.num_layers; ++i) {
+                 auto block = std::dynamic_pointer_cast<QwenImage21TransformerBlock>(blocks["transformer_blocks." + std::to_string(i)]);
+                 joint      = block->forward(ctx, joint, mod, pe, token_indices, zero_shift, layout, masks);
++                if (v75_compat) {
++                    sd::ggml_graph_cut::mark_graph_cut(joint, "qwen21.blocks." + std::to_string(i), "joint");
++                }
+             }
+             joint      = ggml_ext_slice(ctx->ggml_ctx, joint, 1, layout.prefix_length, joint->ne[1]);
+             auto scale = std::dynamic_pointer_cast<Linear>(blocks["norm_out.linear"])->forward(ctx, ggml_ext_chunk(ctx->ggml_ctx, time, 2, 1)[0]);

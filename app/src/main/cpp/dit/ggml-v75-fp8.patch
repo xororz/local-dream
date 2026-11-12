@@ -1,0 +1,429 @@
+diff --git a/src/ggml-hexagon/ggml-hexagon.cpp b/src/ggml-hexagon/ggml-hexagon.cpp
+--- a/src/ggml-hexagon/ggml-hexagon.cpp
++++ b/src/ggml-hexagon/ggml-hexagon.cpp
+@@ -82,6 +82,7 @@
+ 
+ static ggml_hexagon_device_config opt_device_configs[GGML_HEXAGON_MAX_SESSIONS];
+ 
++static bool   opt_fp8_compat = false; // enable only on detected HTP v75
+ static int    opt_arch    = 0; // autodetect
+ static size_t opt_ndev    = 1;
+ static size_t opt_nhvx    = 0; // use all
+@@ -4360,6 +4361,7 @@
+     size_t vtcm_budget,
+     struct htp_mm_kernel_params * kparams
+ ) {
++    if (opt_fp8_compat && wtype == GGML_TYPE_F8_E4M3) wtype = HTP_TYPE_F8_E4M3_COMPAT;
+     const int aligned_tile_size = htp_mm_get_weight_aligned_tile_size(wtype);
+     const bool pipeline = is_matmul_id ? false : htp_mm_hmx_pipeline(ne11);
+     const int n_threads = (int)sess->n_threads;
+@@ -5031,7 +5033,7 @@
+         case GGML_TYPE_IQ4_NL:
+         case GGML_TYPE_MXFP4:
+         case GGML_TYPE_F8_E4M3:
+-            if (src0->type == GGML_TYPE_F8_E4M3 && (opt_arch < 79 || src1->type != GGML_TYPE_F32)) {
++            if (src0->type == GGML_TYPE_F8_E4M3 && ((opt_arch < 79 && !opt_fp8_compat) || src1->type != GGML_TYPE_F32)) {
+                 return false;
+             }
+             if (src0->ne[0] % 32) {
+@@ -5098,7 +5100,7 @@
+     if (!supported_weight || !src1 || !src2 ||
+         src1->type != GGML_TYPE_F32 || src2->type != GGML_TYPE_F32 ||
+         dst->type != GGML_TYPE_F32 ||
+-        (src0->type == GGML_TYPE_F8_E4M3 && opt_arch < 79)) {
++        (src0->type == GGML_TYPE_F8_E4M3 && opt_arch < 79 && !opt_fp8_compat)) {
+         return false;
+     }
+     if (src0->ne[0] != src1->ne[0] + src2->ne[0] || src0->ne[1] != dst->ne[0] ||
+@@ -7731,7 +7733,7 @@
+     }
+ }
+ 
+-static void ggml_hexagon_init(ggml_backend_reg * reg) {
++static bool ggml_hexagon_init(ggml_backend_reg * reg) {
+     // Basic sanity checks to make sure definitions match
+     static_assert((unsigned int) HTP_TYPE_Q4_0 == (unsigned int) GGML_TYPE_Q4_0,
+                   "please update hexagon_type to match ggml_type");
+@@ -7788,6 +7790,14 @@
+         opt_arch = strtoul(str_arch, NULL, 0);
+     }
+ 
++    const char *fp8_compat = getenv("GGML_HEXAGON_FP8_COMPAT");
++    if (fp8_compat && strcmp(fp8_compat, "1") == 0) {
++        // Do not register HTP0 for this profile unless FastRPC detected v75.
++        if (str_arch || opt_arch != 75) {
++            return false;
++        }
++        opt_fp8_compat = true;
++    }
+     size_t MiB = 1024 * 1024;
+ 
+     // Update vmem default
+@@ -7802,6 +7812,10 @@
+     opt_optrace   = str_optrace  ? strtoul(str_optrace, NULL, 0)          : (opt_opbatch * 256);
+     opt_oppoll    = str_oppoll   ? strtoul(str_oppoll,  NULL, 0)          : opt_oppoll;
+     opt_opfusion  = str_opfusion ? atoi(str_opfusion)                     : opt_opfusion;
++    if (opt_fp8_compat) {
++        // Fused output scales can bypass the FP16 intermediate range guard.
++        opt_opfusion = 0;
++    }
+     opt_profile   = str_profile  ? atoi(str_profile)                      : 0;
+     opt_etm       = str_etm      ? atoi(str_etm)                          : 0;
+     opt_nhvx      = str_nhvx     ? strtoul(str_nhvx, NULL, 0)             : opt_nhvx;
+@@ -8022,6 +8036,7 @@
+     }
+ 
+     reg->context = new ggml_hexagon_registry(reg);
++    return true;
+ }
+ 
+ static const struct ggml_backend_reg_i ggml_backend_hexagon_reg_i = {
+@@ -8047,7 +8062,9 @@
+                 return NULL;
+             }
+ 
+-            ggml_hexagon_init(&reg);
++            if (!ggml_hexagon_init(&reg)) {
++                return NULL;
++            }
+         }
+ 
+         initialized = true;
+diff --git a/src/ggml-hexagon/htp/fp8-compat.h b/src/ggml-hexagon/htp/fp8-compat.h
+new file mode 100644
+--- /dev/null
++++ b/src/ggml-hexagon/htp/fp8-compat.h
+@@ -0,0 +1,25 @@
++#ifndef HTP_FP8_COMPAT_H
++#define HTP_FP8_COMPAT_H
++#include <stdint.h>
++#include <stddef.h>
++// Power-of-two protection for the transient FP16 HMX result, restored in FP32.
++#define HTP_FP8_HMX_DOWNSCALE (1.0f / 256.0f)
++#define HTP_FP8_HMX_RESTORE 256.0f
++static inline uint16_t htp_fp8_to_fp16_bits(uint8_t x) {
++    const uint16_t sign = (uint16_t)(x & 0x80) << 8;
++    unsigned e = (x >> 3) & 15, m = x & 7;
++    if (e == 15 && m == 7) return sign | 0x7e00;
++    if (e) return sign | (uint16_t)((e + 8) << 10) | (uint16_t)(m << 7);
++    if (!m) return sign;
++    unsigned exponent = 9;
++    while (!(m & 8)) { m <<= 1; --exponent; }
++    return sign | (uint16_t)(exponent << 10) | (uint16_t)((m & 7) << 7);
++}
++static inline size_t htp_fp8_tile_offset(unsigned n, unsigned k) {
++    static const unsigned lane[4] = {0, 2, 1, 3};
++    return (k / 4 * 4 + n / 8) * 32 + n % 8 * 4 + lane[k % 4];
++}
++static inline size_t htp_fp16_tile_offset(unsigned n, unsigned k) {
++    return k / 2 * 64 + n * 2 + k % 2;
++}
++#endif
+diff --git a/src/ggml-hexagon/htp/hmx-mm-kernels-tiled.h b/src/ggml-hexagon/htp/hmx-mm-kernels-tiled.h
+--- a/src/ggml-hexagon/htp/hmx-mm-kernels-tiled.h
++++ b/src/ggml-hexagon/htp/hmx-mm-kernels-tiled.h
+@@ -1,5 +1,8 @@
+ #include "hmx-utils.h"
+ #include "hmx-queue.h"
++#if __HEXAGON_ARCH__ == 75
++#include "fp8-compat-hvx.h"
++#endif
+ 
+ // MXFP4 dequantization LUT: maps 4-bit index to fp16 mantissa value
+ // kvalues: 0, 0.5, 1, 1.5, 2, 3, 4, 6, 0, -0.5, -1, -1.5, -2, -3, -4, -6
+@@ -32,6 +35,17 @@
+     size_t                    row_stride;
+     uint32_t                  weight_type;
+ } tiled_dequantize_state_t;
++
++#if __HEXAGON_ARCH__ == 75
++static void dequantize_tiled_weight_to_fp16_task_f8_compat(
++        const tiled_dequantize_state_t *state, uint32_t start_tile, uint32_t end_tile) {
++    for (uint32_t t = start_tile; t < end_tile; ++t) {
++        const uint8_t *src = state->src + t * state->aligned_tile_size;
++        uint16_t *dst = (uint16_t *)(state->dst + t * HTP_MM_HMX_TILE_N_ELMS);
++        htp_fp8_tile_to_fp16(dst, src);
++    }
++}
++#endif
+ 
+ // Dequantize a single tile from tiled weight data (already in VTCM) to tile-major FP16.
+ static void dequantize_tiled_weight_to_fp16_task_q4_0(
+diff --git a/src/ggml-hexagon/htp/htp-ops.h b/src/ggml-hexagon/htp/htp-ops.h
+--- a/src/ggml-hexagon/htp/htp-ops.h
++++ b/src/ggml-hexagon/htp/htp-ops.h
+@@ -35,7 +35,8 @@
+     HTP_TYPE_MXFP4_TILED,
+     HTP_TYPE_F8_E4M3_TILED,
+ 
+-    HTP_TYPE_INVALID
++    HTP_TYPE_INVALID,
++    HTP_TYPE_F8_E4M3_COMPAT, // FP8 DDR tiles, transient FP16 HMX tiles (v75)
+ };
+ 
+ // Constats for internal types
+diff --git a/src/ggml-hexagon/htp/matmul-ops.c b/src/ggml-hexagon/htp/matmul-ops.c
+--- a/src/ggml-hexagon/htp/matmul-ops.c
++++ b/src/ggml-hexagon/htp/matmul-ops.c
+@@ -1743,6 +1743,9 @@
+ DEQUANTIZE_WORKER_LOOP_IMPL(iq4_nl)
+ DEQUANTIZE_WORKER_LOOP_IMPL(mxfp4)
+ DEQUANTIZE_WORKER_LOOP_IMPL(q8_0)
++#if __HEXAGON_ARCH__ == 75
++DEQUANTIZE_WORKER_LOOP_IMPL(f8_compat)
++#endif
+ 
+ static void convert_f16_worker_loop(unsigned int n, unsigned int i, void *data) {
+     tiled_dequantize_state_t *state = (tiled_dequantize_state_t *)data;
+@@ -2592,6 +2595,20 @@
+         (activation1 && !hex_is_aligned(activation1, VLEN))) { return -1; }
+     if (activation1 && (k0 <= 0 || k0 >= k || k0 % HTP_MM_HMX_TILE_N_COLS != 0)) { return -1; }
+ 
++#if __HEXAGON_ARCH__ == 75
++    if (weight_type == HTP_TYPE_F8_E4M3) {
++        static atomic_int conversion_checked = 0;
++        int checked = atomic_load(&conversion_checked);
++        if (checked == 0) {
++            checked = fp8_compat_vector_selftest() ? 1 : -1;
++            atomic_store(&conversion_checked, checked);
++        }
++        if (checked < 0) {
++            return -1;
++        }
++        weight_type = HTP_TYPE_F8_E4M3_COMPAT;
++    }
++#endif
+     size_t row_stride = htp_mm_get_tiled_row_stride(weight_type, k);
+     if (row_stride == 0) {
+         return -1;
+@@ -2608,6 +2625,9 @@
+         case HTP_TYPE_F16:    dequant_worker_fn = convert_f16_worker_loop; break;
+         case HTP_TYPE_F32:    dequant_worker_fn = quantize_f32_worker_loop; break;
+         case HTP_TYPE_F8_E4M3: break;
++#if __HEXAGON_ARCH__ == 75
++        case HTP_TYPE_F8_E4M3_COMPAT: dequant_worker_fn = dequantize_tiled_worker_loop_f8_compat; break;
++#endif
+         default:
+             return -1;
+     }
+@@ -3711,8 +3731,13 @@
+     uint32_t src2_stride = 0;
+     size_t src2_nb2 = 0;
+     size_t src2_nb3 = 0;
++#if __HEXAGON_ARCH__ == 75
++    float hmx_scale = src0->type == HTP_TYPE_F16 ? 1.0f / 16.0f : 1.0f;
++    float output_scale = 1.0f / hmx_scale;
++#else
+     const float hmx_scale = src0->type == HTP_TYPE_F16 ? 1.0f / 16.0f : 1.0f;
+     float output_scale = src0->type == HTP_TYPE_F8_E4M3 ? 256.0f : 1.0f / hmx_scale;
++#endif
+     const float * channel_scales = NULL;
+     if (kparams->scale_flags != 0) {
+         const int status = hmx_mm_apply_output_scales(octx, kparams, 2, (uint32_t) n_valid, &output_scale, &channel_scales);
+@@ -3725,6 +3750,15 @@
+         src2_nb2 = (src2->ne[2] == 1) ? 0 : src2->nb[2];
+         src2_nb3 = (src2->ne[3] == 1) ? 0 : src2->nb[3];
+     }
++
++#if __HEXAGON_ARCH__ == 75
++    if (src0->type == HTP_TYPE_F8_E4M3 && channel_scales == NULL) {
++        // The accumulator is wider than the intermediate FP16 output. Preserve
++        // headroom before that conversion, then restore after the FP32 readback.
++        hmx_scale = HTP_FP8_HMX_DOWNSCALE;
++        output_scale *= HTP_FP8_HMX_RESTORE;
++    }
++#endif
+ 
+     const int dst_stride = (int)(dst->nb[1] / sizeof(float));
+     float       * dst_ptr = (float *)       dst->data  + m_start * dst_stride;
+@@ -3828,13 +3862,26 @@
+         return HTP_STATUS_INVAL_PARAMS;
+     }
+ 
++#if __HEXAGON_ARCH__ == 75
++    float output_scale = 1.0f;
++#else
+     float output_scale = weight->type == HTP_TYPE_F8_E4M3 ? 256.0f : 1.0f;
++#endif
+     const float * channel_scales = NULL;
+     const int scale_status = hmx_mm_apply_output_scales(octx, kparams, 3, (uint32_t) weight->ne[1], &output_scale, &channel_scales);
+     if (scale_status != HTP_STATUS_OK) {
+         return scale_status;
+     }
+ 
++#if __HEXAGON_ARCH__ == 75
++    float hmx_scale = 1.0f;
++    if (weight->type == HTP_TYPE_F8_E4M3 && channel_scales == NULL) {
++        hmx_scale = HTP_FP8_HMX_DOWNSCALE;
++        output_scale *= HTP_FP8_HMX_RESTORE;
++    }
++#else
++    const float hmx_scale = 1.0f;
++#endif
+     const int ret = hmx_mm_2d_f32(
+         octx->ctx, (float *) dst->data, NULL, (const float *) src0->data,
+         (const uint8_t *) weight->data, (int) src0->ne[1], k, (int) weight->ne[1],
+@@ -3843,7 +3890,7 @@
+         kparams->m_chunk, kparams->n_chunk, kparams->pipeline,
+         kparams->n_threads, kparams->n_act_threads,
+         &kparams->div_n_act_threads, &kparams->div_ne00_padded,
+-        kparams->tile_size, kparams->aligned_tile_size, kparams->vtcm_size, output_scale, 1.0f,
++        kparams->tile_size, kparams->aligned_tile_size, kparams->vtcm_size, output_scale, hmx_scale,
+         channel_scales, (const float *) src1->data, (int) (src1->nb[1] / sizeof(float)), k0);
+     return ret == 0 ? HTP_STATUS_OK : HTP_STATUS_INTERNAL_ERR;
+ }
+diff --git a/src/ggml-hexagon/htp/matmul-ops.h b/src/ggml-hexagon/htp/matmul-ops.h
+--- a/src/ggml-hexagon/htp/matmul-ops.h
++++ b/src/ggml-hexagon/htp/matmul-ops.h
+@@ -210,6 +210,7 @@
+         case HTP_TYPE_MXFP4:
+             return HTP_MM_WEIGHT_TILE_SIZE_MXFP4;
+         case HTP_TYPE_F8_E4M3:
++        case HTP_TYPE_F8_E4M3_COMPAT:
+             return HTP_MM_WEIGHT_TILE_SIZE_F8_E4M3;
+         default:
+             return 0;
+@@ -228,6 +229,7 @@
+         case HTP_TYPE_MXFP4:
+             return HTP_MM_WEIGHT_ALIGNED_TILE_SIZE_MXFP4;
+         case HTP_TYPE_F8_E4M3:
++        case HTP_TYPE_F8_E4M3_COMPAT:
+             return HTP_MM_WEIGHT_ALIGNED_TILE_SIZE_F8_E4M3;
+         default:
+             return 0;
+@@ -271,6 +273,7 @@
+         case HTP_TYPE_MXFP4:
+             return (size_t) nb * htp_mm_get_weight_tile_size(weight_type);
+         case HTP_TYPE_F8_E4M3:
++        case HTP_TYPE_F8_E4M3_COMPAT:
+             return (size_t) k;
+         case HTP_TYPE_F16:
+             return (size_t) k * sizeof(__fp16);
+diff --git a/src/ggml-hexagon/htp/fp8-compat-hvx.h b/src/ggml-hexagon/htp/fp8-compat-hvx.h
+new file mode 100644
+--- /dev/null
++++ b/src/ggml-hexagon/htp/fp8-compat-hvx.h
+@@ -0,0 +1,60 @@
++#ifndef HTP_FP8_COMPAT_HVX_H
++#define HTP_FP8_COMPAT_HVX_H
++#include <stdbool.h>
++#include <hexagon_types.h>
++#include <hexagon_protos.h>
++#include <hvx_hexagon_protos.h>
++#include "fp8-compat.h"
++#if __HVX_LENGTH__ != 128
++#error "FP8 compatibility requires 128-byte HVX vectors"
++#endif
++#define HTP_FP8_VMEM(p) (*(HVX_Vector *)(p))
++static inline HVX_Vector fp8_compat_decode_half(HVX_Vector x) {
++    const HVX_Vector mag = Q6_V_vand_VV(x, Q6_V_vsplat_R(0x007f007f));
++    const HVX_Vector sign = Q6_Vh_vasl_VhR(Q6_V_vand_VV(x, Q6_V_vsplat_R(0x00800080)), 8);
++    const HVX_Vector e = Q6_V_vand_VV(mag, Q6_V_vsplat_R(0x00780078));
++    const HVX_Vector normal = Q6_Vh_vadd_VhVh(Q6_Vh_vasl_VhR(mag, 7), Q6_V_vsplat_R(0x20002000));
++    const HVX_Vector mant = Q6_V_vand_VV(mag, Q6_V_vsplat_R(0x00070007));
++    // v75 qfloat multiplication rounds these exact subnormal values up by one
++    // FP16 bit. Construct all eight encodings with integer operations instead.
++    HVX_Vector sub = Q6_V_vmux_QVV(
++        Q6_Q_vcmp_gt_VhVh(mant, Q6_V_vsplat_R(0x00030003)),
++        Q6_Vh_vadd_VhVh(Q6_Vh_vasl_VhR(mant, 8), Q6_V_vsplat_R(0x1c001c00)),
++        Q6_Vh_vadd_VhVh(Q6_Vh_vasl_VhR(mant, 9), Q6_V_vsplat_R(0x18001800)));
++    sub = Q6_V_vmux_QVV(Q6_Q_vcmp_eq_VhVh(mant, Q6_V_vsplat_R(0x00010001)),
++                        Q6_V_vsplat_R(0x18001800), sub);
++    sub = Q6_V_vmux_QVV(Q6_Q_vcmp_eq_VhVh(mant, Q6_V_vzero()), Q6_V_vzero(), sub);
++    HVX_Vector bits = Q6_V_vmux_QVV(Q6_Q_vcmp_eq_VhVh(e, Q6_V_vzero()), sub, normal);
++    bits = Q6_V_vmux_QVV(Q6_Q_vcmp_eq_VhVh(mag, Q6_V_vsplat_R(0x007f007f)),
++                         Q6_V_vsplat_R(0x7e007e00), bits);
++    return Q6_V_vor_VV(bits, sign);
++}
++
++// Runs on the DSP, so the vector widening/order is checked as well as the scalar oracle.
++static bool fp8_compat_vector_selftest(void) {
++    uint8_t input[256] __attribute__((aligned(128)));
++    uint16_t output[256] __attribute__((aligned(128)));
++    for (unsigned i=0; i<256; ++i) input[i]=(uint8_t)i;
++    for (unsigned i=0; i<256; i+=128) {
++        HVX_VectorPair p=Q6_Wuh_vunpack_Vub(HTP_FP8_VMEM(input+i));
++        HTP_FP8_VMEM(output+i)=fp8_compat_decode_half(Q6_V_lo_W(p));
++        HTP_FP8_VMEM(output+i+64)=fp8_compat_decode_half(Q6_V_hi_W(p));
++    }
++    for (unsigned i=0; i<256; ++i)
++        if (output[i] != htp_fp8_to_fp16_bits(input[i])) return false;
++    return true;
++}
++
++static inline void htp_fp8_tile_to_fp16(uint16_t *dst, const uint8_t *src) {
++    uint16_t decoded[1024] __attribute__((aligned(128)));
++    for (unsigned b = 0; b < 8; ++b) {
++        const HVX_VectorPair expanded = Q6_Wuh_vunpack_Vub(HTP_FP8_VMEM(src + b * 128));
++        HTP_FP8_VMEM(decoded + b * 128) = fp8_compat_decode_half(Q6_V_lo_W(expanded));
++        HTP_FP8_VMEM(decoded + b * 128 + 64) = fp8_compat_decode_half(Q6_V_hi_W(expanded));
++    }
++    for (unsigned n = 0; n < 32; ++n)
++        for (unsigned k = 0; k < 32; ++k)
++            dst[htp_fp16_tile_offset(n, k)] = decoded[htp_fp8_tile_offset(n, k)];
++}
++#undef HTP_FP8_VMEM
++#endif
+diff --git a/src/ggml-hexagon/htp/groupnorm-ops.c b/src/ggml-hexagon/htp/groupnorm-ops.c
+--- a/src/ggml-hexagon/htp/groupnorm-ops.c
++++ b/src/ggml-hexagon/htp/groupnorm-ops.c
+@@ -236,6 +236,16 @@
+     }
+ }
+ 
++static inline void group_norm_accumulate_f16_vector(struct group_norm_accum * acc, int lane, HVX_Vector x) {
++#if __HEXAGON_ARCH__ == 75
++    // The v75 finish routine expects qfloat accumulators.
++    group_norm_accumulate_vector(acc, lane, x);
++#else
++    acc->sum[lane] = hvx_vec_add_f32_f32(acc->sum[lane], x);
++    acc->square[lane] = hvx_vec_add_f32_f32(acc->square[lane], hvx_vec_mul_f32_f32(x, x));
++#endif
++}
++
+ static inline __attribute__((always_inline)) void group_norm_accumulate_f16(struct group_norm_accum * acc, const void * data, uint32_t n) {
+     const __fp16 * src = (const __fp16 *) data;
+     const uint32_t nvec = n / 64u;
+@@ -248,23 +258,17 @@
+         const HVX_Vector x1 = Q6_V_hi_W(p0);
+         const HVX_Vector x2 = Q6_V_lo_W(p1);
+         const HVX_Vector x3 = Q6_V_hi_W(p1);
+-        acc->sum[0] = hvx_vec_add_f32_f32(acc->sum[0], x0);
+-        acc->sum[1] = hvx_vec_add_f32_f32(acc->sum[1], x1);
+-        acc->sum[2] = hvx_vec_add_f32_f32(acc->sum[2], x2);
+-        acc->sum[3] = hvx_vec_add_f32_f32(acc->sum[3], x3);
+-        acc->square[0] = hvx_vec_add_f32_f32(acc->square[0], hvx_vec_mul_f32_f32(x0, x0));
+-        acc->square[1] = hvx_vec_add_f32_f32(acc->square[1], hvx_vec_mul_f32_f32(x1, x1));
+-        acc->square[2] = hvx_vec_add_f32_f32(acc->square[2], hvx_vec_mul_f32_f32(x2, x2));
+-        acc->square[3] = hvx_vec_add_f32_f32(acc->square[3], hvx_vec_mul_f32_f32(x3, x3));
++        group_norm_accumulate_f16_vector(acc, 0, x0);
++        group_norm_accumulate_f16_vector(acc, 1, x1);
++        group_norm_accumulate_f16_vector(acc, 2, x2);
++        group_norm_accumulate_f16_vector(acc, 3, x3);
+     }
+     if (i < nvec) {
+         const HVX_VectorPair p = hvx_vec_f16_to_f32(hvx_vmemu(src + (size_t) i * 64u));
+         const HVX_Vector x0 = Q6_V_lo_W(p);
+         const HVX_Vector x1 = Q6_V_hi_W(p);
+-        acc->sum[0] = hvx_vec_add_f32_f32(acc->sum[0], x0);
+-        acc->sum[1] = hvx_vec_add_f32_f32(acc->sum[1], x1);
+-        acc->square[0] = hvx_vec_add_f32_f32(acc->square[0], hvx_vec_mul_f32_f32(x0, x0));
+-        acc->square[1] = hvx_vec_add_f32_f32(acc->square[1], hvx_vec_mul_f32_f32(x1, x1));
++        group_norm_accumulate_f16_vector(acc, 0, x0);
++        group_norm_accumulate_f16_vector(acc, 1, x1);
+     }
+ 
+     const uint32_t tail = n % 64u;
+@@ -274,10 +278,8 @@
+         const HVX_VectorPair p = hvx_vec_f16_to_f32(x);
+         const HVX_Vector x0 = Q6_V_lo_W(p);
+         const HVX_Vector x1 = Q6_V_hi_W(p);
+-        acc->sum[0] = hvx_vec_add_f32_f32(acc->sum[0], x0);
+-        acc->sum[1] = hvx_vec_add_f32_f32(acc->sum[1], x1);
+-        acc->square[0] = hvx_vec_add_f32_f32(acc->square[0], hvx_vec_mul_f32_f32(x0, x0));
+-        acc->square[1] = hvx_vec_add_f32_f32(acc->square[1], hvx_vec_mul_f32_f32(x1, x1));
++        group_norm_accumulate_f16_vector(acc, 0, x0);
++        group_norm_accumulate_f16_vector(acc, 1, x1);
+     }
+ }
+ 
