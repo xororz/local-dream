@@ -629,6 +629,10 @@ class BackendService : Service() {
             env["LD_LIBRARY_PATH"] = systemLibPathsStr
             env["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
             if (ditEngineDir != null) {
+                if (DitEngine.isSm8650Device()) {
+                    env["GGML_HEXAGON_FP8_COMPAT"] = "1"
+                    env["GGML_HEXAGON_VMEM"] = "3072"
+                }
                 // ggml-hexagon asks FastRPC for its skel by bare name, so both
                 // the runtime directory holding the skels and the platform
                 // defaults have to be on the DSP search path; dropping the

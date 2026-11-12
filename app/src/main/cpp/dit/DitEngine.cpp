@@ -81,6 +81,7 @@ struct dit_ctx {
   dit_model_kind kind = DIT_MODEL_Z_IMAGE;
   std::string last_error;
   int preview_interval = 0;
+  bool v75_compat = false;
 };
 
 namespace {
@@ -155,16 +156,22 @@ dit_ctx *engine_create(const dit_ctx_params *params) {
   sd_params.flash_attn = params->flash_attn;
   sd_params.diffusion_flash_attn = params->flash_attn;
   sd_params.vae_conv_direct = params->vae_conv_direct;
-  // Keep the upstream segment prefetch enabled: it overlaps loading/repacking
-  // the next graph segment with HTP execution. Component-level residency is
-  // controlled separately by params_backend=all=disk.
-  sd_params.disable_prefetch = false;
+  const char *compat = std::getenv("GGML_HEXAGON_FP8_COMPAT");
+  const bool v75_compat = compat && std::strcmp(compat, "1") == 0;
+  sd_params.disable_prefetch = v75_compat;
+  if (v75_compat) {
+    // Bound mapped weights and graph buffers on v75. Component-level residency
+    // still comes from the caller's params_backend=all=disk.
+    sd_params.max_vram = "HTP0=2.0";
+    sd_params.disable_segmented_compute = false;
+  }
   if (params->backend && params->backend[0]) sd_params.backend = params->backend;
   if (params->params_backend && params->params_backend[0])
     sd_params.params_backend = params->params_backend;
 
   auto *ctx = new dit_ctx();
   ctx->kind = params->kind;
+  ctx->v75_compat = v75_compat;
   ctx->sd = new_sd_ctx(&sd_params);
   if (!ctx->sd) {
     g_create_error = "new_sd_ctx failed";
@@ -255,11 +262,14 @@ bool engine_generate(dit_ctx *ctx, const dit_gen_params *params, dit_progress_cb
                   : "preset=flux2";
   }
 
-  if (params->vae_tile_size > 0) {
+  const bool has_vae_tile = params->vae_tile_size > 0;
+  if (has_vae_tile || ctx->v75_compat) {
+    // On v75, bound DSP VAE scratch even at the smallest canvas size.
+    const int tile = has_vae_tile ? params->vae_tile_size : 64;
     gen.vae_tiling_params.enabled = true;
-    gen.vae_tiling_params.tile_size_x = params->vae_tile_size;
-    gen.vae_tiling_params.tile_size_y = params->vae_tile_size;
-    gen.vae_tiling_params.target_overlap = params->vae_tile_overlap;
+    gen.vae_tiling_params.tile_size_x = tile;
+    gen.vae_tiling_params.tile_size_y = tile;
+    gen.vae_tiling_params.target_overlap = has_vae_tile ? params->vae_tile_overlap : 0.25f;
   }
 
   int sampling_steps = std::max(1, params->steps);
