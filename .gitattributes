@@ -1,1 +1,2 @@
 *tokenizer.json binary
+standalone_image/**/*.sh text eol=lf

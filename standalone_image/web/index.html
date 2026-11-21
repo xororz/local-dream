@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#7B4DFF">
+  <title>Local Dream — Image</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>Local Dream <span>Image</span></h1>
+    <span id="engine" class="pill">Engine offline</span>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Models</h2>
+      <div id="models" class="models"><p class="muted">Loading…</p></div>
+
+      <div class="box">
+        <label for="search">Find SD1.5 GGUF on Hugging Face</label>
+        <div class="row">
+          <input id="search" type="text" maxlength="64" placeholder="SD 1.5 GGUF">
+          <button id="search-btn" type="button">Search</button>
+        </div>
+        <p class="hint">Only curated models can be downloaded here. To add one,
+          edit <code>standalone_image/server.py</code> → <code>CATALOG</code>.</p>
+        <div id="results" class="results"></div>
+      </div>
+      <div id="download" class="download"></div>
+    </section>
+
+    <section class="card">
+      <h2>Create</h2>
+      <label for="prompt">Prompt</label>
+      <textarea id="prompt" rows="3" placeholder="a cat astronaut on the moon, studio photo"></textarea>
+
+      <label for="negative">Negative prompt</label>
+      <input id="negative" type="text" placeholder="blurry, lowres, bad anatomy">
+
+      <div class="grid">
+        <div>
+          <label for="size">Size</label>
+          <select id="size">
+            <option value="256">256 × 256</option>
+            <option value="128">128 × 128</option>
+            <option value="384">384 × 384</option>
+            <option value="512">512 × 512 (slow)</option>
+          </select>
+        </div>
+        <div><label for="steps">Steps</label><input id="steps" type="number" min="1" max="30" value="10"></div>
+        <div><label for="seed">Seed</label><input id="seed" type="number" value="-1"></div>
+      </div>
+
+      <div class="row actions">
+        <button id="go" class="primary" type="button" disabled>Generate</button>
+        <button id="cancel" type="button" disabled>Cancel</button>
+      </div>
+
+      <div id="progress" class="progress" hidden>
+        <div class="progress-label"><span id="stage">starting</span><span id="steps-label"></span></div>
+        <div class="track"><div id="bar"></div></div>
+      </div>
+
+      <div id="result" class="result" hidden>
+        <img id="preview" alt="Generated image">
+        <a id="save" href="#" download>Save PNG</a>
+      </div>
+      <p id="message" class="message" role="status"></p>
+    </section>
+
+    <section class="card">
+      <h2>Gallery</h2>
+      <div id="gallery" class="gallery"><p class="muted">No images yet.</p></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+models/
+results/
+state/
+bin/sd-server
+__pycache__/
+*.pyc

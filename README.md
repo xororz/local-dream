@@ -28,6 +28,14 @@ If you like it, please consider [sponsor](#-support-this-project) this project.
 >
 > You can join our [telegram group](https://t.me/local_dream) for discussion or help with testing.
 
+## Standalone Image Webapp (Termux / Debian)
+
+A separate, image-only localhost webapp now lives in
+[`standalone_image/`](standalone_image/). It is independent of the Android APK:
+it runs on a phone inside Debian/Termux, uses the portable `stable-diffusion.cpp`
+engine, and serves a mobile UI on `http://127.0.0.1:8090/`. See its
+[README](standalone_image/README.md) for install and usage.
+
 ## User Guide
 
 For certain reasons, all guides and documentation have been moved to [Guide Site](https://ld-guide.chino.icu).
