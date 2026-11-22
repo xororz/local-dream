@@ -264,8 +264,11 @@ data class Model(
     }
 
     companion object {
-        private fun ditFile(defaultFile: String, convRot: String): String =
-            if (DitEngine.usesConvRotWeights()) "$convRot|${DitEngine.CONVROT_DIT}" else defaultFile
+        private fun ditFile(defaultFile: String, convRot: String): String = if (DitEngine.usesConvRotWeights()) {
+            "$convRot|${DitEngine.CONVROT_DIT}"
+        } else {
+            defaultFile
+        }
 
         // Where each part of a DiT package comes from, and the name the
         // native side expects on disk (see PipelineDit). The weights are
