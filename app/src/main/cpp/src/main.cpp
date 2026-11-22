@@ -85,9 +85,9 @@ struct ServerOptions {
   bool anima_seq_dit = false;  // (anima+lowram) never co-resident DiT halves
   bool upscaler_mode = false;
   bool convert_mode = false;
-  // Run all three DiT modules on the Hexagon NPU. The Android catalog only
-  // exposes these models on the SM8750-and-newer devices validated upstream.
+  // Run all three DiT modules on the Hexagon NPU.
   std::string dit_backend = "diffusion=HTP0,te=HTP0,vae=HTP0";
+  bool dit_convrot = false;
   // Load a component lazily and discard its parameters at runner_end(). This
   // keeps TE, DiT and VAE weights from remaining co-resident between stages;
   // intra-component segment prefetch remains enabled for throughput.
@@ -145,6 +145,7 @@ static void showHelp() {
          "  --lowram               (sdxl/anima) load/release models per stage\n"
          "  --anima_seq_dit        (anima+lowram) never keep both DiT halves "
          "resident; for 12GB devices\n"
+         "  --dit_convrot          Use dit-convrot.safetensors with TE on disk\n"
          "  --clip_skip_2          (convert) export CLIP with skip 2\n"
          "  --log_level <n>        QNN log level\n"
          "  --version              Print QNN SDK build id\n"
@@ -177,6 +178,7 @@ static ServerOptions processCommandLine(int argc, char **argv) {
     OPT_UPSCALER_MODE,
     OPT_LOWRAM,
     OPT_ANIMA_SEQ_DIT,
+    OPT_DIT_CONVROT,
     OPT_LOG_LEVEL
   };
   static struct pal::Option s_longOptions[] = {
@@ -197,6 +199,7 @@ static ServerOptions processCommandLine(int argc, char **argv) {
       {"upscaler_mode", pal::no_argument, NULL, OPT_UPSCALER_MODE},
       {"lowram", pal::no_argument, NULL, OPT_LOWRAM},
       {"anima_seq_dit", pal::no_argument, NULL, OPT_ANIMA_SEQ_DIT},
+      {"dit_convrot", pal::no_argument, NULL, OPT_DIT_CONVROT},
       {"log_level", pal::required_argument, NULL, OPT_LOG_LEVEL},
       {NULL, 0, NULL, 0}};
 
@@ -260,6 +263,9 @@ static ServerOptions processCommandLine(int argc, char **argv) {
         break;
       case OPT_ANIMA_SEQ_DIT:
         opts.anima_seq_dit = true;
+        break;
+      case OPT_DIT_CONVROT:
+        opts.dit_convrot = true;
         break;
       case OPT_LOG_LEVEL:
         logLevel = sample_app::parseLogLevel(pal::g_optArg);
@@ -353,8 +359,10 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
   // engine .so ships in the APK's native library directory. Its FastRPC skels
   // are copied from assets into the shared runtime directory at app startup.
   if (opts.isDit()) {
-    std::string dit_path = (dir / "dit.safetensors").string();
-    if (!std::filesystem::exists(dit_path))
+    std::string dit_path =
+        (dir / (opts.dit_convrot ? "dit-convrot.safetensors" : "dit.safetensors"))
+            .string();
+    if (!opts.dit_convrot && !std::filesystem::exists(dit_path))
       dit_path = (dir / "dit.gguf").string();
     std::string llm_path = (dir / "llm.gguf").string();
     std::string llm_vision_path =
@@ -384,7 +392,7 @@ static std::unique_ptr<Pipeline> createPipeline(const ServerOptions &opts,
     return std::make_unique<PipelineDit>(
         text_encoder, opts.model_dir, engine_path, dit_path, llm_path,
         llm_vision_path, vae_path, kind, opts.dit_backend,
-        opts.dit_params_backend,
+        opts.dit_convrot ? "te=disk" : opts.dit_params_backend,
         opts.dit_threads, opts.dit_vae_tile_size, !opts.no_img2img);
   }
 

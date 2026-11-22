@@ -531,6 +531,9 @@ class BackendService : Service() {
                     return false
                 }
                 command += listOf("--lib_dir", ditEngineDir.absolutePath)
+                if (DitEngine.usesConvRotWeights() && File(modelsDir, DitEngine.CONVROT_DIT).isFile) {
+                    command += "--dit_convrot"
+                }
                 // The DiT engine lives in nativeLibraryDir, while the shared
                 // /upscale endpoint needs the extracted QNN runtime. Keep the
                 // two paths explicit so generation and upscaling can coexist

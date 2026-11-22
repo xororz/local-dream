@@ -264,37 +264,53 @@ data class Model(
     }
 
     companion object {
+        private fun ditFile(defaultFile: String, convRot: String): String =
+            if (DitEngine.usesConvRotWeights()) "$convRot|${DitEngine.CONVROT_DIT}" else defaultFile
+
         // Where each part of a DiT package comes from, and the name the
         // native side expects on disk (see PipelineDit). The weights are
         // pulled from the repositories that publish them rather than rehosted:
         // DiTs, text encoders and VAEs are already converted to the formats
         // stable-diffusion.cpp reads.
         val ZIMAGE_PACKAGE_FILES = listOf(
-            "Kijai/Z-Image_comfy_fp8_scaled/resolve/main/" +
-                "z-image-turbo_fp8_scaled_e4m3fn_KJ.safetensors|dit.safetensors",
+            ditFile(
+                "Kijai/Z-Image_comfy_fp8_scaled/resolve/main/" +
+                    "z-image-turbo_fp8_scaled_e4m3fn_KJ.safetensors|dit.safetensors",
+                "JoaoZaokk/Z-Image-Turbo-W4A4-ConvRot/resolve/main/zimage_turbo_w4a4.safetensors",
+            ),
             "zhiyuanasad/z_image_turbo_adreno/resolve/main/llm.gguf|llm.gguf",
             "zhiyuanasad/z_image_turbo_adreno/resolve/main/vae.safetensors|vae.safetensors",
             "Tongyi-MAI/Z-Image-Turbo/resolve/main/tokenizer/tokenizer.json|tokenizer.json",
         )
 
         val KLEIN_PACKAGE_FILES = listOf(
-            "black-forest-labs/FLUX.2-klein-4b-fp8/resolve/main/" +
-                "flux-2-klein-4b-fp8.safetensors|dit.safetensors",
+            ditFile(
+                "black-forest-labs/FLUX.2-klein-4b-fp8/resolve/main/" +
+                    "flux-2-klein-4b-fp8.safetensors|dit.safetensors",
+                "toxicdog/FLUX.2-klein-4B-INT4-ConvRot/resolve/main/flux-2-klein-4b-int4_convrot.safetensors",
+            ),
             "zhiyuanasad/flux2_klein_adreno/resolve/main/llm.gguf|llm.gguf",
             "zhiyuanasad/flux2_klein_adreno/resolve/main/vae.safetensors|vae.safetensors",
             "Qwen/Qwen3-4B/resolve/main/tokenizer.json|tokenizer.json",
         )
 
         val KLEIN_9B_PACKAGE_FILES = listOf(
-            "leejet/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q4_0.gguf|dit.gguf",
+            ditFile(
+                "leejet/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q4_0.gguf|dit.gguf",
+                "ariaotp/INT4-ConvRot-W4A4-ComfyUI/resolve/main/Flux2-Klein-9B/flux-2-klein-9b-int4_convrot.safetensors",
+            ),
             "bartowski/Qwen_Qwen3-8B-GGUF/resolve/main/Qwen_Qwen3-8B-Q4_0.gguf|llm.gguf",
             "zhiyuanasad/flux2_klein_adreno/resolve/main/vae.safetensors|vae.safetensors",
             "Qwen/Qwen3-8B/resolve/main/tokenizer.json|tokenizer.json",
         )
 
         val FLUX3_PACKAGE_FILES = listOf(
-            "unsloth/flux-3-image-klein/resolve/main/variants/fp8r/" +
-                "model.safetensors|dit.safetensors",
+            ditFile(
+                "unsloth/flux-3-image-klein/resolve/main/variants/fp8r/" +
+                    "model.safetensors|dit.safetensors",
+                "toxicdog/FLUX.3-Image-Klein-INT4-ConvRot-ComfyUI/resolve/main/" +
+                    "diffusion_models/flux3_image_klein_sd_int4_convrot.safetensors",
+            ),
             "bartowski/Qwen_Qwen3-VL-4B-Instruct-GGUF/resolve/main/" +
                 "Qwen_Qwen3-VL-4B-Instruct-Q4_0.gguf|llm.gguf",
             "zhiyuanasad/flux2_klein_adreno/resolve/main/vae.safetensors|vae.safetensors",
@@ -302,8 +318,11 @@ data class Model(
         )
 
         val QWEN_IMAGE_2_1_PACKAGE_FILES = listOf(
-            "unsloth/Qwen-Image-2.1-FP8/resolve/main/" +
-                "Qwen-Image-2.1-FP8.safetensors|dit.safetensors",
+            ditFile(
+                "unsloth/Qwen-Image-2.1-FP8/resolve/main/" +
+                    "Qwen-Image-2.1-FP8.safetensors|dit.safetensors",
+                "poor7/Models/resolve/main/qwen_image_2.1-int4_convrot.safetensors",
+            ),
             "bartowski/Qwen_Qwen3-VL-8B-Instruct-GGUF/resolve/main/" +
                 "Qwen_Qwen3-VL-8B-Instruct-Q4_0.gguf|llm.gguf",
             "bartowski/Qwen_Qwen3-VL-8B-Instruct-GGUF/resolve/main/" +
@@ -314,12 +333,19 @@ data class Model(
         )
 
         val QWEN_IMAGE_2_1_TURBO_PACKAGE_FILES = listOf(
-            "unsloth/Qwen-Image-2.1-Turbo-FP8/resolve/main/" +
-                "Qwen-Image-2.1-Turbo-FP8.safetensors|dit.safetensors",
+            ditFile(
+                "unsloth/Qwen-Image-2.1-Turbo-FP8/resolve/main/" +
+                    "Qwen-Image-2.1-Turbo-FP8.safetensors|dit.safetensors",
+                "toxicdog/Qwen-Image-2.1-Turbo-INT4-ConvRot/resolve/main/" +
+                    "diffusion_models/qwen_image_2.1_turbo_int4_convrot.safetensors",
+            ),
         ) + QWEN_IMAGE_2_1_PACKAGE_FILES.drop(1)
 
         val KREA_2_TURBO_PACKAGE_FILES = listOf(
-            "gguf-org/krea-2-gguf/resolve/main/krea2_turbo-mxfp4_moe.gguf|dit.gguf",
+            ditFile(
+                "gguf-org/krea-2-gguf/resolve/main/krea2_turbo-mxfp4_moe.gguf|dit.gguf",
+                "poor7/Models/resolve/main/krea2_turbo_int4.safetensors",
+            ),
             "bartowski/Qwen_Qwen3-VL-4B-Instruct-GGUF/resolve/main/" +
                 "Qwen_Qwen3-VL-4B-Instruct-Q4_0.gguf|llm.gguf",
             "bartowski/Qwen_Qwen3-VL-4B-Instruct-GGUF/resolve/main/" +
