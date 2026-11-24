@@ -25,6 +25,7 @@ import io.github.xororz.localdream.remote.RemoteModelDefaults
 import io.github.xororz.localdream.remote.RemoteModelInfo
 import io.github.xororz.localdream.remote.RemoteProtocol
 import io.github.xororz.localdream.remote.RemoteUpscalerInfo
+import io.github.xororz.localdream.utils.BackendAuth
 import java.io.File
 import java.io.IOException
 import java.net.Inet4Address
@@ -73,6 +74,7 @@ class RemoteHostService : Service() {
             val newServer = RemoteHostServer(
                 port = RemoteProtocol.CONTROL_PORT,
                 handler = ApiHandler(),
+                accessCode = { BackendAuth.localCode(this@RemoteHostService) },
             )
             try {
                 newServer.start()

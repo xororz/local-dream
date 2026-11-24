@@ -4,6 +4,7 @@ import android.app.Application
 import io.github.xororz.localdream.data.HistoryMigration
 import io.github.xororz.localdream.data.MigrationState
 import io.github.xororz.localdream.data.db.AppDatabase
+import io.github.xororz.localdream.utils.BackendAuth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,6 +25,7 @@ class LocalDreamApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        BackendAuth.init(this)
         startMigration()
     }
 

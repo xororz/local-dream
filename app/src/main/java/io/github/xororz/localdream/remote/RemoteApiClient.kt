@@ -74,6 +74,26 @@ class RemoteApiClient(
         }.getOrDefault(false)
     }
 
+    /**
+     * Whether the host accepts this device's access code: true on success,
+     * false when it answers 401, null when it cannot be reached.
+     */
+    suspend fun checkAccess(): Boolean? = withContext(Dispatchers.IO) {
+        runCatching {
+            val request = Request.Builder()
+                .url(baseUrl + RemoteProtocol.PATH_STATUS)
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                when {
+                    response.isSuccessful -> true
+                    response.code == HTTP_UNAUTHORIZED -> false
+                    else -> null
+                }
+            }
+        }.getOrNull()
+    }
+
     /** Direct health probe against the native backend on the host. */
     suspend fun checkGenerationHealth(): Boolean = withContext(Dispatchers.IO) {
         runCatching {
@@ -110,5 +130,6 @@ class RemoteApiClient(
     companion object {
         private const val CONNECT_TIMEOUT_S = 4L
         private const val READ_TIMEOUT_S = 15L
+        private const val HTTP_UNAUTHORIZED = 401
     }
 }

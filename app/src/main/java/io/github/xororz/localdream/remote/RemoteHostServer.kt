@@ -1,6 +1,7 @@
 package io.github.xororz.localdream.remote
 
 import android.util.Log
+import io.github.xororz.localdream.utils.BackendAuth
 import java.io.BufferedInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -19,10 +20,9 @@ import org.json.JSONObject
  * heavy (generation SSE, tokenize, upscale) is served by the native backend
  * on its own port, never through here.
  *
- * No authentication, matching the trust model of the existing "allow LAN
- * access" feature: the generation port itself is unauthenticated, so gating
- * only the control API would add friction without adding security. Host mode
- * is explicit and user-visible while active.
+ * Every route except /info and CORS preflight requires "Authorization: Bearer
+ * <access code>", the same code the native backend on the generation port
+ * checks (see BackendAuth). A null [accessCode] disables the check.
  *
  * CORS headers mirror the native backend's (main.cpp, set_default_headers) so a
  * browser page can drive these routes the same way it already drives /generate.
@@ -32,6 +32,7 @@ import org.json.JSONObject
 class RemoteHostServer(
     private val port: Int,
     private val handler: Handler,
+    private val accessCode: () -> String? = { null },
 ) {
     interface Handler {
         fun info(): JSONObject
@@ -108,6 +109,7 @@ class RemoteHostServer(
         val method: String,
         val path: String,
         val body: JSONObject,
+        val authorization: String?,
     )
 
     private fun parseRequest(input: InputStream): Request? {
@@ -119,6 +121,7 @@ class RemoteHostServer(
         val path = parts[1].substringBefore('?')
 
         var contentLength = 0
+        var authorization: String? = null
         while (true) {
             val line = readLine(input) ?: return null
             if (line.isEmpty()) break
@@ -126,6 +129,8 @@ class RemoteHostServer(
             val value = line.substringAfter(':').trim()
             if (name == "content-length") {
                 contentLength = value.toIntOrNull() ?: 0
+            } else if (name == "authorization") {
+                authorization = value
             }
         }
         if (contentLength > MAX_BODY_BYTES) return null
@@ -146,7 +151,7 @@ class RemoteHostServer(
         } else {
             JSONObject()
         }
-        return Request(method, path, body)
+        return Request(method, path, body, authorization)
     }
 
     // Reads one CRLF/LF-terminated header line as ISO-8859-1 (headers are
@@ -172,6 +177,9 @@ class RemoteHostServer(
         }
         if (request.path == RemoteProtocol.PATH_INFO) {
             return Response(200, handler.info())
+        }
+        if (!isAuthorized(request.authorization, accessCode())) {
+            return Response(401, errorBody("unauthorized"))
         }
         return when {
             request.method == "GET" && request.path == RemoteProtocol.PATH_MODELS ->
@@ -222,6 +230,10 @@ class RemoteHostServer(
         private const val MAX_LINE_LENGTH = 8 * 1024
     }
 }
+
+/** True when no code is required, or [authorization] carries exactly that code. */
+internal fun isAuthorized(authorization: String?, code: String?): Boolean = code.isNullOrEmpty() ||
+    BackendAuth.matches(authorization, code)
 
 // The CORS headers mirror the native backend's default headers (set_default_headers
 // in main.cpp) so a browser page can drive the control API exactly the way it

@@ -56,6 +56,7 @@ import io.github.xororz.localdream.service.ModelDownloadService
 import io.github.xororz.localdream.ui.components.BlockingProgressOverlay
 import io.github.xororz.localdream.ui.components.SmoothCircularWavyProgressIndicator
 import io.github.xororz.localdream.ui.theme.Motion
+import io.github.xororz.localdream.utils.BackendAuth
 import io.github.xororz.localdream.utils.UPSCALER_NATIVE_SCALE
 import io.github.xororz.localdream.utils.performUpscale
 import io.github.xororz.localdream.utils.saveImage
@@ -232,6 +233,8 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
 
                 env["LD_LIBRARY_PATH"] = systemLibPaths.joinToString(":")
                 env["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
+                // Only requests carrying this device's access code are served.
+                env[BackendAuth.ENV_TOKEN] = BackendAuth.localCode(context)
 
                 Log.d("UpscaleScreen", "COMMAND: ${command.joinToString(" ")}")
                 Log.d("UpscaleScreen", "LD_LIBRARY_PATH=${env["LD_LIBRARY_PATH"]}")

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -32,6 +33,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -56,7 +58,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -71,6 +76,7 @@ import io.github.xororz.localdream.navigation.popBackStackIfResumed
 import io.github.xororz.localdream.remote.RemoteProtocol
 import io.github.xororz.localdream.service.BackendService
 import io.github.xororz.localdream.service.RemoteHostService
+import io.github.xororz.localdream.utils.BackendAuth
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -90,8 +96,11 @@ fun RemoteScreen(navController: NavController, modifier: Modifier = Modifier) {
 
     val msgConnectedTo = stringResource(R.string.remote_connected_to)
     val msgUnreachable = stringResource(R.string.remote_connect_failed_unreachable)
+    val msgUnauthorized = stringResource(R.string.remote_connect_failed_code)
 
     var hostInput by remember { mutableStateOf("") }
+    var codeInput by remember { mutableStateOf("") }
+    var localCode by remember { mutableStateOf(BackendAuth.localCode(context)) }
     var connecting by remember { mutableStateOf(false) }
     var connectError by remember { mutableStateOf<String?>(null) }
 
@@ -174,6 +183,34 @@ fun RemoteScreen(navController: NavController, modifier: Modifier = Modifier) {
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        // The code a controller must enter; also required by the
+                        // generation port, so nobody else on the network can use it.
+                        Text(
+                            stringResource(R.string.remote_access_code),
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            BackendAuth.format(localCode),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            stringResource(R.string.remote_access_code_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        // A running backend keeps the code it was started with,
+                        // so only allow a new one while nothing is serving.
+                        OutlinedButton(
+                            onClick = { localCode = BackendAuth.regenerateLocalCode(context) },
+                            enabled = !hostRunning && servingModelId == null,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.remote_access_code_regenerate))
+                        }
+                        HorizontalDivider()
                         if (hostRunning) {
                             Text(
                                 stringResource(R.string.remote_host_addresses),
@@ -299,6 +336,20 @@ fun RemoteScreen(navController: NavController, modifier: Modifier = Modifier) {
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            OutlinedTextField(
+                                value = codeInput,
+                                onValueChange = { codeInput = it },
+                                label = { Text(stringResource(R.string.remote_access_code_field)) },
+                                placeholder = { Text("XXXX-XXXX-XXXX") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Characters,
+                                    autoCorrectEnabled = false,
+                                    keyboardType = KeyboardType.Password,
+                                ),
+                                textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                             connectError?.let { error ->
                                 Text(
                                     error,
@@ -311,7 +362,10 @@ fun RemoteScreen(navController: NavController, modifier: Modifier = Modifier) {
                                     connectError = null
                                     connecting = true
                                     scope.launch {
-                                        val result = remoteRepository.connect(hostInput.trim())
+                                        val result = remoteRepository.connect(
+                                            hostInput.trim(),
+                                            BackendAuth.normalize(codeInput),
+                                        )
                                         connecting = false
                                         when (result) {
                                             is RemoteConnectResult.Success -> {
@@ -325,10 +379,15 @@ fun RemoteScreen(navController: NavController, modifier: Modifier = Modifier) {
 
                                             is RemoteConnectResult.Unreachable ->
                                                 connectError = msgUnreachable
+
+                                            is RemoteConnectResult.Unauthorized ->
+                                                connectError = msgUnauthorized
                                         }
                                     }
                                 },
-                                enabled = !connecting && hostInput.isNotBlank(),
+                                enabled = !connecting &&
+                                    hostInput.isNotBlank() &&
+                                    BackendAuth.isValidCode(BackendAuth.normalize(codeInput)),
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 if (connecting) {
