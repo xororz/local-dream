@@ -40,6 +40,7 @@ import io.github.xororz.localdream.ui.theme.sharedAxisXPopEnter
 import io.github.xororz.localdream.ui.theme.sharedAxisXPopExit
 import io.github.xororz.localdream.ui.theme.sharedAxisXPredictivePopEnter
 import io.github.xororz.localdream.ui.theme.sharedAxisXPredictivePopExit
+import io.github.xororz.localdream.utils.PrivacySettings
 
 class MainActivity : ComponentActivity() {
     private val requestStoragePermissionLauncher = registerForActivityResult(
@@ -122,6 +123,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Before any content is drawn, so the first frame is already protected.
+        PrivacySettings.applySecureScreen(this)
         enableEdgeToEdge()
 
         checkStoragePermission()
@@ -157,6 +160,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        // The activity is really finishing, not being recreated for a rotation
+        // or fold/unfold. On Android 12+ Back on the root screen only moves the
+        // task to the background, so the clear on the next start (see
+        // LocalDreamApplication) is what usually applies.
+        if (isFinishing && !isChangingConfigurations) {
+            (application as LocalDreamApplication).clearHistoryIfEnabled()
+        }
+        super.onDestroy()
     }
 }
 

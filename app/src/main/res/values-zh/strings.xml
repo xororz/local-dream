@@ -11,6 +11,10 @@
     <string name="capture_logs_hint">运行模型时收集应用日志，退出后展示</string>
     <string name="listen_on_all_addresses">允许局域网访问</string>
     <string name="listen_on_all_addresses_hint">允许同一网络下的其他设备访问后端（端口 8081）。关闭则只接受本机访问。</string>
+    <string name="secure_screen">截图保护</string>
+    <string name="secure_screen_hint">禁止截图和录屏，并在最近任务中隐藏应用预览</string>
+    <string name="forget_history">不保留历史记录</string>
+    <string name="forget_history_hint">每次应用重新启动时（例如从最近任务中划掉或重启手机后），删除生成的图片、对应的提示词和输入图片。已保存到相册的图片会保留。</string>
     <string name="tag_autocomplete">Tag 联想</string>
     <string name="tag_autocomplete_hint">输入提示词时联想并纠正 tag</string>
     <string name="tag_alias_label">别名</string>
